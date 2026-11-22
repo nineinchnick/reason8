@@ -2,7 +2,8 @@
 # Download the pinned sdfz-demo-parser standalone executable (Node.js bundled in,
 # no Node install needed) and verify its checksum.
 #
-# Usage: parser/fetch.sh [install-dir]   (default: <repo>/data/tools)
+# Usage: parser/fetch.sh [install-dir]
+# (default: $REASON8_DATA_DIR/tools, or <repo>/data/tools when it is unset)
 # Prints the path of the binary on success. Idempotent: does nothing if present.
 #
 # Upstream publishes no checksums, so SHA256 below was recorded when the version
@@ -15,7 +16,7 @@ SHA256="0a7dc4f99b9cc9c470b977df3045a4f8e74d720f794de4f6b9ae0c6d744b9cc4"
 TARGET="linux-x64"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DESTINATION="${1:-$REPO_ROOT/data/tools}/sdfz-demo-parser-$VERSION"
+DESTINATION="${1:-${REASON8_DATA_DIR:-$REPO_ROOT/data}/tools}/sdfz-demo-parser-$VERSION"
 PARSER_BINARY="$DESTINATION/sdfz-demo-parser"
 ARCHIVE="sdfz-demo-parser-$VERSION-$TARGET.tar.gz"
 URL="https://github.com/beyond-all-reason/demo-parser/releases/download/v$VERSION/$ARCHIVE"
