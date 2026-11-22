@@ -28,3 +28,5 @@ one "Superseded by NNNN".
   Accepted
 - [0010. Run locally first, move bulk jobs to the cloud](0010-run-locally-first.md):
   Accepted
+- [0013. Download replays in a fixed random order, maps taking turns](0013-download-replays-in-a-fixed-random-order-per-map.md):
+  Accepted

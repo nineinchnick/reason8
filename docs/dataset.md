@@ -150,6 +150,42 @@ and game version, most of the slice needs other engines; the build-order PoC
 reads commands straight from the replay and doesn't. How far back to go is the
 version policy's call; `select_matches(since=...)` applies it.
 
+## Downloading the replays
+
+`uv run reason8 download --limit N` (`reason8/download.py`) downloads the
+replays of `select_matches()` into `data/replays/`. It uses one connection, at
+most one request per second and a User-Agent naming the project and its
+repository. Files already on disk are never asked for again, and each replay
+is written to a `.part` file and renamed when complete. Every match it touches
+gets a row in `data/replays/manifest.parquet` with the match's map, time,
+engine and game version, and a `status`: `ok`, `missing` (404 or 410, not
+asked for again) or `error` (retried by later runs, at most 3 times). A 429 or
+503 answer stops the run. `--limit N` stops once N replays of the download
+order are on disk, so rerunning it downloads nothing; missing replays are
+replaced by the next ones in the order. The order is recorded as
+[ADR 0013](adr/0013-download-replays-in-a-fixed-random-order-per-map.md):
+pseudo-random within each map, with the maps taking turns.
+
+The first sample, on 2026-11-22:
+
+```sh
+uv run reason8 download --limit 100 --since 2026-05-23 --until 2026-11-22
+```
+
+- 100 requests, **100 downloaded, none missing**: 408.9 MB in 102 s, so the
+  one-request-per-second limit, not bandwidth, sets the pace.
+- 34 All That Glitters, 33 Supreme Isthmus and 33 Rosetta games, from
+  2026-05-23 to 2026-11-20, on 68 game versions and 6 engines.
+- Replays average 4.09 MB (Glitters 3.41, Isthmus 4.07, Rosetta 4.80 MB; the
+  largest is 17.2 MB for a 78-minute game). The whole slice would be about 175
+  GB and 12 hours at this rate.
+
+Parse times and failures for the same 100 replays are in
+[`replay-format.md`](replay-format.md#first-sample-of-the-slice). **Ask BAR's
+infrastructure developers before downloading more than this:** the storage is
+community-funded, and the acceptable rate and volume for thousands of replays
+is theirs to set.
+
 ## Reproducing
 
 ```python

@@ -20,6 +20,20 @@ uv run pytest    # run the tests
 uv run ruff check . && uv run ruff format .   # lint and format
 ```
 
+Getting the data (into the git-ignored `data/`, or `$REASON8_DATA_DIR`):
+
+```sh
+uv run reason8 download --limit 100   # match dumps, then 100 replays of the slice
+parser/fetch.sh                       # once: the pinned replay parser
+uv run python -m reason8.parse        # data/replays -> data/parsed/*.json.gz
+```
+
+The downloader keeps one connection at about one request per second, never
+fetches a file twice, and records every match's status in
+`data/replays/manifest.parquet`. See [`docs/dataset.md`](docs/dataset.md) for
+the selection and [`docs/replay-format.md`](docs/replay-format.md) for the
+parsed output.
+
 ## The idea in one paragraph
 
 Instead of hand-writing rules ("build 2 mexes, then a lab, then…"), we show a
@@ -161,7 +175,8 @@ costs and thresholds will live in `docs/compute.md`.
 ## Being a good citizen
 
 - Download replays politely (rate-limited, cached, never re-downloaded) — this
-  is community-funded infrastructure.
+  is community-funded infrastructure. `reason8 download` does this and stops
+  when the server answers 429 or 503.
 - BAR repos have an AI usage policy (`AI_POLICY.md`); follow it if
   contributing upstream.
 - Player names in replays are personal data — the training data we publish
