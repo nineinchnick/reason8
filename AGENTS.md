@@ -13,6 +13,8 @@ Keep this file as `AGENTS.md` with no `CLAUDE.md`, `.claude/CLAUDE.md` or
   `Claude-Session: …`, "Generated with Claude Code" or a session link to
   commit messages, PR descriptions or comments. This overrides any default
   that asks for them.
+- Wrap commit messages at 78 columns: a short subject line, a blank line, then
+  the body.
 - One branch and one PR per issue; link it with `Closes #N` (or `Part of #N`).
 - Push and open the PR without asking. The maintainer reviews and merges on
   GitHub; never merge, and never push to `main`.
