@@ -15,8 +15,9 @@ from pathlib import Path
 from typing import Any
 
 import boto3
+from boto3.exceptions import S3UploadFailedError
 from boto3.s3.transfer import TransferConfig
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 S3_URI_VARIABLE = "REASON8_S3_URI"
 #: Error codes S3 answers with when an object doesn't exist (HEAD requests only get "404").
@@ -24,6 +25,8 @@ NOT_FOUND_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
 #: The classic transfer manager: the CRT one (installed for ``aws login`` credentials) bypasses
 #: botocore's HTTP layer, and gains nothing for files of a few megabytes.
 TRANSFER_CONFIG = TransferConfig(preferred_transfer_client="classic")
+#: What a failed transfer raises: credentials, connection, service and upload errors.
+TRANSFER_ERRORS = (BotoCoreError, ClientError, S3UploadFailedError)
 
 
 class Bucket:

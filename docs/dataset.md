@@ -169,6 +169,19 @@ replaced by the next ones in the order. The order is recorded as
 [ADR 0013](adr/0013-download-replays-in-a-fixed-random-order-per-map.md):
 pseudo-random within each map, with the maps taking turns.
 
+Downloaded replays are also kept in a private S3 bucket, the shared copy of
+the data directory
+([ADR 0014](adr/0014-keep-the-data-in-a-private-s3-bucket.md)). When it is
+configured (`REASON8_S3_URI` or `--s3-uri`), `download` looks for each missing
+replay in the bucket first and copies it from there without a request to BAR's
+servers, and uploads every replay it does get from BAR's servers to the
+bucket. The manifest's `source` column records where each replay came from:
+`bar`, `s3`, or empty when the file was already on disk (and in rows written
+before the column existed). The bucket's manifest is updated by
+`uv run reason8 sync push replays`; pulling it on a new machine
+(`sync pull replays`) also tells `download` which replays BAR's servers
+answered 404 for, so they aren't asked for again.
+
 The first sample, on 2026-11-22:
 
 ```sh

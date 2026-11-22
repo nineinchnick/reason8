@@ -55,7 +55,9 @@ class Area:
 
 
 AREAS = {
-    "replays": Area(("*.sdfz",), {download.MANIFEST_NAME: download.merge_manifests}),
+    download.REPLAYS_DIRECTORY: Area(
+        ("*.sdfz",), {download.MANIFEST_NAME: download.merge_manifests}
+    ),
     "parsed": Area(("*" + parse.PARSED_SUFFIX,), {parse.INDEX_NAME: parse.merge_indexes}),
     "matches": Area(("*.parquet", "*.json")),
 }
