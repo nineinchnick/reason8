@@ -3,9 +3,12 @@ from datetime import datetime, timedelta
 import httpx
 import polars as pl
 import pytest
+from botocore.exceptions import ClientError
 
 from reason8.download import (
     ERROR,
+    FROM_BAR,
+    FROM_BUCKET,
     MANIFEST_NAME,
     MISSING,
     OK,
@@ -232,3 +235,80 @@ def test_rate_limiter_spaces_requests():
     now[0] += 3.0
     limiter.wait()
     assert sleeps == [pytest.approx(0.75)]
+
+
+class CountingLimiter(RateLimiter):
+    def __init__(self):
+        super().__init__(0)
+        self.waits = 0
+
+    def wait(self):
+        self.waits += 1
+
+
+def test_replays_in_the_bucket_are_copied_without_asking_bar(tmp_path, bucket):
+    queue = download_order(selection(), "newest")
+    in_bucket = queue["replay_file_name"][0]
+    bucket.write(f"replays/{in_bucket}", b"from the bucket")
+    server = FakeServer()
+    limiter = CountingLimiter()
+    with make_client(httpx.MockTransport(server)) as client:
+        summary = download_replays(
+            queue,
+            2,
+            dest=tmp_path,
+            client=client,
+            limiter=limiter,
+            bucket=bucket,
+            log=lambda line: None,
+        )
+
+    assert (summary.on_disk, summary.from_bucket, summary.requests, summary.uploaded) == (
+        2,
+        1,
+        1,
+        1,
+    )
+    assert limiter.waits == 1
+    assert [request.url.path.rsplit("/", 1)[-1] for request in server.requests] == [
+        queue["replay_file_name"][1]
+    ]
+    assert (tmp_path / in_bucket).read_bytes() == b"from the bucket"
+    from_bar = queue["replay_file_name"][1]
+    assert bucket.read(f"replays/{from_bar}") == (tmp_path / from_bar).read_bytes()
+    manifest = read_manifest(tmp_path / MANIFEST_NAME)
+    first, second = manifest[queue["match_id"][0]], manifest[queue["match_id"][1]]
+    assert (first["status"], first["source"], first["attempts"]) == (OK, FROM_BUCKET, 0)
+    assert first["bytes"] == len(b"from the bucket")
+    assert (second["status"], second["source"], second["attempts"]) == (OK, FROM_BAR, 1)
+
+
+def test_missing_replays_are_not_uploaded(tmp_path, bucket):
+    queue = download_order(selection((1, 0, 0)), "newest")
+    file_name = queue["replay_file_name"][0]
+    summary = run_download(tmp_path, FakeServer({file_name: 404}), queue, 1, bucket=bucket)
+    assert (summary.requests, summary.uploaded) == (1, 0)
+    assert bucket.read(f"replays/{file_name}") is None
+    row = read_manifest(tmp_path / MANIFEST_NAME)[queue["match_id"][0]]
+    assert (row["status"], row["source"]) == (MISSING, FROM_BAR)
+
+
+def test_a_failed_upload_does_not_stop_the_download(tmp_path, bucket, monkeypatch):
+    def refuse(path, relative_path):
+        raise ClientError({"Error": {"Code": "AccessDenied"}}, "PutObject")
+
+    monkeypatch.setattr(bucket, "upload", refuse)
+    lines = []
+    queue = download_order(selection(), "newest")
+    with make_client(httpx.MockTransport(FakeServer())) as client:
+        summary = download_replays(
+            queue,
+            2,
+            dest=tmp_path,
+            client=client,
+            limiter=RateLimiter(0),
+            bucket=bucket,
+            log=lines.append,
+        )
+    assert (summary.on_disk, summary.requests, summary.uploaded) == (2, 2, 0)
+    assert sum("could not upload" in line for line in lines) == 2

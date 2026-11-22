@@ -13,13 +13,19 @@ first and renamed when complete, so an interrupted run leaves no truncated repla
 the downloader touches gets a row in ``<data dir>/replays/manifest.parquet`` with its status:
 
 ``ok``
-    the file is on disk (downloaded now or found there);
+    the file is on disk (downloaded now, copied from the S3 bucket, or found there);
 ``missing``
     the server answered 404 or 410 (expired or never uploaded); not asked for again unless
     ``--retry-missing``;
 ``error``
     anything else (5xx, timeout, broken connection); retried by later runs until it has failed
     ``MAX_ATTEMPTS`` times.
+
+When an S3 bucket is configured (``--s3-uri`` or ``REASON8_S3_URI``, see ``reason8 sync``), a
+replay that isn't on disk is copied from the bucket if it is there, without a request to BAR's
+servers, and a replay downloaded from BAR's servers is uploaded to the bucket. The manifest's
+``source`` column says where each replay came from: ``bar`` or ``s3`` (empty when it was found
+on disk, and in rows written before the column existed).
 
 The order in which matches are downloaded is decided by ``download_order()``.
 """
@@ -43,10 +49,14 @@ from typing import Any
 import httpx
 import polars as pl
 
+from reason8 import bucket as bucket_module
 from reason8 import match_dumps
+from reason8.bucket import Bucket
 
 PROJECT_URL = "https://github.com/nineinchnick/reason8"
 USER_AGENT = f"reason8/{version('reason8')} (+{PROJECT_URL})"
+#: Directory of the replays, in the data directory and in the bucket.
+REPLAYS_DIRECTORY = "replays"
 MANIFEST_NAME = "manifest.parquet"
 MAX_ATTEMPTS = 3
 #: Seconds between the starts of two requests.
@@ -60,6 +70,10 @@ OK = "ok"
 MISSING = "missing"
 ERROR = "error"
 
+#: Where a replay came from (the manifest's ``source``).
+FROM_BAR = "bar"
+FROM_BUCKET = "s3"
+
 MANIFEST_SCHEMA = {
     "match_id": pl.Int64,
     "replay_file_name": pl.String,
@@ -68,6 +82,7 @@ MANIFEST_SCHEMA = {
     "engine": pl.String,
     "game_version": pl.String,
     "status": pl.String,
+    "source": pl.String,
     "http_status": pl.Int32,
     "bytes": pl.Int64,
     "attempts": pl.Int32,
@@ -80,7 +95,7 @@ ORDERS = ("random", "newest")
 
 def replays_dir() -> Path:
     """Directory holding the downloaded ``.sdfz`` files and the manifest."""
-    return match_dumps.data_dir() / "replays"
+    return match_dumps.data_dir() / REPLAYS_DIRECTORY
 
 
 def download_order(selection: pl.DataFrame, order: str = "random", seed: int = 0) -> pl.DataFrame:
@@ -236,6 +251,9 @@ class DownloadSummary:
     bytes: int = 0
     statuses: Counter[str] = field(default_factory=Counter)
     stopped: str | None = None
+    #: Replays copied from the bucket, and replays from BAR uploaded to it.
+    from_bucket: int = 0
+    uploaded: int = 0
 
 
 def download_replays(
@@ -247,13 +265,16 @@ def download_replays(
     limiter: RateLimiter,
     retry_missing: bool = False,
     max_attempts: int = MAX_ATTEMPTS,
+    bucket: Bucket | None = None,
     log: Callable[[str], None] = print,
 ) -> DownloadSummary:
     """Walk ``queue`` in order until ``limit`` of its replays are on disk.
 
     Replays already on disk count towards the limit without a request. Matches recorded as
     ``missing``, and those that failed ``max_attempts`` times, are skipped and the next match
-    in the queue takes their place. The manifest is updated as the run goes.
+    in the queue takes their place. With a ``bucket``, a replay is looked for there before
+    asking BAR's servers, and one downloaded from them is uploaded there. The manifest is updated
+    as the run goes.
     """
     dest = dest or replays_dir()
     dest.mkdir(parents=True, exist_ok=True)
@@ -262,11 +283,14 @@ def download_replays(
     summary = DownloadSummary()
     unsaved_changes = 0
 
-    def record(match: dict[str, Any], result: FetchResult, attempts: int) -> None:
+    def record(
+        match: dict[str, Any], result: FetchResult, attempts: int, source: str | None
+    ) -> None:
         nonlocal unsaved_changes
         manifest[match["match_id"]] = {
             **{column: match[column] for column in MATCH_COLUMNS},
             "status": result.status,
+            "source": source,
             "http_status": result.http_status,
             "bytes": result.bytes,
             "attempts": attempts,
@@ -286,27 +310,43 @@ def download_replays(
             previous = manifest.get(match["match_id"], {})
             attempts = previous.get("attempts") or 0
             if Path(file_name).name != file_name or file_name.startswith("."):
-                record(match, FetchResult(ERROR, error="unsafe file name"), attempts)
+                record(match, FetchResult(ERROR, error="unsafe file name"), attempts, None)
                 continue
             path = dest / file_name
             if path.exists():
                 summary.on_disk += 1
                 if previous.get("status") != OK:
-                    record(match, FetchResult(OK, bytes=path.stat().st_size), attempts)
+                    on_disk = FetchResult(OK, bytes=path.stat().st_size)
+                    record(match, on_disk, attempts, previous.get("source"))
                 continue
             if previous.get("status") == MISSING and not retry_missing:
                 continue
             if previous.get("status") == ERROR and attempts >= max_attempts:
                 continue
 
+            bucket_path = f"{REPLAYS_DIRECTORY}/{file_name}"
+            if bucket is not None and bucket.download(bucket_path, path):
+                size = path.stat().st_size
+                summary.on_disk += 1
+                summary.from_bucket += 1
+                record(match, FetchResult(OK, bytes=size), attempts, FROM_BUCKET)
+                log(f"[{summary.on_disk}/{limit}] {OK:7} {file_name} {size / 1e6:.2f} MB from S3")
+                continue
+
             limiter.wait()
             result = fetch(client, match_dumps.replay_url(file_name), path)
             summary.requests += 1
             summary.statuses[result.status] += 1
-            record(match, result, attempts + 1)
+            record(match, result, attempts + 1, FROM_BAR)
             if result.status == OK:
                 summary.on_disk += 1
                 summary.bytes += result.bytes or 0
+                if bucket is not None:
+                    try:
+                        bucket.upload(path, bucket_path)
+                        summary.uploaded += 1
+                    except bucket_module.TRANSFER_ERRORS as error:
+                        log(f"could not upload {file_name} to S3: {error}")
             detail = result.error or (f"{result.bytes / 1e6:.2f} MB" if result.bytes else "")
             log(f"[{summary.on_disk}/{limit}] {result.status:7} {file_name} {detail}".rstrip())
             if result.http_status in SLOW_DOWN_STATUSES:
@@ -361,6 +401,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--dry-run", action="store_true", help="print the queue's first LIMIT matches and exit"
     )
+    bucket_module.add_uri_argument(parser)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -370,6 +411,9 @@ def run(args: argparse.Namespace) -> int:
         with pl.Config(tbl_rows=args.limit, fmt_str_lengths=80, tbl_width_chars=200):
             print(queue.head(args.limit).select(*MATCH_COLUMNS))
         return 0
+    bucket = bucket_module.configured_bucket(args.s3_uri)
+    if bucket is not None:
+        print(f"looking in s3://{bucket.name}/{bucket.prefix} first", file=sys.stderr)
     started = time.monotonic()
     with make_client() as client:
         summary = download_replays(
@@ -379,6 +423,7 @@ def run(args: argparse.Namespace) -> int:
             client=client,
             limiter=RateLimiter(args.interval),
             retry_missing=args.retry_missing,
+            bucket=bucket,
             log=lambda line: print(line, file=sys.stderr),
         )
     elapsed = time.monotonic() - started
@@ -388,6 +433,11 @@ def run(args: argparse.Namespace) -> int:
         f"{summary.bytes / 1e6:.1f} MB in {elapsed:.0f} s",
         file=sys.stderr,
     )
+    if bucket is not None:
+        print(
+            f"{summary.from_bucket} copied from S3, {summary.uploaded} uploaded to S3",
+            file=sys.stderr,
+        )
     if summary.stopped:
         print(summary.stopped, file=sys.stderr)
         return 1
