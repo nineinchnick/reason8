@@ -177,6 +177,21 @@ measurement and the routine after a patch, and
 [ADR 0012](docs/adr/0012-keep-the-time-window-across-balance-patches.md) for
 the policy.
 
+### Map meta
+
+BAR's map metadata recommends start positions per map, each with a role
+(front, tech, air, sea), and the game shows them before the start. On the
+slice maps 97 to 99% of players start on one. `reason8.positions` gives every
+player of a replay that position, from the game's own lobby options or from
+the map list fetched by `python -m reason8.map_metadata`: sixteen positions on
+an 8v8 map, eight per side. Supreme Isthmus has seven recognisably different
+openings per side; All That Glitters and Rosetta have three (front, tech,
+air). The meta is strongest in the first factory and loose in the exact build
+order. See [`docs/maps/`](docs/maps/README.md) for the positions, the sources
+and the numbers per map, and
+[ADR 0015](docs/adr/0015-take-positions-from-the-map-metadata.md) for how
+positions are defined.
+
 ## Compute
 
 Training and headless simulation run **locally first**. Bulk jobs (re-running

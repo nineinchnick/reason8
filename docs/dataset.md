@@ -99,13 +99,14 @@ at or above their map's median skill**.
 No other map has more than ~400 games after the same filters.
 
 **Openings:** 42,913 games × 16 = **687k player-openings**: ~22k per start
-position on Isthmus, ~20k on Glitters, ~1.1k on Rosetta (twice that per role
-if roles mirror across the two teams). Isthmus and Glitters are plenty for an
-opening model; Rosetta is small but enough for a frequency baseline and a
-check that the approach works beyond one map. Rosetta lobbies are much
-stronger than on the other maps, so the median is taken per map; one global
-median would keep fewer Glitters games and more Rosetta ones. Replay download
-and parsing time is the real constraint.
+position on Isthmus, ~20k on Glitters, ~1.1k on Rosetta: each of the 16
+recommended start positions of a map ([`maps/`](maps/README.md)) is played
+once per game. Isthmus and Glitters are plenty for an opening model; Rosetta
+is small but enough for a frequency baseline and a check that the approach
+works beyond one map. Rosetta lobbies are much stronger than on the other
+maps, so the median is taken per map; one global median would keep fewer
+Glitters games and more Rosetta ones. Replay download and parsing time is the
+real constraint.
 
 ### Skill cutoff vs. the leaderboard
 
@@ -196,7 +197,12 @@ uv run reason8 download --limit 100 --since 2026-05-23 --until 2026-11-22
   largest is 17.2 MB for a 78-minute game). The whole slice would be about 175
   GB and 12 hours at this rate.
 
-Parse times and failures for the same 100 replays are in
+The same command with `--limit 250`, run later that day for the per-position
+measurements of [`maps/`](maps/README.md), asked for the next 150 replays of
+the order: 150 downloaded, none missing, 689.2 MB in 151 s. The 250 are 84 All
+That Glitters, 83 Supreme Isthmus and 83 Rosetta games.
+
+Parse times and failures for the first 100 replays are in
 [`replay-format.md`](replay-format.md#first-sample-of-the-slice). **Ask BAR's
 infrastructure developers before downloading more than this:** the storage is
 community-funded, and the acceptable rate and volume for thousands of replays
