@@ -569,17 +569,25 @@ def read_index(out_dir: Path) -> dict[str, dict[str, Any]]:
     path = out_dir / INDEX_NAME
     if not path.exists():
         return {}
-    entries = (json.loads(line) for line in path.read_text().splitlines() if line.strip())
+    return parse_index(path.read_text())
+
+
+def parse_index(text: str) -> dict[str, dict[str, Any]]:
+    """Index entries by replay file name, from the text of an index file."""
+    entries = (json.loads(line) for line in text.splitlines() if line.strip())
     return {entry["file"]: entry for entry in entries}
 
 
 def write_index(out_dir: Path, index: dict[str, dict[str, Any]]) -> None:
     path = out_dir / INDEX_NAME
     temporary_path = path.with_name(path.name + ".tmp")
-    temporary_path.write_text(
-        "".join(json.dumps(entry) + "\n" for entry in sorted(index.values(), key=_file_key))
-    )
+    temporary_path.write_text(index_text(index))
     os.replace(temporary_path, path)
+
+
+def index_text(index: dict[str, dict[str, Any]]) -> str:
+    """The text of an index file: one JSON line per replay, sorted by file name."""
+    return "".join(json.dumps(entry) + "\n" for entry in sorted(index.values(), key=_file_key))
 
 
 def _file_key(entry: dict[str, Any]) -> str:
