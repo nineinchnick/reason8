@@ -22,7 +22,7 @@ DUMPS_URL = "https://data-marts.beyondallreason.dev/"
 DUMPS = ("matches", "match_players", "players", "player_skill_snapshot")
 REPLAY_URL = "https://storage.uk.cloud.ovh.net/v1/AUTH_10286efc0d334efd917d476d7183232e/BAR/demos/"
 
-#: Default maps of the first slice: the three most played Large Team (8v8) maps (#19).
+#: Default maps of the first slice: the three most played Large Team (8v8) maps.
 DEFAULT_MAPS = ("Supreme Isthmus v2.1", "All That Glitters v2.2.3", "Rosetta 1.4.4")
 
 
@@ -115,7 +115,7 @@ def select_matches(
 ) -> pl.DataFrame:
     """Select the matches to learn from and return their ids and replay file names.
 
-    Defaults give the first training slice chosen in #4: ranked 8v8 games on the three most
+    Defaults give the first training slice: ranked 8v8 games on the three most
     played maps (Supreme Isthmus v2.1, All That Glitters v2.2.3, Rosetta 1.4.4) from the last ~6
     months, lobby average skill at or above that map's median, nobody leaving in
     the first 10 minutes, and a replay file available.
