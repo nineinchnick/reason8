@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import os
 import sys
 import time
@@ -149,18 +150,28 @@ def make_client(transport: httpx.BaseTransport | None = None) -> httpx.Client:
     )
 
 
-def read_manifest(path: Path) -> dict[int, dict[str, Any]]:
-    """Manifest rows by ``match_id`` (empty if there is no manifest yet)."""
-    if not path.exists():
-        return {}
-    return {row["match_id"]: row for row in pl.read_parquet(path).iter_rows(named=True)}
+def read_manifest(source: Path | bytes) -> dict[int, dict[str, Any]]:
+    """Manifest rows by ``match_id``, from a file (empty if it doesn't exist yet) or its bytes."""
+    if isinstance(source, Path):
+        if not source.exists():
+            return {}
+        frame = pl.read_parquet(source)
+    else:
+        frame = pl.read_parquet(io.BytesIO(source))
+    return {row["match_id"]: row for row in frame.iter_rows(named=True)}
+
+
+def manifest_bytes(rows: Iterable[dict[str, Any]]) -> bytes:
+    """The manifest as a Parquet file, sorted by match id."""
+    buffer = io.BytesIO()
+    pl.DataFrame(list(rows), schema=MANIFEST_SCHEMA).sort("match_id").write_parquet(buffer)
+    return buffer.getvalue()
 
 
 def write_manifest(path: Path, rows: Iterable[dict[str, Any]]) -> None:
     """Write the manifest atomically, sorted by match id."""
-    frame = pl.DataFrame(list(rows), schema=MANIFEST_SCHEMA).sort("match_id")
     temporary_path = path.with_name(path.name + ".tmp")
-    frame.write_parquet(temporary_path)
+    temporary_path.write_bytes(manifest_bytes(rows))
     os.replace(temporary_path, path)
 
 
