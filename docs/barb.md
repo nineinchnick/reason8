@@ -9,7 +9,8 @@ These notes come from reading the source:
   `luarules/configs/BARb/stable/`, `master` as of 2026-11-22
 
 The "Not covered yet" section at the end lists what still needs hands-on
-testing.
+testing. Hook 1 below has since been built and run: see
+[`in-game.md`](in-game.md).
 
 ## TL;DR
 
@@ -207,14 +208,17 @@ From least to most invasive:
 *Hooks 1–4 need no new code at play time. We'd learn the numbers offline from
 human replays and write them into a custom profile, e.g. `config/reason8/` +
 `script/reason8/`. That could be our first playable PoC, and much cheaper than
-writing a bot from scratch.* The connection here is speculative until we've
-confirmed a custom profile can be loaded without changing the game archive.
+writing a bot from scratch.* A custom variant does load without changing the
+game archive: [`in-game.md`](in-game.md) has the measurements, and
+[ADR 0011](adr/0011-ship-the-model-as-tables-in-a-barb-variant.md) the
+decision.
 
-**One mismatch to sort out:** BARb's openers are in **roles** (RAIDER,
-SCOUT…), and only for **factory** output. Replays give us **unit names** for
-every BUILD order, including the commander's and builders' structures. We need
-a mapping between them. `behaviour.json` gives every unit its roles, so it can
-serve as that mapping.
+**A mismatch that turned out not to matter:** BARb's openers are in **roles**
+(RAIDER, SCOUT…), and only for **factory** output. Replays give us **unit
+names** for every BUILD order, including the commander's and builders'
+structures. No mapping is needed: a script can queue a factory task or a build
+task for a unit by name, so the opening is written in unit names and covers
+the commander too ([`in-game.md`](in-game.md)).
 
 ## What players say (anecdotal)
 
@@ -233,10 +237,10 @@ we've confirmed.
 
 - [ ] Play a few skirmishes against `hard` BARb on 1–2 popular 1v1 maps and
   keep the replays. They'll be test data for the replay parser
-- [ ] Confirm a custom profile (copy of `hard` with edited openers) loads, and
-  how: game-side override vs files next to the DLL. Apex's approach (own short
-  name, files next to the library) is described in
-  [`related-work.md`](related-work.md); still to be tried
+- [x] Confirm a custom profile (copy of `hard` with edited openers) loads, and
+  how: game-side override vs files next to the DLL. **It loads**, under its
+  own short name, from the files next to the library; no game-side files are
+  needed. Measured in [`in-game.md`](in-game.md)
 - [ ] Note how BARb's openings look next to human openings on the same maps
 - [ ] Military layer in depth (only if we go past the opening)
 
