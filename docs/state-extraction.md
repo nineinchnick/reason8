@@ -16,8 +16,9 @@ Faster than real time?
   start, 1.8x at minute 25)
 
 State snapshots from a spectator widget?
-: Yes. Units, positions, health, build progress, resources, plus an event for
-  every unit created / finished / destroyed
+: Yes. Units, positions, health, build progress, resources and wind, plus an
+  event for every unit created / finished / destroyed and for every first hit
+  between two enemy units
 
 Is the re-run the same game?
 : Yes. 0 desync warnings, same winner and length as recorded, byte-identical
@@ -80,6 +81,10 @@ All in `tools/headless/`. Paths are arguments; nothing is committed from
 `demo.py`
 : Reads a replay's header: engine version, game version, map, length
 
+`batch.py`
+: Plays many replays, several engines at once: fetches what each needs, keeps
+  the state as `<replay name>.jsonl.gz`, skips the ones already done
+
 `state.py`
 : Reads a state file; prints sizes and counts, and the first finished builds
   per team
@@ -98,6 +103,9 @@ python tools/headless/setup.py --data-dir data/bar \
 python tools/headless/run.py --data-dir data/bar --threads 1 --snapshots \
     --out data/state/X.jsonl data/replays/X.sdfz
 python tools/headless/state.py data/state/X.jsonl --builds
+# the first 12 game minutes of many replays, 4 engines at once
+python tools/headless/batch.py --data-dir data/bar --out-dir data/state \
+    --jobs 4 --max-frame 21600 data/replays/A.sdfz data/replays/B.sdfz
 
 # an AI vs AI game at full speed, 10 game minutes
 python tools/headless/run.py --data-dir data/bar --threads 1 \
@@ -273,13 +281,14 @@ of the two that BAR allows a user widget to write to.
 
 `header`
 : *When:* once
-: *Content:* game, map, engine, map size, teams (number, ally team, AI or not,
-  side), unit type id to name
+: *Content:* game, map, engine, map size, the map's wind range and tidal
+  strength, teams (number, ally team, AI or not, side), unit type id to name
 
 `s`
 : *When:* every N game seconds
-: *Content:* per team: metal and energy (stored, storage, income, expense);
-  per unit: id, type, team, x, z, health %, build %
+: *Content:* the wind strength at that moment; per team: metal and energy
+  (stored, storage, income, expense); per unit: id, type, team, x, z, health
+  %, build %
 
 `created`
 : *When:* unit placed
@@ -298,9 +307,19 @@ of the two that BAR allows a user widget to write to.
 : *When:* unit changed team
 : *Content:* frame, unit, type, new team, old team
 
+`hit`
+: *When:* a unit is damaged by a given enemy team for the first time
+: *Content:* frame, unit, type, team, position, the attacking unit, its type
+  and team, the damage
+
+`damage`
+: *When:* every second in which one team damaged units of an enemy team
+: *Content:* frame, damaged team, attacking team, number of hits, damage
+
 `end`
 : *When:* game over or last frame
-: *Content:* frame, reason, winning ally teams
+: *Content:* frame, reason, winning ally teams, how the attackers were told
+  (below)
 
 The `finished` lines are the **finished builds** that the opening model needs:
 what was actually built and when, not just what was ordered.
@@ -308,6 +327,19 @@ what was actually built and when, not just what was ordered.
 
 Unit type ids change between game versions, which is why every file carries
 its own id-to-name table.
+
+The `hit` and `damage` lines are what [`first-contact.md`](first-contact.md)
+is measured from. Who did the damage is not simple to get: the engine tells
+LuaUI the attacker, but BAR's widget handler passes a widget only the first
+five arguments of `UnitDamaged` (unit, type, team, damage, paralyzer). Game
+versions up to autumn 2026 give a user widget that asks for it
+(`handler = true`) the handler itself, and the widget wraps the handler's
+call-in to see the attacker (`"attackers":"attacker"` in the `end` line).
+Later versions (seen from `test-31820`) keep the handler from user widgets;
+there the damage is put down to the nearest enemy unit within 1,300 map units
+of the damaged unit, and left out when there is none
+(`"attackers":"nearest"`). How well the guess agrees with the engine's answer
+is measured in [`first-contact.md`](first-contact.md).
 
 ### Size per game
 
@@ -331,6 +363,10 @@ At 5 s, 100,000 duels need about 9 GB gzipped, and 43,000 8v8 games about 260
 GB. For 8v8 a 30 s interval (50 GB) or a binary format is the better choice.
 The 8v8 file has 669,214 unit rows; packed at 16 bytes per row that is 10.7 MB
 before compression.
+
+The sizes in the table were measured before the `hit` and `damage` lines and
+the wind were added. The first 12 minutes of an 8v8 game, with snapshots every
+5 s, are 3.6 to 4.2 MB raw and 0.8 to 0.9 MB gzipped.
 
 ### Not recorded yet
 
@@ -529,8 +565,8 @@ What the pipeline must do, all of it already in `tools/headless/`:
 - Record what each player could see (line of sight per ally team); needed
   before the state is used for training.
 - A compact binary state format for 8v8.
-- Bulk runner: a queue over many replays, N engines at once, resume after
-  failures; and the cloud cost per 1,000 replays.
+- The cloud cost per 1,000 replays. `batch.py` runs a list of replays with N
+  engines at once and skips what is done, on one machine.
 - Find out why engines slow each other down (memory bandwidth, or fast and
   slow cores) and whether a server CPU behaves better.
 - Engines before 2025.03 use another download name and are untested. Engines

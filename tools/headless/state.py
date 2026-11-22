@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Read a state file written by reason8_state_export.lua and summarise it.
 
-    python tools/headless/state.py STATE.jsonl [--builds]
+    python tools/headless/state.py STATE.jsonl[.gz] [--builds]
 
 The file is JSON lines (see the widget for the fields):
-    {"t":"header", ...}                         game, map, teams, unitDefID -> name
-    {"t":"s","f":frame,"teams":[...],"units":[...]}   one snapshot
+    {"t":"header", ...}                         game, map, wind range, teams, unitDefID -> name
+    {"t":"s","f":frame,"wind":strength,"teams":[...],"units":[...]}   one snapshot
     {"t":"created"|"finished"|"destroyed"|"given", "f":frame, "u":unitID, ...}
-    {"t":"end","f":frame,"reason":...,"winners":[allyTeam,...]}
+    {"t":"hit","f":frame,"u":unitID,...,"by":unitID,"by_team":team}   first hit by an enemy
+    {"t":"damage","f":frame,"team":team,"by_team":team,"hits":n,"damage":sum}   per second
+    {"t":"end","f":frame,"reason":...,"winners":[allyTeam,...],"attackers":...}
 
 Prints sizes (raw and gzip) and counts as JSON. With --builds it also prints,
 per team, the first units that were *finished* (not just ordered), which is
@@ -35,6 +37,7 @@ SNAPSHOT_TEAM_FIELDS = (
     "energy_income",
     "energy_expense",
 )
+EVENT_KINDS = ("created", "finished", "destroyed", "given", "hit", "damage")
 SNAPSHOT_UNIT_FIELDS = ("unit_id", "unit_def_id", "team", "x", "z", "health_pct", "build_pct")
 
 
@@ -49,6 +52,8 @@ def read_lines(path: str | Path) -> Iterator[dict]:
 
 def summarise(path: str | Path, builds: int = 0) -> dict:
     raw = Path(path).read_bytes()
+    if str(path).endswith(".gz"):
+        raw = gzip.decompress(raw)
     counts: Counter[str] = Counter()
     bytes_by_kind: Counter[str] = Counter()
     header: dict = {}
@@ -94,7 +99,8 @@ def summarise(path: str | Path, builds: int = 0) -> dict:
         "snapshot_frames": header.get("snapshot_frames"),
         "max_units": max_units,
         "unit_rows": unit_rows,
-        "events": {kind: counts[kind] for kind in ("created", "finished", "destroyed", "given")},
+        "events": {kind: counts[kind] for kind in EVENT_KINDS},
+        "attackers": end.get("attackers"),
         "bytes": len(raw),
         "bytes_gzip": len(gzip.compress(raw, 6)),
         "bytes_by_kind": dict(bytes_by_kind),

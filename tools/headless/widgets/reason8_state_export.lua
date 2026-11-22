@@ -6,8 +6,8 @@
 -- this widget loaded as a full-view spectator, it writes what the world looked
 -- like: every N seconds one line with every team's resources and every unit's
 -- type, owner, position, health and build progress, plus one line per unit
--- created / finished / destroyed / given. The widget is unsynced and gives no
--- orders, so the replay stays valid.
+-- created / finished / destroyed / given, and the damage enemies do to each
+-- other. The widget is unsynced and gives no orders, so the replay stays valid.
 --
 -- The approach (spectator widget + headless playback at max speed) follows
 -- Apex's barai_replay_export.lua (github.com/apexearth/bar-ai, GPL v2+); the
@@ -20,6 +20,7 @@
 --   Reason8Speed           game speed to ask for (default 0 = leave alone)
 --   Reason8MaxFrame        quit at this frame (default 0 = only at game over)
 --   Reason8Events          1 = also write per-unit event lines (default 1)
+--   Reason8DamageAttacker  0 = always guess the attacker (default 1, see below)
 --
 -- No player names are written: teams and players are numbers only.
 --------------------------------------------------------------------------------
@@ -33,11 +34,12 @@ function widget:GetInfo()
 		license = "GNU GPL, v2",
 		layer = 0,
 		enabled = true,
+		handler = true, -- the widget handler itself: see watchDamage()
 	}
 end
 
 local OUT_PATH = "LuaUI/Config/reason8_state.jsonl"
-local FORMAT_VERSION = 1
+local FORMAT_VERSION = 2 -- 2: hit and damage lines, wind
 
 local spGetGameFrame = Spring.GetGameFrame
 local spGetAllUnits = Spring.GetAllUnits
@@ -46,6 +48,8 @@ local spGetUnitTeam = Spring.GetUnitTeam
 local spGetUnitPosition = Spring.GetUnitPosition
 local spGetUnitHealth = Spring.GetUnitHealth
 local spGetTeamResources = Spring.GetTeamResources
+local spGetUnitsInSphere = Spring.GetUnitsInSphere
+local spGetWind = Spring.GetWind
 local floor = math.floor
 local format = string.format
 local concat = table.concat
@@ -54,10 +58,21 @@ local snapshotFrames = Spring.GetConfigInt("Reason8SnapshotFrames", 150)
 local wantedSpeed = Spring.GetConfigInt("Reason8Speed", 0)
 local maxFrame = Spring.GetConfigInt("Reason8MaxFrame", 0)
 local writeEvents = Spring.GetConfigInt("Reason8Events", 1) ~= 0
+local useHandler = Spring.GetConfigInt("Reason8DamageAttacker", 1) ~= 0
+
+local DAMAGE_FRAMES = 30 -- damage between teams is summed over this many frames
+-- Beyond the reach of what is built in the first minutes: the longest first-tier
+-- weapons, the coastal guns, reach 1,245.
+local NEAREST_ENEMY_RANGE = 1300
 
 local outputFile
 local teams = {}
+local allyTeamOfTeam = {}
+local gaiaTeam = Spring.GetGaiaTeamID()
 local finished = false
+-- damage by enemies: who has hit which unit already, and the sums not yet written
+local hitBefore = {} -- [unitID] = { [attackerTeam] = true }
+local damageSums = {} -- [victimTeam * 256 + attackerTeam] = { hits, damage }
 
 local function write(line)
 	if outputFile then
@@ -82,19 +97,21 @@ local function writeHeader()
 	for _, team in ipairs(Spring.GetTeamList()) do
 		local _, _, _, isAI, side, allyTeam = Spring.GetTeamInfo(team, false)
 		teams[#teams + 1] = team
+		allyTeamOfTeam[team] = allyTeam
 		teamParts[#teamParts + 1] = format(
 			'{"team":%d,"ally":%d,"ai":%s,"side":%s,"gaia":%s}',
 			team,
 			allyTeam or -1,
 			isAI and "true" or "false",
 			jsonString(side or ""),
-			team == Spring.GetGaiaTeamID() and "true" or "false"
+			team == gaiaTeam and "true" or "false"
 		)
 	end
 	write(
 		format(
 			'{"t":"header","v":%d,"game":%s,"map":%s,"engine":%s,"mapx":%d,"mapz":%d,'
-				.. '"replay":%s,"snapshot_frames":%d,"teams":[%s],"unitdefs":{%s}}',
+				.. '"replay":%s,"snapshot_frames":%d,"wind_min":%.1f,"wind_max":%.1f,"tidal":%.1f,'
+				.. '"teams":[%s],"unitdefs":{%s}}',
 			FORMAT_VERSION,
 			jsonString(Game.gameName .. " " .. Game.gameVersion),
 			jsonString(Game.mapName),
@@ -103,13 +120,18 @@ local function writeHeader()
 			Game.mapSizeZ,
 			Spring.IsReplay() and "true" or "false",
 			snapshotFrames,
+			Game.windMin or -1,
+			Game.windMax or -1,
+			Game.tidal or -1,
 			concat(teamParts, ","),
 			concat(unitDefNames, ",")
 		)
 	)
 end
 
--- One line per snapshot. Arrays, not objects, to keep it small:
+-- One line per snapshot, with the wind strength at that moment (it changes all
+-- the time, and with it what a wind turbine makes). Arrays, not objects, to
+-- keep it small:
 --   teams: [team, metal, metalStorage, metalIncome, metalExpense,
 --           energy, energyStorage, energyIncome, energyExpense]
 --   units: [unitID, unitDefID, team, x, z, health%, build%]
@@ -155,35 +177,16 @@ local function writeSnapshot(frame)
 			)
 		end
 	end
-	write(format('{"t":"s","f":%d,"teams":[%s],"units":[%s]}', frame, concat(teamParts, ","), concat(unitParts, ",")))
-end
-
-local function finish(reason, winners)
-	if finished then
-		return
-	end
-	finished = true
-	local frame = spGetGameFrame()
-	if snapshotFrames > 0 then
-		writeSnapshot(frame)
-	end
-	write(format('{"t":"end","f":%d,"reason":%s,"winners":[%s]}', frame, jsonString(reason), concat(winners or {}, ",")))
-	if outputFile then
-		outputFile:close()
-		outputFile = nil
-	end
-end
-
-function widget:Initialize()
-	Spring.CreateDir("LuaUI/Config")
-	outputFile = io.open(OUT_PATH, "w")
-	writeHeader()
-	Spring.SendCommands("specfullview 1")
-	if wantedSpeed > 0 then
-		-- a replay plays at 1x unless told otherwise; min = max pins the speed
-		Spring.SendCommands("setmaxspeed " .. wantedSpeed, "setminspeed " .. wantedSpeed)
-	end
-	Spring.Echo(format("[R8] state export on: every %d frames, speed %d, max frame %d", snapshotFrames, wantedSpeed, maxFrame))
+	local _, _, _, windStrength = spGetWind()
+	write(
+		format(
+			'{"t":"s","f":%d,"wind":%.2f,"teams":[%s],"units":[%s]}',
+			frame,
+			windStrength or -1,
+			concat(teamParts, ","),
+			concat(unitParts, ",")
+		)
+	)
 end
 
 local function writeEvent(kind, unitID, unitDefID, unitTeam, extra)
@@ -206,6 +209,180 @@ local function writeEvent(kind, unitID, unitDefID, unitTeam, extra)
 	)
 end
 
+-- Damage one side does to the other, in two kinds of lines:
+--   "hit": the first time a team's unit damages a given enemy unit, with both
+--          units' types, so that who met whom, and when, can be told apart
+--   "damage": hits and damage per victim team and attacking team, summed over
+--          DAMAGE_FRAMES frames, so that a poke can be told from a fight
+-- Damage from or to the neutral team is not written.
+local function recordDamage(unitID, unitDefID, unitTeam, damage, paralyzer, attackerID, attackerDefID, attackerTeam)
+	if finished or not attackerTeam or not unitTeam then
+		return
+	end
+	local victimAllyTeam, attackerAllyTeam = allyTeamOfTeam[unitTeam], allyTeamOfTeam[attackerTeam]
+	if victimAllyTeam == attackerAllyTeam or unitTeam == gaiaTeam or attackerTeam == gaiaTeam then
+		return
+	end
+	local key = unitTeam * 256 + attackerTeam
+	local sums = damageSums[key]
+	if not sums then
+		sums = { 0, 0 }
+		damageSums[key] = sums
+	end
+	sums[1] = sums[1] + 1
+	sums[2] = sums[2] + (damage or 0)
+	local attackers = hitBefore[unitID]
+	if not attackers then
+		attackers = {}
+		hitBefore[unitID] = attackers
+	end
+	if not attackers[attackerTeam] then
+		attackers[attackerTeam] = true
+		writeEvent(
+			"hit",
+			unitID,
+			unitDefID,
+			unitTeam,
+			format(
+				',"by":%d,"by_d":%d,"by_team":%d,"damage":%.0f,"paralyzer":%s',
+				attackerID or -1,
+				attackerDefID or -1,
+				attackerTeam,
+				damage or 0,
+				paralyzer and "true" or "false"
+			)
+		)
+	end
+end
+
+-- Who did the damage. The engine tells LuaUI the attacker, but BAR's widget
+-- handler gives a widget only the first five arguments of UnitDamaged. There
+-- are two ways around that, and the "end" line says which one a file used:
+--   "attacker": game versions up to autumn 2026 hand a widget that asks for it
+--          (`handler = true`) the handler itself; its call-in is wrapped here
+--          to see every argument.
+--   "nearest": later versions keep the handler from user widgets. The damage
+--          is then put down to the nearest enemy unit within NEAREST_ENEMY_RANGE
+--          of the damaged unit, and left out when there is none. This also
+--          counts damage nobody aimed (debris, fire) when an enemy is close.
+-- Reason8DamageAttacker = 0 forces "nearest", to compare the two on one replay.
+local attackerSource = "none"
+local seenByHandler = false
+local handlerUnitDamaged
+
+local function watchDamage()
+	if not useHandler or type(widgetHandler.UnitDamaged) ~= "function" or not widgetHandler.UpdateCallIn then
+		return
+	end
+	handlerUnitDamaged = widgetHandler.UnitDamaged
+	widgetHandler.UnitDamaged = function(handler, unitID, unitDefID, unitTeam, damage, paralyzer, weaponDefID, projectileID, attackerID, attackerDefID, attackerTeam)
+		seenByHandler = true
+		attackerSource = "attacker"
+		recordDamage(unitID, unitDefID, unitTeam, damage, paralyzer, attackerID, attackerDefID, attackerTeam)
+		handlerUnitDamaged(handler, unitID, unitDefID, unitTeam, damage, paralyzer, weaponDefID, projectileID, attackerID, attackerDefID, attackerTeam)
+		seenByHandler = false
+	end
+	widgetHandler:UpdateCallIn("UnitDamaged") -- the engine's call-in holds the old function
+end
+
+local function nearestEnemy(unitID, unitTeam)
+	local x, y, z = spGetUnitPosition(unitID)
+	if not x then
+		return
+	end
+	local allyTeam = allyTeamOfTeam[unitTeam]
+	local nearestID, nearestTeam, nearestDistance
+	local candidates = spGetUnitsInSphere(x, y, z, NEAREST_ENEMY_RANGE)
+	for i = 1, #candidates do
+		local candidateTeam = spGetUnitTeam(candidates[i])
+		if candidateTeam and candidateTeam ~= gaiaTeam and allyTeamOfTeam[candidateTeam] ~= allyTeam then
+			local candidateX, candidateY, candidateZ = spGetUnitPosition(candidates[i])
+			local distance = (candidateX - x) ^ 2 + (candidateY - y) ^ 2 + (candidateZ - z) ^ 2
+			-- the lower unit id wins a tie, so the choice does not depend on the list's order
+			if not nearestDistance or distance < nearestDistance or (distance == nearestDistance and candidates[i] < nearestID) then
+				nearestID, nearestTeam, nearestDistance = candidates[i], candidateTeam, distance
+			end
+		end
+	end
+	return nearestID, nearestTeam
+end
+
+-- Called by the handler for every damaged unit; without it the handler would
+-- not listen to the engine's UnitDamaged at all.
+function widget:UnitDamaged(unitID, unitDefID, unitTeam, damage, paralyzer)
+	if seenByHandler or not writeEvents or not unitTeam or unitTeam == gaiaTeam then
+		return
+	end
+	local attackerID, attackerTeam = nearestEnemy(unitID, unitTeam)
+	if attackerID then
+		attackerSource = "nearest"
+		recordDamage(unitID, unitDefID, unitTeam, damage, paralyzer, attackerID, spGetUnitDefID(attackerID), attackerTeam)
+	end
+end
+
+local function writeDamageSums(frame)
+	local keys = {}
+	for key in pairs(damageSums) do
+		keys[#keys + 1] = key
+	end
+	table.sort(keys) -- pairs() has no fixed order; the file must not depend on it
+	for i = 1, #keys do
+		local key = keys[i]
+		local sums = damageSums[key]
+		write(
+			format(
+				'{"t":"damage","f":%d,"team":%d,"by_team":%d,"hits":%d,"damage":%.0f}',
+				frame,
+				floor(key / 256),
+				key % 256,
+				sums[1],
+				sums[2]
+			)
+		)
+		damageSums[key] = nil
+	end
+end
+
+local function finish(reason, winners)
+	if finished then
+		return
+	end
+	finished = true
+	local frame = spGetGameFrame()
+	writeDamageSums(frame)
+	if snapshotFrames > 0 then
+		writeSnapshot(frame)
+	end
+	write(
+		format(
+			'{"t":"end","f":%d,"reason":%s,"winners":[%s],"attackers":%s}',
+			frame,
+			jsonString(reason),
+			concat(winners or {}, ","),
+			jsonString(attackerSource)
+		)
+	)
+	if outputFile then
+		outputFile:close()
+		outputFile = nil
+	end
+end
+
+function widget:Initialize()
+	Spring.CreateDir("LuaUI/Config")
+	outputFile = io.open(OUT_PATH, "w")
+	writeHeader()
+	if writeEvents then
+		watchDamage()
+	end
+	Spring.SendCommands("specfullview 1")
+	if wantedSpeed > 0 then
+		-- a replay plays at 1x unless told otherwise; min = max pins the speed
+		Spring.SendCommands("setmaxspeed " .. wantedSpeed, "setminspeed " .. wantedSpeed)
+	end
+	Spring.Echo(format("[R8] state export on: every %d frames, speed %d, max frame %d", snapshotFrames, wantedSpeed, maxFrame))
+end
+
 function widget:UnitCreated(unitID, unitDefID, unitTeam, builderID)
 	writeEvent("created", unitID, unitDefID, unitTeam, builderID and format(',"by":%d', builderID))
 end
@@ -215,6 +392,7 @@ function widget:UnitFinished(unitID, unitDefID, unitTeam)
 end
 
 function widget:UnitDestroyed(unitID, unitDefID, unitTeam, attackerID, attackerDefID, attackerTeam)
+	hitBefore[unitID] = nil
 	local _, _, _, _, buildProgress = spGetUnitHealth(unitID)
 	writeEvent(
 		"destroyed",
@@ -233,6 +411,9 @@ function widget:GameFrame(frame)
 	if finished then
 		return
 	end
+	if frame % DAMAGE_FRAMES == 0 and next(damageSums) then
+		writeDamageSums(frame)
+	end
 	if snapshotFrames > 0 and frame % snapshotFrames == 0 then
 		writeSnapshot(frame)
 	end
@@ -249,4 +430,8 @@ end
 
 function widget:Shutdown()
 	finish("shutdown")
+	if handlerUnitDamaged then
+		widgetHandler.UnitDamaged = handlerUnitDamaged
+		widgetHandler:UpdateCallIn("UnitDamaged")
+	end
 end
