@@ -1,7 +1,7 @@
 # Public matches dataset and the first training slice
 
-Findings from [`notebooks/01_matches.ipynb`](../notebooks/01_matches.ipynb)
-(issue #4), on the dump of 2026-11-21. The selection is reproducible with
+Findings from [`notebooks/01_matches.ipynb`](../notebooks/01_matches.ipynb) ,
+on the dump of 2026-11-21. The selection is reproducible with
 `reason8.match_dumps.select_matches()`.
 
 ## The dumps
@@ -27,7 +27,7 @@ Columns that matter (some differ from the issue's list):
 - `match_players`: `match_id`, `team_id`, `user_id`, `party_id`, `left_after`
   (s), `old_skill`/`new_skill` (OpenSkill mu),
   `old_uncertainty`/`new_uncertainty` (sigma), `faction`. No start positions:
-  those come from the replay itself (#19).
+  those come from the replay itself.
 
 ## Findings
 
@@ -49,7 +49,7 @@ Columns that matter (some differ from the issue's list):
   after a year" warning doesn't affect a 6-month slice.
 - **`is_public` is true for every row**: private/passworded lobbies
   (tournaments) are not in the dumps at all. Expert games have to come from
-  elsewhere (#18).
+  elsewhere.
 - **Versions.** The dumps include the **engine version** (`engine`, also the
   suffix of the replay file name) and the exact `game_version`
   (`Beyond All Reason test-<build>-<sha>`). A new engine ships every 1–3
@@ -128,10 +128,10 @@ evaluation set.
 | **2026.09.03** | **814** | **1.9%** | 4             | 2026-11-16 .. 11-21 |
 
 199 distinct game versions in total. Only 814 slice games match the engine we
-have locally (`2026.09.03`). If re-simulation (#12) needs the exact engine and
-game version, most of the slice needs other engines; the build-order PoC reads
-commands straight from the replay and doesn't. How far back to go is the
-version policy's call (#21); `select_matches(since=...)` applies it.
+have locally (`2026.09.03`). If re-simulating replays needs the exact engine
+and game version, most of the slice needs other engines; the build-order PoC
+reads commands straight from the replay and doesn't. How far back to go is the
+version policy's call; `select_matches(since=...)` applies it.
 
 ## Reproducing
 

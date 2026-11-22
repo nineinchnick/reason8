@@ -1,7 +1,6 @@
 # BARb: the default BAR AI
 
-Notes for [#1](https://github.com/nineinchnick/reason8/issues/1). They come
-from reading the source:
+These notes come from reading the source:
 
 - **C++:** [rlcevg/CircuitAI](https://github.com/rlcevg/CircuitAI), branch
   `barbarian`, at commit `e3bebd3` (2026-09-13)
