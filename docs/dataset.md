@@ -226,3 +226,7 @@ chosen.select("match_id", "replay_file_name")
 
 Without `since`/`until` the window is the last 182 days of whatever dump is
 cached, so it moves with each rebuild.
+
+The parsed replays of the slice become the opening dataset with
+`python -m reason8.opening_dataset`; see
+[`openings-dataset.md`](openings-dataset.md).

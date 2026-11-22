@@ -192,6 +192,17 @@ and the numbers per map, and
 [ADR 0015](docs/adr/0015-take-positions-from-the-map-metadata.md) for how
 positions are defined.
 
+### Opening dataset
+
+`python -m reason8.opening_dataset` turns the parsed replays into the training
+data: every build order a player gave in the first 8 minutes, with the
+player's position, faction, skill and result and the game's version, split by
+game into train, validation and test. See
+[`docs/openings-dataset.md`](docs/openings-dataset.md) for the columns and the
+numbers, and
+[ADR 0017](docs/adr/0017-define-openings-by-time-and-split-games-by-match-id.md)
+for what an opening is and how games are split.
+
 ## Compute
 
 Training and headless simulation run **locally first**. Bulk jobs (re-running
