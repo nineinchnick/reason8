@@ -171,7 +171,7 @@ reason8/
   data/          # local cache — git-ignored
   notebooks/     # exploration
   reason8/       # Python package: download, parse, dataset, models
-  parser/        # thin Node wrapper around sdfz-demo-parser
+  parser/        # pinned sdfz-demo-parser (fetch.sh), fixture tooling
   ai/            # in-game side (Lua) — later
 ```
 
