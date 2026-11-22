@@ -40,7 +40,7 @@ Failures don't stop the run. Each replay gets a line in
 the game and engine version (read with `--header-only` when the full parse
 fails), sizes and the time taken. Replays that are already parsed are skipped
 unless `--force` is given. The run ends with a summary that includes failures
-per game version.
+per game version and per engine.
 
 ## Document
 
@@ -301,9 +301,56 @@ re-running the replay headlessly. The only outcome data in the replay is in
 
 ## Measurements
 
+### First sample of the slice
+
+The first 100 replays of the first slice in download order
+([ADR 0013](adr/0013-download-replays-in-a-fixed-random-order-per-map.md)):
+8v8 games on the three slice maps (34 All That Glitters, 33 Supreme Isthmus,
+33 Rosetta) played between 2026-05-23 and 2026-11-20, on **68 game versions
+and 6 engines**. They were parsed one at a time (`--jobs 1`) on a WSL2 machine
+with 32 threads and sdfz-demo-parser 5.15.1.
+
+| Per replay  | Game length | `.sdfz`  | Parser JSON | Ours (JSON) | Ours (gz) | Events  | Time    |
+| ----------- | ----------- | -------- | ----------- | ----------- | --------- | ------- | ------- |
+| mean        | 26.1 min    | 4.09 MB  | 51.2 MB     | 20.1 MB     | 1.96 MB   | 126,270 | 2.20 s  |
+| median      | 23.0 min    | 3.66 MB  | 42.1 MB     | 16.1 MB     | 1.58 MB   | 102,626 | 1.76 s  |
+| 90th pctile | 40.6 min    | 6.15 MB  | 80.9 MB     | 32.7 MB     | 3.38 MB   | 206,767 | 3.52 s  |
+| max         | 77.8 min    | 17.25 MB | 264.8 MB    | 109.8 MB    | 10.07 MB  | 674,083 | 11.68 s |
+
+| Map (mean)               | Replays | Game length | `.sdfz` | Ours (gz) | Events  | Time   |
+| ------------------------ | ------- | ----------- | ------- | --------- | ------- | ------ |
+| All That Glitters v2.2.3 | 34      | 25.0 min    | 3.41 MB | 1.37 MB   | 87,760  | 1.57 s |
+| Supreme Isthmus v2.1     | 33      | 28.0 min    | 4.07 MB | 1.90 MB   | 129,728 | 2.24 s |
+| Rosetta 1.4.4            | 33      | 25.4 min    | 4.80 MB | 2.63 MB   | 162,487 | 2.79 s |
+
+- **Failures: 0 of 100**, on every game version and engine. Per engine:
+
+  | Engine     | Replays | Failed |
+  | ---------- | ------- | ------ |
+  | 2025.06.19 | 3       | 0      |
+  | 2025.06.24 | 30      | 0      |
+  | 2026.06.11 | 1       | 0      |
+  | 2026.06.12 | 13      | 0      |
+  | 2026.07.04 | 52      | 0      |
+  | 2026.09.03 | 1       | 0      |
+
+  The 68 game versions (test-30166 to test-32018) have 1 to 4 replays each,
+  none failed. The game and engine version in every parsed replay match the
+  match dump's.
+
+- Parse time is proportional to the number of events (correlation 0.996), at
+  about 17 µs per event. The parser's JSON is 11.7× the `.sdfz` on average,
+  ours 4.5× uncompressed and **0.45× gzipped**.
+
+- With `--jobs 8` the same 100 replays take 43 s of wall time (0.43 s per
+  replay). The whole slice (42,913 replays) would take about 26 h on one core
+  or 5 h with 8 jobs, and about 84 GB of gzipped JSON next to 175 GB of
+  replays.
+
+### Earlier replays
+
 Seven replays: three 8v8 games on Supreme Isthmus, three 1v1s (Avalanche,
-Canis River) and our 1-minute BARb-vs-BARb test game. All were parsed one at a
-time on a WSL2 machine with sdfz-demo-parser 5.15.1.
+Canis River) and our 1-minute BARb-vs-BARb test game, parsed the same way.
 
 | Replay              | Game       | Length   | `.sdfz` | Parser JSON | Ours (JSON / gz) | Events | Time   |
 | ------------------- | ---------- | -------- | ------- | ----------- | ---------------- | ------ | ------ |
@@ -315,14 +362,8 @@ time on a WSL2 machine with sdfz-demo-parser 5.15.1.
 | 1v1 Canis River     | test-32018 | 12.9 min | 0.55 MB | 4.5 MB      | 1.21 / 0.13 MB   | 7,561  | 0.20 s |
 | BARb vs BARb        | test-32018 | 1 min    | 0.01 MB | 0.1 MB      | 0.02 / 0.004 MB  | 104    | 0.03 s |
 
-- The parser's own JSON is about 11× the `.sdfz`, even with frame and sync
-  packets excluded. Ours is about 3.5× uncompressed and **about 0.35×
-  gzipped**: smaller than the replay itself.
-- At about 0.5 s and 1 core per replay, 10,000 replays take roughly 1.5 h on 1
-  core, or 20 min with `--jobs 4`. The parser binary uses 150–400 MB of RAM
-  per process.
-- Failures per game version: 0 of 7 across three BAR versions (test-31986,
-  test-31992, test-32018) and two engine versions (2026.09.02, 2026.09.03). A
-  truncated and a non-gzip file are recorded as errors
-  (`unexpected end of file`, `incorrect header check`). Real failure rates per
-  version need a larger batch of replays.
+- 1v1 games have far fewer events than 8v8 games of the same length: about
+  0.1–0.2 MB of gzipped JSON each.
+- The parser binary uses 150–400 MB of RAM per process.
+- A truncated and a non-gzip file are recorded as errors
+  (`unexpected end of file`, `incorrect header check`).

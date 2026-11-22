@@ -9,7 +9,7 @@ import struct
 
 import pytest
 
-from reason8.parse import ParseError, command_name, compact, option_names
+from reason8.parse import ParseError, command_name, compact, failures_by, option_names, summarize
 from reason8.replay import Replay
 from reason8.sdfz import RawCommand, RawCommandPacket, read_command_packets_file
 
@@ -245,3 +245,31 @@ def test_compact_detects_misaligned_commands():
     raw_packets[0] = RawCommandPacket(11, (RawCommand(-2, 32, (1.0, 2.0, 3.0, 4.0)),))
     with pytest.raises(ParseError):
         compact(parsed_doc(), raw_packets, {})
+
+
+def test_failures_by_version_and_engine():
+    entries = [
+        {
+            "status": "ok",
+            "game": "test-2",
+            "engine": "2026.07.04",
+            "seconds": 1.0,
+            "sdfz_bytes": 2e6,
+            "parser_json_bytes": 2e7,
+            "json_bytes": 7e6,
+            "gz_bytes": 7e5,
+        },
+        {"status": "error", "game": "test-2", "engine": "2026.07.04", "error": "boom"},
+        {"status": "error", "game": "test-1", "engine": "2025.06.24", "error": "boom"},
+        {"status": "error", "error": "not a demo"},
+    ]
+    assert failures_by(entries, ("engine",)) == {
+        ("2025.06.24",): (1, 1),
+        ("2026.07.04",): (1, 2),
+        ("None",): (1, 1),
+    }
+    assert failures_by(entries, ("game",))[("test-2",)] == (1, 2)
+    summary = summarize(entries)
+    assert summary.splitlines()[0] == "1 ok, 3 failed"
+    assert "failures per engine:" in summary
+    assert "  2026.07.04: 1/2 failed" in summary
