@@ -4,6 +4,17 @@ An AI for [Beyond All Reason](https://github.com/beyond-all-reason/Beyond-All-Re
 
 > **Status:** early proof of concept. Nothing playable yet. See the [issues](../../issues) and [milestones](../../milestones) for what's being worked on.
 
+## Getting started
+
+You need [uv](https://docs.astral.sh/uv/getting-started/installation/); it installs the right Python (3.15) for you.
+
+```sh
+git clone https://github.com/nineinchnick/reason8.git && cd reason8
+uv sync          # create .venv with all dependencies
+uv run pytest    # run the tests
+uv run ruff check . && uv run ruff format .   # lint and format
+```
+
 ## The idea in one paragraph
 
 Instead of hand-writing rules ("build 2 mexes, then a lab, then…"), we show a model thousands of real games and train it to predict *what a good player does next* in a given situation. This is called **imitation learning** (or behavioural cloning). It's how AlphaStar's StarCraft II agent was bootstrapped before it improved further through self-play. We start with the smallest version of that idea that can actually be tested: **learn the opening build order for each start position on a popular team map**, then have a bot play it in team games.
