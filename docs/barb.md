@@ -234,7 +234,9 @@ we've confirmed.
 - [ ] Play a few skirmishes against `hard` BARb on 1–2 popular 1v1 maps and
   keep the replays. They'll be test data for the replay parser
 - [ ] Confirm a custom profile (copy of `hard` with edited openers) loads, and
-  how: game-side override vs files next to the DLL
+  how: game-side override vs files next to the DLL. Apex's approach (own short
+  name, files next to the library) is described in
+  [`related-work.md`](related-work.md); still to be tried
 - [ ] Note how BARb's openings look next to human openings on the same maps
 - [ ] Military layer in depth (only if we go past the opening)
 
