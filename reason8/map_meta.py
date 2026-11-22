@@ -39,15 +39,11 @@ from reason8.match_dumps import DEFAULT_MAPS
 from reason8.opening_shift import (
     SCORED_ORDERS,
     NextUnitModel,
-    Opening,
     by_match,
     feature_distance,
-    first_factory,
-    opening_shape,
-    openings,
     shuffled,
-    unit_role,
 )
+from reason8.openings import Opening, first_factory, opening_shape, openings, unit_role
 from reason8.positions import StartSetup, position_order, replay_positions, start_setup
 from reason8.replay import GAME_SPEED, iter_replays
 

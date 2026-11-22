@@ -15,7 +15,8 @@ position are, and tests whether a position can be recognised from the builds.
 How positions are defined is
 [ADR 0015](../adr/0015-take-positions-from-the-map-metadata.md). Code:
 `reason8/map_metadata.py` (BAR's map list), `reason8/positions.py` (positions
-and start setup) and `reason8/map_meta.py` (the measurement).
+and start setup), `reason8/openings.py` (what an opening is) and
+`reason8/map_meta.py` (the measurement).
 
 Replays parsed on 2026-11-22. To reproduce the tables:
 

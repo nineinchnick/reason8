@@ -24,7 +24,8 @@ from reason8.map_meta import (
     roles,
     sides_lines,
 )
-from reason8.opening_shift import NextUnitModel, Opening
+from reason8.opening_shift import NextUnitModel
+from reason8.openings import Opening
 from reason8.positions import FROM_GAME, FROM_MAP_LIST, StartSetup
 
 FIXTURE = Path(__file__).parent / "fixtures" / "replay.json"
