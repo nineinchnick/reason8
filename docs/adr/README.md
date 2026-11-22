@@ -31,3 +31,5 @@ one "Superseded by NNNN".
 - [0012. Keep the time window across balance patches](0012-keep-the-time-window-across-balance-patches.md):
 - [0013. Download replays in a fixed random order, maps taking turns](0013-download-replays-in-a-fixed-random-order-per-map.md):
   Accepted
+- [0014. Keep the data in a private S3 bucket](0014-keep-the-data-in-a-private-s3-bucket.md):
+  Accepted
