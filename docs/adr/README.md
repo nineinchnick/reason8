@@ -40,3 +40,5 @@ one "Superseded by NNNN".
   Accepted
 - [0016. License the project GPL-2.0-or-later](0016-license-the-project-gpl-2-0-or-later.md):
   Accepted
+- [0017. Define openings by time and split games by match id](0017-define-openings-by-time-and-split-games-by-match-id.md):
+  Accepted
