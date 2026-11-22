@@ -141,3 +141,20 @@ def test_select_matches_bad_threshold(dumps):
 
 def test_replay_url():
     assert replay_url("a b.sdfz").endswith("/BAR/demos/a%20b.sdfz")
+
+
+def test_select_matches_min_build():
+    # A build is a release number, not a date: the older build was still played later.
+    matches = pl.DataFrame(
+        [
+            _match(1, game_version="Beyond All Reason test-31075-1913fe9"),
+            _match(2, game_version="Beyond All Reason test-31058-0308fc6"),
+            _match(3, game_version="Beyond All Reason test-31115-0123abc"),
+            _match(4, game_version="Beyond All Reason pr-9493-31506-5476673"),
+            _match(5, game_version=None),
+        ]
+    )
+    players = pl.DataFrame(sum((_players(i) for i in range(1, 6)), []))
+    out = select_matches(matches, players, min_avg_skill=None, min_build=31075)
+    assert out["match_id"].to_list() == [1, 3]
+    assert select_matches(matches, players, min_avg_skill=None).height == 5
