@@ -76,17 +76,19 @@ in team games.
 
 ## Roadmap
 
-1. PoC: learned openings : Team bot that plays the opening for its start
-   position, predicted from replays; BARb takes over after
+**1. PoC: learned openings**
+: Team bot that plays the opening for its start position, predicted from
+  replays; BARb takes over after
 
-2. Learned macro (1v1) : The model decides what to build for the whole game
-   from game state recovered from replays; BARb runs production and army
+**2. Learned macro (1v1)**
+: The model decides what to build for the whole game from game state recovered
+  from replays; BARb runs production and army
 
-3. Learned production : Unit mix chosen from scouted information; team
-   communication
+**3. Learned production**
+: Unit mix chosen from scouted information; team communication
 
-4. Beyond imitation : Offline RL on replays, then self-play, still within the
-   human-like limits
+**4. Beyond imitation**
+: Offline RL on replays, then self-play, still within the human-like limits
 
 Army control and unit micro stay with BARb until there's a reason to change
 that.
