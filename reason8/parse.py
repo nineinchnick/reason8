@@ -4,7 +4,7 @@ Usage::
 
     parser/fetch.sh                      # once: download the pinned parser binary
     uv run python -m reason8.parse       # data/replays/*.sdfz -> data/parsed/*.json.zst
-    uv run python -m reason8.parse DIR_OR_FILE ... --out OUT --jobs 4
+    uv run python -m reason8.parse DIR_OR_FILE ... --out OUT --jobs 24
 
 Each replay becomes one zstd-compressed JSON document (see docs/replay-format.md).
 A replay that fails to parse gets an entry with the error in `<out>/_index.jsonl`
@@ -30,10 +30,10 @@ from typing import Any
 from reason8.match_dumps import data_dir
 from reason8.sdfz import RawCommandPacket, read_command_packets_file
 
-#: Parsed replays are written once and read many times, so compress hard: level 19
-#: is about 30% smaller than gzip and decompresses twice as fast, at about 4 s of
-#: CPU per replay. Lower levels (9: 13% smaller, 0.1 s) suit quick experiments.
-ZSTD_LEVEL = 19
+#: Level 12 is about 15% smaller than gzip and decompresses twice as fast, at
+#: about 0.2 s of CPU per replay. Level 19 is another 18% smaller but takes about
+#: 27 times longer, which dominates the parse time, so it isn't worth it here.
+ZSTD_LEVEL = 12
 PARSED_SUFFIX = ".json.zst"
 
 PARSER_VERSION = "5.15.1"
@@ -493,6 +493,11 @@ def compact(parsed: dict[str, Any], raw: list[RawCommandPacket], source: dict[st
     }
 
 
+def default_jobs() -> int:
+    """Three quarters of the CPU threads: parsing is CPU-bound, leave room for the rest."""
+    return max(1, (os.cpu_count() or 1) * 3 // 4)
+
+
 def default_parser() -> Path:
     """The pinned parser binary that ``parser/fetch.sh`` downloads into the data directory."""
     return data_dir() / "tools" / f"sdfz-demo-parser-{PARSER_VERSION}" / "sdfz-demo-parser"
@@ -651,12 +656,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     argument_parser.add_argument("--out", type=Path, default=data_dir() / "parsed")
     argument_parser.add_argument("--parser", type=Path, default=default_parser())
-    argument_parser.add_argument("--jobs", type=int, default=min(4, os.cpu_count() or 1))
+    argument_parser.add_argument(
+        "--jobs",
+        type=int,
+        default=default_jobs(),
+        help="parallel parses (default: three quarters of the CPU threads)",
+    )
     argument_parser.add_argument(
         "--zstd-level",
         type=int,
         default=ZSTD_LEVEL,
-        help=f"compression level (default {ZSTD_LEVEL}: about 4 s per replay; 9 for quick runs)",
+        help=f"zstd compression level (default {ZSTD_LEVEL})",
     )
     argument_parser.add_argument(
         "--force", action="store_true", help="re-parse replays already done"

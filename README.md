@@ -53,7 +53,7 @@ uv run reason8 sync push                # data/ -> bucket: replays, parsed, matc
 and the parse index, and never deletes anything. With the bucket configured,
 `reason8 download` looks there before asking BAR's servers and uploads what it
 downloads from them. Storing the whole first slice (about 175 GB of replays
-and 54 GB of parsed replays) costs about $6 a month.
+and about 70 GB of parsed replays) costs about $6 a month.
 
 ## The idea in one paragraph
 
