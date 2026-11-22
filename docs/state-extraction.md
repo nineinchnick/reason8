@@ -505,7 +505,9 @@ second, 23 MB of log for one 8v8 game, so clean up run dirs.
 
 ## 7. Go / no-go for using state in v2
 
-**Go.**
+**Go.** The decision is recorded in
+[ADR 0002](adr/0002-recover-game-state-by-re-running-replays.md); this section
+keeps the numbers behind it.
 
 - **1v1 (milestone 2, learned macro):** clear go. About 40 s and 90 KB per
   replay. 100,000 duels are about 1,100 core-hours, which is two weeks on this
