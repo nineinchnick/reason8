@@ -59,15 +59,30 @@ Columns that matter (some differ from the issue's list):
 
 Defaults of `reason8.match_dumps.select_matches()`:
 
-| filter        | value                                                                                                                                                        |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| maps          | `Supreme Isthmus v2.1`, `All That Glitters v2.2.3`, `Rosetta 1.4.4`: the three most played Large Team maps (exact versions: layouts change between versions) |
-| game type     | `Large Team`, ranked, exactly two teams of 8                                                                                                                 |
-| time          | last 182 days of the dump (pinned in the notebook to 2026-05-23 .. 2026-11-22)                                                                               |
-| duration      | ≥ 600 s                                                                                                                                                      |
-| early leavers | no player left before 600 s                                                                                                                                  |
-| skill         | lobby average `old_skill` ≥ **that map's** median over the games passing all other filters (Isthmus 22.1, Glitters 21.2, Rosetta 34.3)                       |
-| replay        | `replay_file_name` present                                                                                                                                   |
+maps
+: `Supreme Isthmus v2.1`, `All That Glitters v2.2.3`, `Rosetta 1.4.4`: the
+  three most played Large Team maps (exact versions: layouts change between
+  versions)
+
+game type
+: `Large Team`, ranked, exactly two teams of 8
+
+time
+: last 182 days of the dump (pinned in the notebook to 2026-05-23 ..
+  2026-11-22)
+
+duration
+: ≥ 600 s
+
+early leavers
+: no player left before 600 s
+
+skill
+: lobby average `old_skill` ≥ **that map's** median over the games passing all
+  other filters (Isthmus 22.1, Glitters 21.2, Rosetta 34.3)
+
+replay
+: `replay_file_name` present
 
 Funnel over the three maps: 112,960 games → 94,531 ranked Large Team → 93,546
 8v8 → 93,435 with replay → 89,916 ≥ 10 min → 85,825 no early leaver → **42,913

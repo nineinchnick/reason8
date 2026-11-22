@@ -29,11 +29,23 @@ testing.
 
 ## Where things live
 
-| Layer           | Where                                                                                                              | What it does                                                                                                                                      |
-| --------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| C++ (CircuitAI) | `src/circuit/` in CircuitAI. Compiled into `SkirmishAI.dll` / `libSkirmishAI.so`, shipped with the engine          | Everything heavy: managers, task pool, threat and influence maps, pathing, placement, combat                                                      |
-| AngelScript     | BAR repo: `luarules/configs/BARb/stable/script/<profile>/` + shared `common.as`, `define.as`, `task.as`, `unit.as` | Hooks the C++ calls (see below). Mostly just calls back into C++ defaults; the real logic is the **factory openers** and a few economy thresholds |
-| JSON            | BAR repo: `luarules/configs/BARb/stable/config/<profile>/*.json`                                                   | Unit roles, threat values, unit probabilities per factory, energy building limits, defence lists, commander behaviour                             |
+C++ (CircuitAI)
+: *Where:* `src/circuit/` in CircuitAI. Compiled into `SkirmishAI.dll` /
+  `libSkirmishAI.so`, shipped with the engine
+: *What it does:* Everything heavy: managers, task pool, threat and influence
+  maps, pathing, placement, combat
+
+AngelScript
+: *Where:* BAR repo: `luarules/configs/BARb/stable/script/<profile>/` + shared
+  `common.as`, `define.as`, `task.as`, `unit.as`
+: *What it does:* Hooks the C++ calls (see below). Mostly just calls back into
+  C++ defaults; the real logic is the **factory openers** and a few economy
+  thresholds
+
+JSON
+: *Where:* BAR repo: `luarules/configs/BARb/stable/config/<profile>/*.json`
+: *What it does:* Unit roles, threat values, unit probabilities per factory,
+  energy building limits, defence lists, commander behaviour
 
 **Profiles (difficulties):** `easy`, `medium`, `hard`, `hard_aggressive`.
 `AIOptions.lua` uses `hard` by default. `init.as` loads the config parts
@@ -138,14 +150,24 @@ opening.*
 
 ### How it sees the game
 
-| Source                         | What                                                                                        |
-| ------------------------------ | ------------------------------------------------------------------------------------------- |
-| `ThreatMap`                    | Grid of enemy threat by type (air / surface / water). Used for safety checks and path costs |
-| `InfluenceMap`                 | Ally vs enemy influence per cell                                                            |
-| `EnemyManager`                 | Known enemy units, cost per role, mobile threat                                             |
-| `EconomyManager`               | Current, storage, pull and income for metal and energy; average incomes                     |
-| `MetalManager`                 | Metal spots and spot groups, which are taken                                                |
-| Unit config (`behaviour.json`) | Role, attributes, threat multipliers, power and retreat for every unit                      |
+`ThreatMap`
+: Grid of enemy threat by type (air / surface / water). Used for safety checks
+  and path costs
+
+`InfluenceMap`
+: Ally vs enemy influence per cell
+
+`EnemyManager`
+: Known enemy units, cost per role, mobile threat
+
+`EconomyManager`
+: Current, storage, pull and income for metal and energy; average incomes
+
+`MetalManager`
+: Metal spots and spot groups, which are taken
+
+Unit config (`behaviour.json`)
+: Role, attributes, threat multipliers, power and retreat for every unit
 
 *A Reason8 model running inside BARb would see the same signals. That's richer
 than what we can get from replay commands alone, so the features we train on
@@ -155,14 +177,32 @@ need to be ones we can also get at play time.*
 
 From least to most invasive:
 
-| #   | Hook                                                              | What the model decides                                                      | Effort                                                                                            |
-| --- | ----------------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| 1   | **Opener tables** in `script/<profile>/misc/commander.as`         | Which opening sequence a factory plays (weights, or a sequence we generate) | AngelScript or data only, no C++. *Best match for the PoC*                                        |
-| 2   | **Factory unit probabilities** in `config/<profile>/factory.json` | Mix of units per income tier                                                | JSON only. Could be learned offline from replays and written in as numbers                        |
-| 3   | **`Factory::AiGetFactoryToBuild`**                                | Which factory to build first or next                                        | AngelScript. The C++ default is one call away                                                     |
-| 4   | **Energy limits** in `economy.json`                               | How many of each generator, and when                                        | JSON only                                                                                         |
-| 5   | **`Builder::AiMakeTask`**                                         | Which task each builder takes                                               | AngelScript, but would need a lot of game state passed to the script, or running the model in C++ |
-| 6   | **C++ fork** (what Apex does)                                     | Anything                                                                    | Needs a build in Docker against Recoil sources                                                    |
+**Opener tables** in `script/<profile>/misc/commander.as` (1)
+: *What the model decides:* Which opening sequence a factory plays (weights,
+  or a sequence we generate)
+: *Effort:* AngelScript or data only, no C++. *Best match for the PoC*
+
+**Factory unit probabilities** in `config/<profile>/factory.json` (2)
+: *What the model decides:* Mix of units per income tier
+: *Effort:* JSON only. Could be learned offline from replays and written in as
+  numbers
+
+**`Factory::AiGetFactoryToBuild`** (3)
+: *What the model decides:* Which factory to build first or next
+: *Effort:* AngelScript. The C++ default is one call away
+
+**Energy limits** in `economy.json` (4)
+: *What the model decides:* How many of each generator, and when
+: *Effort:* JSON only
+
+**`Builder::AiMakeTask`** (5)
+: *What the model decides:* Which task each builder takes
+: *Effort:* AngelScript, but would need a lot of game state passed to the
+  script, or running the model in C++
+
+**C++ fork** (what Apex does) (6)
+: *What the model decides:* Anything
+: *Effort:* Needs a build in Docker against Recoil sources
 
 *Hooks 1–4 need no new code at play time. We'd learn the numbers offline from
 human replays and write them into a custom profile, e.g. `config/reason8/` +

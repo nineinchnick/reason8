@@ -33,14 +33,29 @@ in team games.
 
 ## How training works (for newcomers)
 
-| Step           | What it means here                                                                                                           |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| **Data**       | Replay files (`.sdfz`) of real BAR matches, plus match metadata (map, skill ratings, winner).                                |
-| **Examples**   | Turn each replay into many *(situation → action)* pairs, e.g. *"after building these 6 things, the player built a Bot Lab"*. |
-| **Model**      | A function with adjustable numbers (parameters) that takes a situation and outputs a probability for each possible action.   |
-| **Training**   | Repeatedly show the model examples and nudge its parameters so the action the human actually took becomes more likely.       |
-| **Evaluation** | On games the model never saw, how often is its top guess the human's real choice? Compare against a dumb baseline first.     |
-| **Deployment** | Run the model inside (or alongside) the game so a bot can act on its predictions.                                            |
+**Data**
+: Replay files (`.sdfz`) of real BAR matches, plus match metadata (map, skill
+  ratings, winner).
+
+**Examples**
+: Turn each replay into many *(situation → action)* pairs, e.g. *"after
+  building these 6 things, the player built a Bot Lab"*.
+
+**Model**
+: A function with adjustable numbers (parameters) that takes a situation and
+  outputs a probability for each possible action.
+
+**Training**
+: Repeatedly show the model examples and nudge its parameters so the action
+  the human actually took becomes more likely.
+
+**Evaluation**
+: On games the model never saw, how often is its top guess the human's real
+  choice? Compare against a dumb baseline first.
+
+**Deployment**
+: Run the model inside (or alongside) the game so a bot can act on its
+  predictions.
 
 ## Goals
 
@@ -61,12 +76,17 @@ in team games.
 
 ## Roadmap
 
-| Milestone                | What it delivers                                                                                                         |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| 1. PoC: learned openings | Team bot that plays the opening for its start position, predicted from replays; BARb takes over after                    |
-| 2. Learned macro (1v1)   | The model decides what to build for the whole game from game state recovered from replays; BARb runs production and army |
-| 3. Learned production    | Unit mix chosen from scouted information; team communication                                                             |
-| 4. Beyond imitation      | Offline RL on replays, then self-play, still within the human-like limits                                                |
+1. PoC: learned openings : Team bot that plays the opening for its start
+   position, predicted from replays; BARb takes over after
+
+2. Learned macro (1v1) : The model decides what to build for the whole game
+   from game state recovered from replays; BARb runs production and army
+
+3. Learned production : Unit mix chosen from scouted information; team
+   communication
+
+4. Beyond imitation : Offline RL on replays, then self-play, still within the
+   human-like limits
 
 Army control and unit micro stay with BARb until there's a reason to change
 that.
@@ -77,13 +97,25 @@ PvE modes (Scavengers, Raptors) and free-for-all games.
 
 ## Where the data comes from
 
-| Source                                                                                                                                                 | What it gives us                                                                                                                         |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| [`data-processing`](https://github.com/beyond-all-reason/data-processing) public dumps — e.g. `https://data-marts.beyondallreason.dev/matches.parquet` | Match metadata, rebuilt twice a week: map, game type, winner, duration, game version, player skill (OpenSkill), and `replay_file_name`.  |
-| BAR public object storage — `https://storage.uk.cloud.ovh.net/v1/AUTH_10286efc0d334efd917d476d7183232e/BAR/demos/<replay_file_name>`                   | The replay files themselves. The replay site notes downloads *may be expired if older than a year*.                                      |
-| [`sdfz-demo-parser`](https://github.com/beyond-all-reason/demo-parser) (used by [bar-lobby](https://github.com/beyond-all-reason/bar-lobby))           | Parses `.sdfz` into JSON: header, players, end-of-game stats and the packet stream, including **build commands resolved to unit names**. |
-| `https://api.bar-rts.com/replays`                                                                                                                      | The replay search API bar-lobby uses (`?players=…&limit=…&page=…`, `/replays/<id>`).                                                     |
-| Tournaments, leagues and casts                                                                                                                         | A smaller hand-picked set of expert games (Alpha Cup, weekly leagues, YouTube casts), used for evaluation and extra weight.              |
+[`data-processing`](https://github.com/beyond-all-reason/data-processing) public dumps — e.g. `https://data-marts.beyondallreason.dev/matches.parquet`
+: Match metadata, rebuilt twice a week: map, game type, winner, duration, game
+  version, player skill (OpenSkill), and `replay_file_name`.
+
+BAR public object storage — `https://storage.uk.cloud.ovh.net/v1/AUTH_10286efc0d334efd917d476d7183232e/BAR/demos/<replay_file_name>`
+: The replay files themselves. The replay site notes downloads *may be expired
+  if older than a year*.
+
+[`sdfz-demo-parser`](https://github.com/beyond-all-reason/demo-parser) (used by [bar-lobby](https://github.com/beyond-all-reason/bar-lobby))
+: Parses `.sdfz` into JSON: header, players, end-of-game stats and the packet
+  stream, including **build commands resolved to unit names**.
+
+`https://api.bar-rts.com/replays`
+: The replay search API bar-lobby uses (`?players=…&limit=…&page=…`,
+  `/replays/<id>`).
+
+Tournaments, leagues and casts
+: A smaller hand-picked set of expert games (Alpha Cup, weekly leagues,
+  YouTube casts), used for evaluation and extra weight.
 
 ### An important caveat about replays
 
