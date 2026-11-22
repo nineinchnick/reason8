@@ -1,6 +1,6 @@
 """Make the small, anonymised test fixture from one parsed replay.
 
-    uv run python parser/make_fixture.py data/parsed/<replay>.json.gz tests/fixtures/replay.json
+    uv run python parser/make_fixture.py data/parsed/<replay>.json.zst tests/fixtures/replay.json
 
 Keeps everything about the game except identities, and only a slice of events:
 - for a few teams, the build-related commands of the first minutes (plus their

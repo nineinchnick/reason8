@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import gzip
 import json
 from collections.abc import Iterator
+from compression import zstd
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -190,9 +190,10 @@ def _build_order(event: dict[str, Any], command: dict[str, Any], *, inserted: bo
 
 def load_replay(path: str | Path) -> Replay:
     path = Path(path)
-    opener = gzip.open if path.suffix == ".gz" else open
-    with opener(path, "rt", encoding="utf-8") as file:
-        document = json.load(file)
+    if path.suffix == ".zst":
+        document = json.loads(zstd.decompress(path.read_bytes()))
+    else:
+        document = json.loads(path.read_text(encoding="utf-8"))
     if document.get("format") != FORMAT:
         raise ValueError(f"{path}: unsupported format {document.get('format')!r}")
     return Replay(document)
@@ -200,5 +201,5 @@ def load_replay(path: str | Path) -> Replay:
 
 def iter_replays(directory: str | Path) -> Iterator[Replay]:
     """All parsed replays in a directory (as written by `python -m reason8.parse`)."""
-    for path in sorted(Path(directory).glob("*.json.gz")):
+    for path in sorted(Path(directory).glob("*.json.zst")):
         yield load_replay(path)

@@ -25,7 +25,7 @@ Getting the data (into the git-ignored `data/`, or `$REASON8_DATA_DIR`):
 ```sh
 uv run reason8 download --limit 100   # match dumps, then 100 replays of the slice
 parser/fetch.sh                       # once: the pinned replay parser
-uv run python -m reason8.parse        # data/replays -> data/parsed/*.json.gz
+uv run python -m reason8.parse        # data/replays -> data/parsed/*.json.zst
 ```
 
 The downloader keeps one connection at about one request per second, never
