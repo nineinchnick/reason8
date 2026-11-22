@@ -27,6 +27,7 @@ from datetime import datetime
 from pathlib import Path
 
 from reason8.game_versions import BALANCE_OPTIONS, balance_options, build_number
+from reason8.parse import output_path
 from reason8.replay import GAME_SPEED, Replay, load_replay
 
 OPENING_SECONDS = 8 * 60
@@ -391,7 +392,7 @@ def load_sample(parsed_dir: Path) -> tuple[list[Opening], dict[str, SampleMatch]
     loaded: list[Opening] = []
     matches: dict[str, SampleMatch] = {}
     for file_name, build in sorted(sample_matches().items()):
-        path = parsed_dir / (Path(file_name).stem + ".json.gz")
+        path = output_path(parsed_dir, Path(file_name))
         if not path.exists() or group_of(build) is None:
             continue
         replay = load_replay(path)
@@ -593,7 +594,7 @@ def main(argv: list[str] | None = None) -> int:
     args = argument_parser.parse_args(argv)
     if args.list:
         for file_name, build in sorted(sample_matches().items(), key=lambda item: item[1]):
-            path = args.parsed / (Path(file_name).stem + ".json.gz")
+            path = output_path(args.parsed, Path(file_name))
             if group_of(build) and path.exists():
                 print(f"{group_of(build)}\t{build}\t{file_name}")
         return 0
