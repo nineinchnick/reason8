@@ -590,6 +590,16 @@ def index_text(index: dict[str, dict[str, Any]]) -> str:
     return "".join(json.dumps(entry) + "\n" for entry in sorted(index.values(), key=_file_key))
 
 
+def merge_indexes(destination: bytes, source: bytes) -> bytes | None:
+    """Entries of both index files, the ``source`` entry winning for a replay in both.
+
+    Returns ``None`` when ``destination`` already holds every entry of the result.
+    """
+    entries = parse_index(destination.decode())
+    merged = entries | parse_index(source.decode())
+    return index_text(merged).encode() if merged != entries else None
+
+
 def _file_key(entry: dict[str, Any]) -> str:
     return entry["file"]
 
