@@ -30,6 +30,9 @@ Keep this file as `AGENTS.md` with no `CLAUDE.md`, `.claude/CLAUDE.md` or
   notebooks, code comments. The repo is independent of the issue tracker and
   always describes the current state. Issue references belong in commit
   messages and PR descriptions.
+- Record each decision that shapes further development as an architecture
+  decision record in `docs/adr/` (see its README). Research docs keep the
+  evidence and link to the record instead of restating the decision.
 
 ## Formatting and checks
 
