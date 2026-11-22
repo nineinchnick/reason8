@@ -34,3 +34,5 @@ one "Superseded by NNNN".
   Accepted
 - [0013. Download replays in a fixed random order, maps taking turns](0013-download-replays-in-a-fixed-random-order-per-map.md):
   Accepted
+- [0014. Keep the data in a private S3 bucket](0014-keep-the-data-in-a-private-s3-bucket.md):
+  Accepted
