@@ -43,4 +43,5 @@ one "Superseded by NNNN".
 - [0017. Define openings by time and split games by match id](0017-define-openings-by-time-and-split-games-by-match-id.md):
   Accepted
 - [0018. Evaluate next-build models on held-out games, one step per decision](0018-evaluate-next-build-models-on-held-out-games.md):
+- [0020. Learn decisions with their context, not build orders alone](0020-learn-decisions-with-their-context.md):
   Accepted
