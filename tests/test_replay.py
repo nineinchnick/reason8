@@ -1,10 +1,11 @@
 import json
 import re
+from compression import zstd
 from pathlib import Path
 
 import pytest
 
-from reason8.replay import BuildOrder, load_replay
+from reason8.replay import BuildOrder, iter_replays, load_replay
 
 FIXTURE = Path(__file__).parent / "fixtures" / "replay.json"
 
@@ -122,13 +123,16 @@ def test_communication_events(replay):
         assert next(replay.events_of(kind), None) is not None, kind
 
 
-def test_load_gzip(tmp_path):
-    import gzip
-
-    path = tmp_path / "r.json.gz"
-    with gzip.open(path, "wt", encoding="utf-8") as file:
-        file.write(FIXTURE.read_text(encoding="utf-8"))
+def test_load_zstd(tmp_path):
+    path = tmp_path / "r.json.zst"
+    path.write_bytes(zstd.compress(FIXTURE.read_bytes()))
     assert load_replay(path).meta["map"] == "Supreme Isthmus v2.1"
+
+
+def test_iter_replays_reads_zstd_files(tmp_path):
+    (tmp_path / "a.json.zst").write_bytes(zstd.compress(FIXTURE.read_bytes()))
+    (tmp_path / "_index.jsonl").write_text("")
+    assert [replay.meta["map"] for replay in iter_replays(tmp_path)] == ["Supreme Isthmus v2.1"]
 
 
 def test_rejects_other_formats(tmp_path):

@@ -5,11 +5,23 @@ shape sdfz-demo-parser 5.15.1 emits, and the demo file is built byte by byte.
 """
 
 import gzip
+import json
 import struct
+from compression import zstd
 
 import pytest
 
-from reason8.parse import ParseError, command_name, compact, failures_by, option_names, summarize
+from reason8.parse import (
+    FORMAT,
+    ParseError,
+    command_name,
+    compact,
+    failures_by,
+    option_names,
+    output_path,
+    summarize,
+    write_json_zst,
+)
 from reason8.replay import Replay
 from reason8.sdfz import RawCommand, RawCommandPacket, read_command_packets_file
 
@@ -257,7 +269,7 @@ def test_failures_by_version_and_engine():
             "sdfz_bytes": 2e6,
             "parser_json_bytes": 2e7,
             "json_bytes": 7e6,
-            "gz_bytes": 7e5,
+            "compressed_bytes": 5e5,
         },
         {"status": "error", "game": "test-2", "engine": "2026.07.04", "error": "boom"},
         {"status": "error", "game": "test-1", "engine": "2025.06.24", "error": "boom"},
@@ -273,3 +285,13 @@ def test_failures_by_version_and_engine():
     assert summary.splitlines()[0] == "1 ok, 3 failed"
     assert "failures per engine:" in summary
     assert "  2026.07.04: 1/2 failed" in summary
+
+
+def test_write_json_zst_round_trip(tmp_path):
+    document = {"format": FORMAT, "events": [{"frame": 1, "type": "start"}]}
+    path = output_path(tmp_path, tmp_path / "game.sdfz")
+    uncompressed = write_json_zst(document, path)
+    assert path.name == "game.json.zst"
+    assert json.loads(zstd.decompress(path.read_bytes())) == document
+    assert uncompressed == len(json.dumps(document, separators=(",", ":")))
+    assert not list(tmp_path.glob("*.tmp"))

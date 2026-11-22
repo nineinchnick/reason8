@@ -3,10 +3,10 @@
 Usage::
 
     parser/fetch.sh                      # once: download the pinned parser binary
-    uv run python -m reason8.parse       # data/replays/*.sdfz -> data/parsed/*.json.gz
+    uv run python -m reason8.parse       # data/replays/*.sdfz -> data/parsed/*.json.zst
     uv run python -m reason8.parse DIR_OR_FILE ... --out OUT --jobs 4
 
-Each replay becomes one gzipped JSON document (see docs/replay-format.md).
+Each replay becomes one zstd-compressed JSON document (see docs/replay-format.md).
 A replay that fails to parse gets an entry with the error in `<out>/_index.jsonl`
 instead of stopping the run. Already parsed replays are skipped unless `--force`.
 Default paths are under the data directory (``REASON8_DATA_DIR``, or ``data/`` in the repo).
@@ -15,7 +15,6 @@ Default paths are under the data directory (``REASON8_DATA_DIR``, or ``data/`` i
 from __future__ import annotations
 
 import argparse
-import gzip
 import json
 import math
 import os
@@ -23,12 +22,19 @@ import subprocess
 import sys
 import time
 from collections import Counter
+from compression import zstd
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
 from reason8.match_dumps import data_dir
 from reason8.sdfz import RawCommandPacket, read_command_packets_file
+
+#: Parsed replays are written once and read many times, so compress hard: level 19
+#: is about 30% smaller than gzip and decompresses twice as fast, at about 4 s of
+#: CPU per replay. Lower levels (9: 13% smaller, 0.1 s) suit quick experiments.
+ZSTD_LEVEL = 19
+PARSED_SUFFIX = ".json.zst"
 
 PARSER_VERSION = "5.15.1"
 FORMAT = "reason8.replay/1"
@@ -506,24 +512,26 @@ def parse_replay(parser: Path, replay: Path) -> tuple[dict[str, Any], int]:
 
 
 def output_path(out_dir: Path, replay: Path) -> Path:
-    return out_dir / (replay.stem + ".json.gz")
+    return out_dir / (replay.stem + PARSED_SUFFIX)
 
 
-def write_json_gz(doc: Any, path: Path) -> int:
+def write_json_zst(document: Any, path: Path, level: int = ZSTD_LEVEL) -> int:
+    """Write compact JSON compressed with zstd; return the uncompressed size."""
     temporary_path = path.with_name(path.name + ".tmp")
-    data = json.dumps(doc, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    with gzip.open(temporary_path, "wb", compresslevel=6) as file:
-        file.write(data)
+    data = json.dumps(document, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    temporary_path.write_bytes(zstd.compress(data, level=level))
     os.replace(temporary_path, path)
     return len(data)
 
 
-def process_one(parser: Path, replay: Path, out_dir: Path) -> dict[str, Any]:
+def process_one(
+    parser: Path, replay: Path, out_dir: Path, zstd_level: int = ZSTD_LEVEL
+) -> dict[str, Any]:
     entry: dict[str, Any] = {"file": replay.name, "sdfz_bytes": replay.stat().st_size}
     start_time = time.perf_counter()
     try:
         document, parser_json_bytes = parse_replay(parser, replay)
-        json_bytes = write_json_gz(document, output_path(out_dir, replay))
+        json_bytes = write_json_zst(document, output_path(out_dir, replay), zstd_level)
         meta = document["meta"]
         entry.update(
             status="ok",
@@ -534,7 +542,7 @@ def process_one(parser: Path, replay: Path, out_dir: Path) -> dict[str, Any]:
             events=len(document["events"]),
             parser_json_bytes=parser_json_bytes,
             json_bytes=json_bytes,
-            gz_bytes=output_path(out_dir, replay).stat().st_size,
+            compressed_bytes=output_path(out_dir, replay).stat().st_size,
         )
     except Exception as error:  # record any failure per file, keep going
         entry.update(status="error", error=f"{type(error).__name__}: {error}"[:2000])
@@ -589,7 +597,8 @@ def summarize(entries: list[dict[str, Any]]) -> str:
         lines.append(
             f"per replay: {mean('seconds'):.2f} s, sdfz {mean('sdfz_bytes') / 1e6:.2f} MB, "
             f"parser JSON {mean('parser_json_bytes') / 1e6:.1f} MB, "
-            f"ours {mean('json_bytes') / 1e6:.2f} MB ({mean('gz_bytes') / 1e6:.2f} MB gzipped)"
+            f"ours {mean('json_bytes') / 1e6:.2f} MB "
+            f"({mean('compressed_bytes') / 1e6:.2f} MB compressed)"
         )
     for title, fields in (
         ("failures per game version", ("game",)),
@@ -626,6 +635,12 @@ def main(argv: list[str] | None = None) -> int:
     argument_parser.add_argument("--parser", type=Path, default=default_parser())
     argument_parser.add_argument("--jobs", type=int, default=min(4, os.cpu_count() or 1))
     argument_parser.add_argument(
+        "--zstd-level",
+        type=int,
+        default=ZSTD_LEVEL,
+        help=f"compression level (default {ZSTD_LEVEL}: about 4 s per replay; 9 for quick runs)",
+    )
+    argument_parser.add_argument(
         "--force", action="store_true", help="re-parse replays already done"
     )
     args = argument_parser.parse_args(argv)
@@ -648,7 +663,8 @@ def main(argv: list[str] | None = None) -> int:
     results: list[dict[str, Any]] = []
     with ProcessPoolExecutor(max_workers=max(1, args.jobs)) as pool:
         futures = [
-            pool.submit(process_one, args.parser, replay, args.out) for replay in replays_to_parse
+            pool.submit(process_one, args.parser, replay, args.out, args.zstd_level)
+            for replay in replays_to_parse
         ]
         for future in as_completed(futures):
             entry = future.result()

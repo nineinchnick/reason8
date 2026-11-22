@@ -12,7 +12,7 @@ Why we read commands instead of re-simulating for openings:
 ```sh
 # once: download the pinned sdfz-demo-parser 5.15.1 into data/tools/
 parser/fetch.sh
-# data/replays/**/*.sdfz -> data/parsed/<name>.json.gz
+# data/replays/**/*.sdfz -> data/parsed/<name>.json.zst
 uv run python -m reason8.parse
 # other inputs and output directory
 uv run python -m reason8.parse some/dir file.sdfz --out other/dir \
@@ -33,7 +33,8 @@ uv run python -m reason8.parse some/dir file.sdfz --out other/dir \
    packet, and any difference in count or parameters raises an error. Both
    bugs are worth reporting upstream.
 3. **`reason8/parse.py`** keeps what we need (metadata, players, statistics
-   and a flat list of events) and writes one gzipped JSON document per replay.
+   and a flat list of events) and writes one zstd-compressed JSON document per
+   replay.
 
 Failures don't stop the run. Each replay gets a line in
 `data/parsed/_index.jsonl` with `status` (`ok` or `error`), the error message,
@@ -343,9 +344,29 @@ with 32 threads and sdfz-demo-parser 5.15.1.
   ours 4.5× uncompressed and **0.45× gzipped**.
 
 - With `--jobs 8` the same 100 replays take 43 s of wall time (0.43 s per
-  replay). The whole slice (42,913 replays) would take about 26 h on one core
-  or 5 h with 8 jobs, and about 84 GB of gzipped JSON next to 175 GB of
-  replays.
+  replay) when the output is gzipped. These tables were measured with gzip;
+  see [Compression](#compression) for the zstd output we write now.
+
+### Compression
+
+Parsed replays are written once and read many times, so they are compressed
+with zstd at level 19 (`--zstd-level`, default 19). On 20 parsed 8v8 replays:
+
+| Output        | Size vs gzip | Compress per file | Decompress per file |
+| ------------- | ------------ | ----------------- | ------------------- |
+| gzip level 6  | 100%         | 0.07 s            | 15 ms               |
+| zstd level 9  | 87%          | 0.07 s            | 6 ms                |
+| zstd level 15 | 82%          | 0.47 s            | 8 ms                |
+| zstd level 19 | 69%          | 4.2 s             | 7 ms                |
+
+Long-distance matching with a 128 MB window made no difference at any level.
+
+Re-parsing all 168 local replays at level 19 with `--jobs 8` took 4 min 22 s
+(1.6 s of wall time per replay) and wrote 211 MB, against 308 MB as gzip: 1.25
+MB per replay on average. For the whole slice (42,913 replays) that is about
+54 GB of parsed JSON next to 175 GB of replays, and about 19 h with 8 jobs.
+Use `--zstd-level 9` for quick experiments: as fast as gzip and still 13%
+smaller.
 
 ### Earlier replays
 
