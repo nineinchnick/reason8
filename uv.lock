@@ -1501,6 +1501,7 @@ dependencies = [
     { name = "duckdb" },
     { name = "httpx" },
     { name = "polars" },
+    { name = "pyyaml" },
     { name = "tqdm" },
 ]
 
@@ -1522,6 +1523,7 @@ requires-dist = [
     { name = "duckdb", specifier = ">=2.0.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "polars", specifier = ">=2.1.0" },
+    { name = "pyyaml", specifier = ">=6.0.4" },
     { name = "tqdm", specifier = ">=4.70.1" },
 ]
 
