@@ -146,9 +146,15 @@ with a headless engine and what it costs.
 
 ### Game versions
 
-BAR is rebalanced often, so openings from old versions can be wrong today. The
-dataset follows a version policy, and models record which game version they
-were trained on.
+BAR is rebalanced every few weeks, so openings from old versions could be
+wrong today. Measured on Supreme Isthmus, a year of balance patches moved
+openings less than sampling noise, so the dataset keeps its whole time window
+across patches, records the version and patch era of every game, and models
+record the versions they were trained on and check them when loaded. See
+[`docs/game-versions.md`](docs/game-versions.md) for the patches, the
+measurement and the routine after a patch, and
+[ADR 0012](docs/adr/0012-keep-the-time-window-across-balance-patches.md) for
+the policy.
 
 ## Compute
 

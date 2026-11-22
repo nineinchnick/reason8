@@ -147,8 +147,11 @@ evaluation set.
 199 distinct game versions in total. Only 814 slice games match the engine we
 have locally (`2026.09.03`). If re-simulating replays needs the exact engine
 and game version, most of the slice needs other engines; the build-order PoC
-reads commands straight from the replay and doesn't. How far back to go is the
-version policy's call; `select_matches(since=...)` applies it.
+reads commands straight from the replay and doesn't. How far back to go is
+settled in
+[ADR 0012](adr/0012-keep-the-time-window-across-balance-patches.md): the whole
+window, across balance patches. `select_matches(min_build=...)` cuts at a
+patch if that ever changes ([`game-versions.md`](game-versions.md)).
 
 ## Downloading the replays
 
