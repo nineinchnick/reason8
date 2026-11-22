@@ -201,7 +201,10 @@ game into train, validation and test. See
 [`docs/openings-dataset.md`](docs/openings-dataset.md) for the columns and the
 numbers, and
 [ADR 0017](docs/adr/0017-define-openings-by-time-and-split-games-by-match-id.md)
-for what an opening is and how games are split.
+for what an opening is and how games are split. Counting baselines that
+predict the next build set the bar for every later model:
+[`docs/results.md`](docs/results.md), measured as in
+[ADR 0018](docs/adr/0018-evaluate-next-build-models-on-held-out-games.md).
 
 ## Compute
 
