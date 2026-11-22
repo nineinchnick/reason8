@@ -124,8 +124,9 @@ records **player commands**, not the game state. To know "what the map looked
 like" at minute 7 you have to re-run the replay through the engine. The PoC
 deliberately avoids needing that by working on build orders (which are visible
 directly in the commands). Even then, a command is an intention: builds can be
-cancelled or re-queued. Getting full game state is tracked as a separate issue
-and is needed from milestone 2.
+cancelled or re-queued. Full game state is needed from milestone 2;
+[`docs/state-extraction.md`](docs/state-extraction.md) shows how to recover it
+with a headless engine and what it costs.
 
 ### Game versions
 
@@ -174,6 +175,7 @@ reason8/
   notebooks/     # exploration
   reason8/       # Python package: download, parse, dataset, models
   parser/        # pinned sdfz-demo-parser (fetch.sh), fixture tooling
+  tools/         # scripts; tools/headless runs games and replays headlessly
   ai/            # in-game side (Lua) — later
 ```
 
