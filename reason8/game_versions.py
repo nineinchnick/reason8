@@ -259,6 +259,20 @@ def unit_name_changes(
     return sorted(new - old), sorted(old - new)
 
 
+# The commander of each faction, by the faction's unit name prefix.
+FACTION_COMMANDERS = {"arm": "armcom", "cor": "corcom", "leg": "legcom"}
+
+
+def loaded_factions(unit_definitions: Iterable[str]) -> set[str]:
+    """Unit name prefixes of the factions a game has loaded: those whose commander it has.
+
+    The prefixes of the names alone do not say it: a game without Legion still defines a
+    few Legion helper units (``legnanotcbase``, ``leghaap``, ...).
+    """
+    known = set(unit_definitions)
+    return {prefix for prefix, commander in FACTION_COMMANDERS.items() if commander in known}
+
+
 # About 30 days of releases (builds grow by about 8.6 a day): the retraining interval.
 STALE_BUILDS = 260
 # The span we measured openings over (12 months); nothing is known beyond it.
@@ -319,11 +333,11 @@ def check_game_version(
     refusals: list[str] = []
     if unit_definitions is not None:
         known = {name for name in unit_definitions if name}
-        loaded_factions = {name[:3] for name in known}
+        loaded = loaded_factions(known)
         missing = sorted(
             unit
             for unit in map(current_unit_name, trained.units)
-            if unit not in known and unit[:3] in loaded_factions
+            if unit not in known and (unit[:3] in loaded or unit[:3] not in FACTION_COMMANDERS)
         )
         if missing:
             refusals.append(f"units the model can order are not in this game: {', '.join(missing)}")
