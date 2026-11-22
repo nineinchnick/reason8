@@ -229,4 +229,7 @@ reason8/
 
 ## License
 
-GPL-2.0, same as Beyond All Reason — see [LICENSE](LICENSE).
+GPL-2.0-or-later, the same as Beyond All Reason's code: you can use it under
+version 2 of the GNU General Public License or any later version. The licence
+text is in [LICENSE](LICENSE); see
+[ADR 0016](docs/adr/0016-license-the-project-gpl-2-0-or-later.md).
