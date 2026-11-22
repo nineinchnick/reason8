@@ -28,6 +28,9 @@ one "Superseded by NNNN".
   Accepted
 - [0010. Run locally first, move bulk jobs to the cloud](0010-run-locally-first.md):
   Accepted
+- [0011. Ship the model as generated tables in a BARb variant](0011-ship-the-model-as-tables-in-a-barb-variant.md):
+  Accepted
 - [0012. Keep the time window across balance patches](0012-keep-the-time-window-across-balance-patches.md):
+  Accepted
 - [0013. Download replays in a fixed random order, maps taking turns](0013-download-replays-in-a-fixed-random-order-per-map.md):
   Accepted

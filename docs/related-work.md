@@ -3,7 +3,9 @@
 These notes build on [`barb.md`](barb.md), which explains how stock BARb
 works; read that first.
 
-Everything here comes from **reading** these sources. Nothing was run.
+Everything here comes from **reading** these sources. Nothing was run for this
+document; two of Apex's observations about BARb were tried later and are
+marked below.
 
 - **Apex:** [apexearth/bar-ai](https://github.com/apexearth/bar-ai) at commit
   [`927ff16c`][head] (2026-11-18, release v0.5.17). 3,349 commits since
@@ -171,7 +173,8 @@ These come from Apex's notes and affect hooks 1–4 in `barb.md`.
    ([`tools/deploy_ai.py`][deploy], header and the "archive-free play"
    comment). *This answers the open question in `barb.md` ("confirm a custom
    profile loads, and how") on paper, and it needs no C++ build: the stock
-   library can be reused. We still have to try it.*
+   library can be reused. We tried it and it works:
+   [`in-game.md`](in-game.md).*
 2. **BARb has hidden timers.** `behaviour.json` can give a unit a `since`,
    `cooldown` or `limit`. Apex found converters banned until 300 seconds and
    storage capped at one ([`docs/traps.md`][traps], S60). *A learned opening
@@ -179,7 +182,9 @@ These come from Apex's notes and affect hooks 1–4 in `barb.md`.
 3. **A script error fails silently.** If the AngelScript does not compile, the
    match still runs with near-stock behaviour (S3), and scripts and JSON are
    only read at start (S51). *Our PoC bot must check the log for script errors
-   before trusting any result.*
+   before trusting any result. When we tried it on stock BARb's library the
+   outcome was worse than near-stock: the AI was removed and its team gave no
+   orders at all, while the game ran on ([`in-game.md`](in-game.md)).*
 
 ## What its version history says
 
@@ -526,7 +531,8 @@ v2 or later".
 **Installing a custom AI**
 : *From Apex:* Own short name, copy of the stock BARb folder, config and
   script next to the library
-: *Reason8:* Try the same for the PoC bot
+: *Reason8:* Done the same way, with our own build tool
+  ([ADR 0011](adr/0011-ship-the-model-as-tables-in-a-barb-variant.md))
 : *Why:* No C++ build, works in hosted games
 
 **Replay state extraction**

@@ -177,6 +177,8 @@ costs and thresholds will live in `docs/compute.md`.
   model can hook in.
 - See [`docs/related-work.md`](docs/related-work.md) for what Apex changed in
   BARb, what it measured, and what we reuse or do differently.
+- See [`docs/in-game.md`](docs/in-game.md) for how a model's decisions get
+  into a running game, and how to build and run the Reason8 AI headlessly.
 
 ## Being a good citizen
 
@@ -199,8 +201,9 @@ reason8/
   reason8/       # Python package: download, parse, dataset, models
   docs/          # research notes; decisions in docs/adr/
   parser/        # pinned sdfz-demo-parser (fetch.sh), fixture tooling
-  tools/         # scripts; tools/headless runs games and replays headlessly
-  ai/            # in-game side (Lua) — later
+  tools/         # scripts; tools/headless runs games and replays headlessly,
+                 #   tools/variant builds and checks the in-game AI
+  ai/            # in-game side: ai/Reason8, a BARb variant (AngelScript)
 ```
 
 ## License
