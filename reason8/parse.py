@@ -9,6 +9,7 @@ Usage::
 Each replay becomes one gzipped JSON document (see docs/replay-format.md).
 A replay that fails to parse gets an entry with the error in `<out>/_index.jsonl`
 instead of stopping the run. Already parsed replays are skipped unless `--force`.
+Default paths are under the data directory (``REASON8_DATA_DIR``, or ``data/`` in the repo).
 """
 
 from __future__ import annotations
@@ -26,15 +27,10 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+from reason8.match_dumps import data_dir
 from reason8.sdfz import RawCommandPacket, read_command_packets_file
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 PARSER_VERSION = "5.15.1"
-DEFAULT_PARSER = (
-    REPO_ROOT / "data" / "tools" / f"sdfz-demo-parser-{PARSER_VERSION}" / "sdfz-demo-parser"
-)
-DEFAULT_INPUT = REPO_ROOT / "data" / "replays"
-DEFAULT_OUTPUT = REPO_ROOT / "data" / "parsed"
 FORMAT = "reason8.replay/1"
 GAME_SPEED = 30  # sim frames per second
 INDEX_NAME = "_index.jsonl"
@@ -491,6 +487,11 @@ def compact(parsed: dict[str, Any], raw: list[RawCommandPacket], source: dict[st
     }
 
 
+def default_parser() -> Path:
+    """The pinned parser binary that ``parser/fetch.sh`` downloads into the data directory."""
+    return data_dir() / "tools" / f"sdfz-demo-parser-{PARSER_VERSION}" / "sdfz-demo-parser"
+
+
 def parse_replay(parser: Path, replay: Path) -> tuple[dict[str, Any], int]:
     """Parse one replay. Returns the compact document and the size of the parser's JSON."""
     parser_output = run_parser(parser, replay)
@@ -607,10 +608,10 @@ def main(argv: list[str] | None = None) -> int:
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter
     )
     argument_parser.add_argument(
-        "inputs", nargs="*", type=Path, help=f"files or dirs (default {DEFAULT_INPUT})"
+        "inputs", nargs="*", type=Path, help=f"files or dirs (default {data_dir() / 'replays'})"
     )
-    argument_parser.add_argument("--out", type=Path, default=DEFAULT_OUTPUT)
-    argument_parser.add_argument("--parser", type=Path, default=DEFAULT_PARSER)
+    argument_parser.add_argument("--out", type=Path, default=data_dir() / "parsed")
+    argument_parser.add_argument("--parser", type=Path, default=default_parser())
     argument_parser.add_argument("--jobs", type=int, default=min(4, os.cpu_count() or 1))
     argument_parser.add_argument(
         "--force", action="store_true", help="re-parse replays already done"
@@ -620,7 +621,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.parser.exists():
         print(f"parser not found at {args.parser}; run parser/fetch.sh first", file=sys.stderr)
         return 2
-    replays = find_replays(args.inputs or [DEFAULT_INPUT])
+    replays = find_replays(args.inputs or [data_dir() / "replays"])
     args.out.mkdir(parents=True, exist_ok=True)
     index = read_index(args.out)
     replays_to_parse = [
