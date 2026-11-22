@@ -1,0 +1,21 @@
+# Data & artifacts
+data/
+*.sdfz
+*.parquet
+*.csv.gz
+checkpoints/
+runs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.ipynb_checkpoints/
+
+# Node
+node_modules/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
