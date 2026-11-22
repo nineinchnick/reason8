@@ -18,6 +18,8 @@ from urllib.parse import quote
 import httpx
 import polars as pl
 
+from reason8.game_versions import VERSION_PATTERN
+
 DUMPS_URL = "https://data-marts.beyondallreason.dev/"
 DUMPS = ("matches", "match_players", "players", "player_skill_snapshot")
 REPLAY_URL = "https://storage.uk.cloud.ovh.net/v1/AUTH_10286efc0d334efd917d476d7183232e/BAR/demos/"
@@ -108,6 +110,7 @@ def select_matches(
     since: datetime | None = None,
     until: datetime | None = None,
     window: timedelta | None = timedelta(days=182),
+    min_build: int | None = None,
     min_avg_skill: float | str | None = "median",
     early_leave_s: int | None = 600,
     min_duration_s: int | None = 600,
@@ -133,6 +136,10 @@ def select_matches(
             ``matches``, so the default window moves with the dump. Pass explicit ``since`` and
             ``until`` to make a selection reproducible across dump rebuilds.
         window: length of the time window used when ``since`` is not given.
+        min_build: oldest game build to keep (see `reason8.game_versions`), to cut the
+            selection at a balance patch. Old versions stay in use for a few days after a
+            release, so a date does not do this. Games whose version is not a release
+            (missing, or a pull-request build) are dropped. ``None`` keeps every version.
         min_avg_skill: minimum lobby average ``old_skill`` (OpenSkill mu before the match).
             ``"median"`` uses, per map, the median lobby average of the games passing all other
             filters (skill levels differ between maps);
@@ -157,6 +164,9 @@ def select_matches(
     filters = [pl.col("start_time") < until]
     if since is not None:
         filters.append(pl.col("start_time") >= since)
+    if min_build is not None:
+        build = pl.col("game_version").str.extract(VERSION_PATTERN.pattern, 1).cast(pl.Int64)
+        filters.append(build >= min_build)
     if maps is not None:
         filters.append(pl.col("map").is_in(list(maps)))
     if game_type is not None:
