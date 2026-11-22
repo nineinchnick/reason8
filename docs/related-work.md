@@ -503,9 +503,10 @@ are not measured here.**
 - **The Python tools** (`imitate.py`, `replay_extract.py`, the match harness)
   have no licence line at all.
 
-**Our rule:** read for ideas, copy no code, and write our own replay widget
-and tools. If the author adds a licence we can revisit this. Reason8 is
-GPL-2.0, which is compatible with "GPL v2 or later".
+**Our rule** ([ADR 0008](adr/0008-copy-no-code-from-apex.md)): read for ideas,
+copy no code, and write our own replay widget and tools. If the author adds a
+licence we can revisit this. Reason8 is GPL-2.0, which is compatible with "GPL
+v2 or later".
 
 ## What we reuse, what we do differently
 
