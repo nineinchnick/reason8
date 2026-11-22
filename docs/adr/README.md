@@ -36,5 +36,7 @@ one "Superseded by NNNN".
   Accepted
 - [0014. Keep the data in a private S3 bucket](0014-keep-the-data-in-a-private-s3-bucket.md):
   Accepted
+- [0015. Take positions from BAR's map metadata](0015-take-positions-from-the-map-metadata.md):
+  Accepted
 - [0016. License the project GPL-2.0-or-later](0016-license-the-project-gpl-2-0-or-later.md):
   Accepted

@@ -156,22 +156,22 @@ and the faction is still behind a lobby option.
 ### Lobby options that change balance
 
 Balance also depends on lobby options, and ranked lobbies switch them on. Of
-the 94 sampled ranked games (below), **only 27 had none of them on**:
+the 142 sampled ranked games (below), **only 38 had none of them on**:
 
-| option                          | games on, of 94 | what it does                             |
-| ------------------------------- | --------------- | ---------------------------------------- |
-| `naval_balance_tweaks`          | 55              | changed naval units and defences         |
-| `community_balance_patch`       | 18              | community changes to about ten units     |
-| `shieldsrework`                 | 16              | the shield rework before it became base  |
-| `proposed_unit_reworks`         | 13              | unit reworks proposed for the base game  |
-| `experimentallegionfaction`     | 11              | Legion can be picked                     |
-| `tweakdefs*`, `tweakunits*`     | 0               | custom unit stats typed in by the host   |
-| `multiplier_*` (anything but 1) | 0               | global multipliers (build power, income) |
+| option                          | games on, of 142 | what it does                             |
+| ------------------------------- | ---------------- | ---------------------------------------- |
+| `naval_balance_tweaks`          | 90               | changed naval units and defences         |
+| `community_balance_patch`       | 31               | community changes to about ten units     |
+| `shieldsrework`                 | 16               | the shield rework before it became base  |
+| `experimentallegionfaction`     | 15               | Legion can be picked                     |
+| `proposed_unit_reworks`         | 13               | unit reworks proposed for the base game  |
+| `tweakdefs*`, `tweakunits*`     | 1                | custom unit stats typed in by the host   |
+| `multiplier_*` (anything but 1) | 0                | global multipliers (build power, income) |
 
 Options come and go with releases: `community_balance_patch` was added in
 build 29214
 ([pull request 6550](https://github.com/beyond-all-reason/Beyond-All-Reason/pull/6550))
-and is last seen in the sample in build 30975; `shieldsrework` ended when the
+and is last seen in the sample in build 31001; `shieldsrework` ended when the
 shield rework became part of the base game in build 29251. The match dumps
 don't have lobby options; the parsed replay does (`modoptions`).
 `reason8.game_versions.balance_options()` returns the ones that are on.
@@ -180,15 +180,14 @@ don't have lobby options; the parsed replay does (`modoptions`).
 
 ### Sample
 
-94 ranked 8v8 games on Supreme Isthmus v2.1 that pass the slice filters
-([`dataset.md`](dataset.md), lobby average skill ≥ 22.1): 1,504 openings.
+142 ranked 8v8 games on Supreme Isthmus v2.1 that pass the slice filters
+([`dataset.md`](dataset.md), lobby average skill ≥ 22.1): 2,272 openings.
 
 - 60 games drawn at random for this measurement, 20 from each of three ranges
   of builds: 29034–29213 (December 2025, before Season 3), 30299–30627 (June
   and July 2026, after the May patch) and from 31720 (since 2026-10-23).
-- The 34 other slice-quality Isthmus games already parsed locally, most of
-  them from the first 100 replays downloaded for the slice, spread over its
-  182 days.
+- The 82 other slice-quality Isthmus games parsed locally, most of them from
+  the first 250 replays downloaded for the slice, spread over its 182 days.
 
 Grouped by the patches that change openings, merging the last two so the
 newest group is not tiny:
@@ -196,12 +195,17 @@ newest group is not tiny:
 | group              | builds       | games | openings |
 | ------------------ | ------------ | ----- | -------- |
 | before Season 3    | 29034..29240 | 20    | 320      |
-| May patch          | 30236..30754 | 32    | 512      |
-| July patch         | 30755..31074 | 4     | 64       |
-| since August patch | 31075..      | 38    | 608      |
+| May patch          | 30236..30754 | 49    | 784      |
+| July patch         | 30755..31074 | 11    | 176      |
+| since August patch | 31075..      | 62    | 992      |
 
 No game of the Season 3 era itself (January to May 2026) is in the sample; the
 comparison of "before Season 3" with later groups spans it.
+
+[ADR 0012](adr/0012-keep-the-time-window-across-balance-patches.md) quotes the
+first run of this measurement, on 94 of these games and with start spots found
+by clustering. The numbers here are from the re-run on all 142, with the start
+positions of the map metadata; the conclusions are the same.
 
 ### Method
 
@@ -218,11 +222,13 @@ opening shape
 first 6 orders
 : the exact first six unit names
 
-start spot
-: players choose their start point freely, but they choose the same eight
-  places per side. `assign_positions()` lays the two sides over each other
-  (the map is point-symmetric) and numbers the eight densest places from the
-  middle of the map outwards. 1,472 of 1,504 openings got a spot.
+start position
+: the recommended start position of the map metadata the player started on
+  (`reason8.positions`,
+  [ADR 0015](adr/0015-take-positions-from-the-map-metadata.md),
+  [`maps/supreme-isthmus.md`](maps/supreme-isthmus.md)): sixteen on this map,
+  `P1` to `P8` for one side and `P9` to `P16` for the other. 2,216 of the
+  2,272 openings are on one.
 
 Two measures:
 
@@ -244,109 +250,129 @@ Two measures:
 
 |                     | before Season 3 | May patch | July patch | since August patch |
 | ------------------- | --------------- | --------- | ---------- | ------------------ |
-| openings            | 320             | 512       | 64         | 608                |
-| bot lab             | 64%             | 67%       | 67%        | 67%                |
-| aircraft plant      | 12%             | 13%       | 12%        | 12%                |
-| shipyard            | 12%             | 9%        | 12%        | 10%                |
-| vehicle plant       | 10%             | 7%        | 6%         | 7%                 |
-| hovercraft platform | 2%              | 4%        | 2%         | 3%                 |
+| openings            | 320             | 784       | 176        | 992                |
+| bot lab             | 64%             | 67%       | 69%        | 67%                |
+| aircraft plant      | 12%             | 13%       | 12%        | 13%                |
+| shipyard            | 12%             | 9%        | 10%        | 10%                |
+| vehicle plant       | 10%             | 8%        | 7%         | 7%                 |
+| hovercraft platform | 2%              | 4%        | 1%         | 2%                 |
 
-The most common opening shapes (`mex win lab win` 8% → 11%,
+The most common opening shapes (`mex win lab win` 8% → 10%,
 `mex win lab rectr` 8% → 5%, `mex win mex win` 8% → 4%) move by a few points,
-within what 300–600 openings can show. Armada opens with a bot lab in 77–81%
-of openings in every group, Cortex in 47–54% (aircraft plant 24–25%).
+within what 300–1,000 openings can show. Armada opens with a bot lab in 77–81%
+of openings in every group, Cortex in 47–55% (aircraft plant 24–25%).
 
-**The start spot decides the opening, the patch does not.** Share of the most
-common first factory per spot (spot 0 is nearest the middle):
+**The start position decides the opening, the patch does not.** Share of the
+most common first factory per position (the July group, with 10 to 12 openings
+per position, is left out):
 
-| spot | first factory  | before Season 3 | May patch | since August patch |
-| ---- | -------------- | --------------- | --------- | ------------------ |
-| 0    | bot lab        | 79% of 39       | 87% of 63 | 92% of 76          |
-| 1    | bot lab        | 69% of 42       | 80% of 64 | 71% of 72          |
-| 2    | bot lab        | 95% of 39       | 91% of 64 | 96% of 78          |
-| 3    | bot lab        | 68% of 41       | 81% of 63 | 82% of 77          |
-| 4    | shipyard       | 77% of 39       | 70% of 64 | 75% of 71          |
-| 5    | bot lab        | 85% of 39       | 88% of 60 | 88% of 68          |
-| 6    | bot lab        | 100% of 39      | 98% of 63 | 97% of 72          |
-| 7    | aircraft plant | 98% of 40       | 97% of 63 | 99% of 73          |
+| position | first factory  | before Season 3 | May patch  | since August patch |
+| -------- | -------------- | --------------- | ---------- | ------------------ |
+| P1       | bot lab        | 90% of 20       | 89% of 47  | 88% of 56          |
+| P2       | bot lab        | 100% of 19      | 100% of 46 | 98% of 58          |
+| P3       | aircraft plant | 95% of 20       | 98% of 49  | 98% of 61          |
+| P4       | bot lab        | 70% of 20       | 69% of 48  | 71% of 65          |
+| P5       | bot lab        | 75% of 20       | 89% of 47  | 89% of 61          |
+| P6       | bot lab        | 65% of 20       | 82% of 45  | 75% of 59          |
+| P7       | bot lab        | 95% of 20       | 88% of 50  | 92% of 65          |
+| P8       | shipyard       | 75% of 20       | 71% of 48  | 81% of 57          |
+| P9       | bot lab        | 79% of 19       | 89% of 46  | 92% of 61          |
+| P10      | bot lab        | 100% of 20      | 98% of 48  | 94% of 62          |
+| P11      | aircraft plant | 100% of 20      | 98% of 46  | 95% of 61          |
+| P12      | bot lab        | 65% of 20       | 81% of 48  | 88% of 59          |
+| P13      | bot lab        | 84% of 19       | 87% of 47  | 95% of 59          |
+| P14      | bot lab        | 73% of 22       | 77% of 48  | 69% of 61          |
+| P15      | bot lab        | 95% of 19       | 92% of 49  | 97% of 62          |
+| P16      | shipyard       | 79% of 19       | 69% of 48  | 76% of 58          |
 
-Between two start spots the first-factory distance is 0.26 (median; 0.06 to
-0.98). Between patch groups it is 0.04 to 0.08, which is the noise floor:
+Between two start positions the first-factory distance is 0.24 (median; 0.01
+to 0.98). Between patch groups it is 0.04 to 0.08, which is the noise floor:
 
-| comparison                       | games    | feature                | distance | shuffled mean | shuffled p95 | p    |
-| -------------------------------- | -------- | ---------------------- | -------- | ------------- | ------------ | ---- |
-| before Season 3 vs since August  | 20 vs 38 | first factory          | 0.084    | 0.076         | 0.110        | 0.32 |
-| before Season 3 vs since August  | 20 vs 38 | first factory per spot | 0.160    | 0.156         | 0.189        | 0.38 |
-| before Season 3 vs since August  | 20 vs 38 | opening shape          | 0.498    | 0.469         | 0.498        | 0.05 |
-| before Season 3 vs since August  | 20 vs 38 | first 6 orders         | 0.422    | 0.405         | 0.433        | 0.15 |
-| May patch vs since August        | 32 vs 38 | first factory          | 0.043    | 0.065         | 0.092        | 0.94 |
-| May patch vs since August        | 32 vs 38 | first factory per spot | 0.121    | 0.129         | 0.156        | 0.66 |
-| May patch vs since August        | 32 vs 38 | opening shape          | 0.450    | 0.431         | 0.456        | 0.09 |
-| May patch vs since August        | 32 vs 38 | first 6 orders         | 0.378    | 0.372         | 0.395        | 0.34 |
-| builds 31075–31719 vs from 31720 | 15 vs 23 | first factory          | 0.073    | 0.087         | 0.123        | 0.77 |
-| builds 31075–31719 vs from 31720 | 15 vs 23 | opening shape          | 0.495    | 0.507         | 0.538        | 0.72 |
+| comparison                       | games    | feature                    | distance | shuffled mean | shuffled p95 | p    |
+| -------------------------------- | -------- | -------------------------- | -------- | ------------- | ------------ | ---- |
+| before Season 3 vs since August  | 20 vs 62 | first factory              | 0.078    | 0.069         | 0.099        | 0.26 |
+| before Season 3 vs since August  | 20 vs 62 | first factory per position | 0.182    | 0.185         | 0.211        | 0.56 |
+| before Season 3 vs since August  | 20 vs 62 | opening shape              | 0.485    | 0.453         | 0.479        | 0.03 |
+| before Season 3 vs since August  | 20 vs 62 | first 6 orders             | 0.419    | 0.397         | 0.421        | 0.07 |
+| May patch vs since August        | 49 vs 62 | first factory              | 0.043    | 0.052         | 0.075        | 0.75 |
+| May patch vs since August        | 49 vs 62 | first factory per position | 0.157    | 0.139         | 0.161        | 0.08 |
+| May patch vs since August        | 49 vs 62 | opening shape              | 0.385    | 0.377         | 0.398        | 0.25 |
+| May patch vs since August        | 49 vs 62 | first 6 orders             | 0.330    | 0.338         | 0.358        | 0.77 |
+| July patch vs since August       | 11 vs 62 | first factory              | 0.065    | 0.086         | 0.126        | 0.82 |
+| July patch vs since August       | 11 vs 62 | first factory per position | 0.254    | 0.221         | 0.255        | 0.06 |
+| July patch vs since August       | 11 vs 62 | opening shape              | 0.514    | 0.518         | 0.554        | 0.55 |
+| July patch vs since August       | 11 vs 62 | first 6 orders             | 0.447    | 0.429         | 0.467        | 0.17 |
+| builds 31075–31719 vs from 31720 | 31 vs 31 | first factory              | 0.069    | 0.065         | 0.093        | 0.41 |
+| builds 31075–31719 vs from 31720 | 31 vs 31 | first factory per position | 0.183    | 0.172         | 0.202        | 0.25 |
+| builds 31075–31719 vs from 31720 | 31 vs 31 | opening shape              | 0.421    | 0.427         | 0.456        | 0.64 |
+| builds 31075–31719 vs from 31720 | 31 vs 31 | first 6 orders             | 0.379    | 0.381         | 0.403        | 0.57 |
 
-None of the distances stands clear of its noise floor. Opening shape comes
-closest (p 0.05 and 0.09 against the two older groups, 0.72 inside the newest
-one), which fits a slow drift in the finer order of steps, but with ten tests
-in the table one p of 0.05 is expected by chance.
+None of the distances stands clear of its noise floor. Opening shape between
+the oldest and the newest group comes closest (p 0.03, and 0.64 inside the
+newest group), which fits a slow drift in the finer order of steps, but with
+sixteen tests in the table one p of 0.05 or less is expected by chance.
 
-**Lobby options show no effect either.** `naval_balance_tweaks` on (55 games)
-against off (39): first factory 0.048 (noise 0.057), opening shape 0.401
-(noise 0.405). `community_balance_patch`, `proposed_unit_reworks` and
-`shieldsrework`: every p above 0.05, with 13–18 games on one side (the lowest
-is `shieldsrework` on first factory, 0.055, and that option exists only in the
-oldest group). Legion-enabled games do differ (first factory 0.29, p 0.001),
-because they contain Legion players, whose units are a different vocabulary.
+**Lobby options show no effect either.** `naval_balance_tweaks` on (90 games)
+against off (52): first factory 0.049 (noise 0.047), opening shape 0.363
+(noise 0.364). `community_balance_patch`, `proposed_unit_reworks` and
+`shieldsrework`: every p above 0.05, with 13–31 games on one side (the lowest
+are `shieldsrework` on first factory, 0.060, and `proposed_unit_reworks` on
+the first 6 orders, 0.061; both options exist only in the oldest group).
+Legion-enabled games do differ (first factory 0.28, p 0.001), because they
+contain Legion players, whose units are a different vocabulary.
 
-**An old model predicts today's openings almost as well as a new one**, and
-old games help more than they hurt:
+**An old model predicts today's openings as well as a new one**, and old games
+help more than they hurt:
 
 | trained on      | games | accuracy on "since August patch" | equally many newest games | difference (95%)        |
 | --------------- | ----- | -------------------------------- | ------------------------- | ----------------------- |
-| before Season 3 | 20    | 0.568                            | 0.571                     | −0.003 (−0.009..+0.004) |
-| May patch       | 32    | 0.574                            | 0.580                     | −0.006 (−0.011..−0.001) |
+| before Season 3 | 20    | 0.568                            | 0.564                     | +0.003 (−0.003..+0.013) |
+| May patch       | 49    | 0.580                            | 0.580                     | +0.000 (−0.004..+0.004) |
+| July patch      | 11    | 0.555                            | 0.551                     | +0.004 (−0.004..+0.014) |
 
 | training data for "since August patch" | games | accuracy | difference (95%)        |
 | -------------------------------------- | ----- | -------- | ----------------------- |
-| since August patch only                | 37    | 0.582    |                         |
-| + July patch                           | 41    | 0.582    | +0.000 (−0.001..+0.002) |
-| + May patch                            | 73    | 0.589    | +0.007 (+0.003..+0.010) |
-| + before Season 3                      | 93    | 0.591    | +0.009 (+0.005..+0.014) |
+| since August patch only                | 61    | 0.587    |                         |
+| + July patch                           | 72    | 0.586    | −0.001 (−0.003..+0.002) |
+| + May patch                            | 121   | 0.593    | +0.007 (+0.004..+0.010) |
+| + before Season 3                      | 141   | 0.593    | +0.006 (+0.003..+0.009) |
 
-Games from before a patch cost at most about one point of accuracy compared
-with the same number of current games; adding them to the current games gains
-about one point. More games is what the model is short of:
+Games from before a patch cost nothing that can be measured compared with the
+same number of current games (the differences are within half a point of zero,
+their intervals within a point and a half); adding them to the current games
+gains about two thirds of a point. More games is what the model is short of:
 
 | training games (all groups pooled) | openings | accuracy |
 | ---------------------------------- | -------- | -------- |
-| 1                                  | 16       | 0.476    |
+| 1                                  | 16       | 0.472    |
+| 2                                  | 32       | 0.502    |
 | 5                                  | 80       | 0.533    |
 | 10                                 | 160      | 0.550    |
-| 20                                 | 320      | 0.568    |
+| 20                                 | 320      | 0.565    |
 | 40                                 | 640      | 0.579    |
-| 80                                 | 1,280    | 0.589    |
-| 93                                 | 1,488    | 0.590    |
+| 80                                 | 1,280    | 0.587    |
+| 141                                | 2,256    | 0.592    |
 
 ### Limits
 
-- **Small sample, one map.** 94 games; groups of 20 to 38. A shift in
-  first-factory shares below a distance of about 0.10 (the shuffled 95th
-  percentile) would not be seen, nor would a shift of under a point of
-  accuracy. Per start spot there are 39 to 78 openings per group.
+- **Small sample, one map.** 142 games; groups of 11 to 62. A shift in
+  first-factory shares below a distance of about 0.08 to 0.10 (the shuffled
+  95th percentile) would not be seen, nor would a shift of under a point of
+  accuracy. Per start position there are 19 to 65 openings per group, and 10
+  to 12 in the July group.
 - **Time and patch are not separated.** "Before Season 3" differs from the
   newest group by ten months and by four patches that change openings. Lobby
   options are tied to time too: `shieldsrework` exists only in the oldest
   group.
-- **The Season 3 era itself is not sampled**, and the July group has 4 games.
+- **The Season 3 era itself is not sampled**, and the July group has 11 games.
 - **Orders, not builds.** We see what was ordered and in which order. A patch
   that makes the same opening finish sooner is invisible here.
 - **A frequency model on little data.** The accuracy curve is still rising at
-  93 games, so more data of any age helps. With thousands of games the curve
+  141 games, so more data of any age helps. With thousands of games the curve
   flattens and the small cost of old games may then outweigh the gain. Repeat
   the measurement on the full dataset: `python -m reason8.opening_shift` reads
   whatever is parsed.
-- **Legion** has 45 openings in the sample: nothing can be said about it.
+- **Legion** has 62 openings in the sample: nothing can be said about it.
 - "Changes openings" in the patch list is a reading of patch notes.
 
 ## Unit names across versions
@@ -393,8 +419,8 @@ patch (Supreme Isthmus):
 (The slice counts differ slightly from [`dataset.md`](dataset.md), which takes
 the median skill of its own window.) Cutting at the last patch that changes
 openings keeps 30% of the Isthmus slice and 23% of Rosetta. Isthmus and
-Glitters each regain about 100 games a day (1,600 openings, 200 per start
-spot), Rosetta 2 to 4.
+Glitters each regain about 100 games a day (1,600 openings, 100 per start
+position), Rosetta 2 to 4.
 
 ## Routine after a patch
 
@@ -412,20 +438,20 @@ The decisions behind this routine are in
 3. **Wait three days, then measure.** By then Isthmus has 320 to 560 new
    slice-quality games (5,000 to 9,000 openings). Download and parse them and
    compare the current model's next-unit accuracy on games after the patch
-   with its accuracy on held-out games from before it. On 38 test games the
-   interval of such a difference was ±0.6 points; on 300 it should be about a
-   third of that.
+   with its accuracy on held-out games from before it. On 62 test games the
+   interval of such a difference was ±0.4 to ±0.9 points; on 300 it should be
+   about half of that.
 4. **If accuracy on the new games is lower by 2 points or more** (interval
    clear of zero), the patch moved openings. Keep the old model in use (it
    warns, see below), and retrain with `select_matches(min_build=<patch>)`
-   once a week of games is in: about 800 to 1,100 games per big map, 1,600 to
-   2,200 openings per start spot. Rosetta gets 12 to 71 games in a week, so it
+   once a week of games is in: about 800 to 1,100 games per big map, as many
+   openings per start position. Rosetta gets 12 to 71 games in a week, so it
    keeps its older games and gets the patch era as a feature instead.
 5. **Otherwise retrain on schedule.** Rebuild the dataset on the moved 182-day
    window and retrain once a month, whether or not there was a patch. This is
    what happened across every patch measured here.
 
-The 2-point threshold is a first choice, about twice what a year of patches
+The 2-point threshold is a first choice, well above anything a year of patches
 cost in the measurement above; revise it when the first real model exists.
 
 ## The version a model was trained on
