@@ -667,7 +667,7 @@ def load_sequences(out_dir: Path, splits: Sequence[str] | None = None) -> pl.Dat
         .group_by("match_id", "player_slot", maintain_order=True)
         .agg(
             pl.col("split", "map", "faction", "position", "role", "on_spot", "skill").first(),
-            pl.col("opening_era").first(),
+            pl.col("opening_era", "build").first(),
             pl.col("unit").alias("units"),
             pl.col("repeat").alias("repeats"),
             pl.col("frame").alias("frames"),
