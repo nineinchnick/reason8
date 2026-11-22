@@ -176,6 +176,7 @@ reason8/
   data/          # local cache — git-ignored
   notebooks/     # exploration
   reason8/       # Python package: download, parse, dataset, models
+  docs/          # research notes; decisions in docs/adr/
   parser/        # pinned sdfz-demo-parser (fetch.sh), fixture tooling
   tools/         # scripts; tools/headless runs games and replays headlessly
   ai/            # in-game side (Lua) — later

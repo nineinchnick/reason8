@@ -57,6 +57,8 @@ Columns that matter (some differ from the issue's list):
 
 ## The first slice
 
+The slice is recorded as [ADR 0006](adr/0006-first-training-slice.md).
+
 Defaults of `reason8.match_dumps.select_matches()`:
 
 maps

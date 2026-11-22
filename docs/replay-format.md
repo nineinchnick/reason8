@@ -4,6 +4,9 @@ How we turn BAR replays (`.sdfz`) into JSON, and the parts of that JSON we
 rely on. Code: `parser/fetch.sh`, `reason8/parse.py` (writer),
 `reason8/replay.py` (reader).
 
+Why we read commands instead of re-simulating for openings:
+[ADR 0007](adr/0007-read-build-orders-from-replay-commands.md).
+
 ## Pipeline
 
 ```sh

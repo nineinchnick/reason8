@@ -14,3 +14,17 @@ one "Superseded by NNNN".
   Accepted
 - [0002. Recover game state by re-running replays headlessly](0002-recover-game-state-by-re-running-replays.md):
   Accepted
+- [0003. Learn from human replays by imitation](0003-learn-from-human-replays-by-imitation.md):
+  Accepted
+- [0004. Build on BARb and replace its decisions layer by layer](0004-build-on-barb-and-replace-its-decisions-layer-by-layer.md):
+  Accepted
+- [0005. Start with team-game openings per start position](0005-start-with-team-game-openings.md):
+  Accepted
+- [0006. First training slice](0006-first-training-slice.md): Accepted
+- [0007. Read build orders from replay commands](0007-read-build-orders-from-replay-commands.md):
+  Accepted
+- [0008. Copy no code from Apex](0008-copy-no-code-from-apex.md): Accepted
+- [0009. Play under human-like limits](0009-play-under-human-like-limits.md):
+  Accepted
+- [0010. Run locally first, move bulk jobs to the cloud](0010-run-locally-first.md):
+  Accepted
