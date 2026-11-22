@@ -12,6 +12,7 @@ from reason8.game_versions import (
     check_game_version,
     current_unit_name,
     ensure_compatible,
+    loaded_factions,
     opening_era,
     opening_patches_between,
     playable_units,
@@ -106,8 +107,10 @@ def test_trained_on_round_trip(trained):
 def test_check_game_version_ok(trained):
     assert check_game_version(trained, version(31650)).level == "ok"
     assert check_game_version(trained, version(31900 + STALE_BUILDS)).level == "ok"
-    # Legion is not loaded in this game, so the model's Legion units are not missed
-    assert check_game_version(trained, version(31900), ["", "armmex", "armlab"]).level == "ok"
+    # Legion is not loaded in this game, so the model's Legion units are not missed, even
+    # though the game defines a Legion helper unit
+    game_units = ["", "armcom", "armmex", "armlab", "legnanotcbase"]
+    assert check_game_version(trained, version(31900), game_units).level == "ok"
 
 
 def test_check_game_version_warns(trained):
@@ -121,7 +124,8 @@ def test_check_game_version_warns(trained):
 
 
 def test_check_game_version_refuses(trained):
-    result = check_game_version(trained, version(31900), ["", "armmex", "legmex"])
+    game_units = ["", "armcom", "legcom", "armmex", "legmex"]
+    result = check_game_version(trained, version(31900), game_units)
     assert result.level == "refuse"
     assert "armlab" in result.reasons[0]
     assert check_game_version(trained, version(31900 + MEASURED_BUILDS + 1)).level == "refuse"
@@ -133,4 +137,10 @@ def test_ensure_compatible(trained):
     with pytest.warns(UserWarning, match="retrain"):
         ensure_compatible(trained, version(31900 + STALE_BUILDS + 1))
     with pytest.raises(IncompatibleGameVersion, match="armlab"):
-        ensure_compatible(trained, version(31900), ["armmex"])
+        ensure_compatible(trained, version(31900), ["armcom", "armmex"])
+
+
+def test_loaded_factions():
+    assert loaded_factions(["", "armcom", "corcom", "armmex", "legnanotcbase"]) == {"arm", "cor"}
+    assert loaded_factions(["armcom", "corcom", "legcom"]) == {"arm", "cor", "leg"}
+    assert loaded_factions([]) == set()
