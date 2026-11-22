@@ -591,16 +591,28 @@ def summarize(entries: list[dict[str, Any]]) -> str:
             f"parser JSON {mean('parser_json_bytes') / 1e6:.1f} MB, "
             f"ours {mean('json_bytes') / 1e6:.2f} MB ({mean('gz_bytes') / 1e6:.2f} MB gzipped)"
         )
-    by_version: Counter[tuple[str, str]] = Counter()
-    failed: Counter[tuple[str, str]] = Counter()
-    for entry in entries:
-        version = (str(entry.get("game")), str(entry.get("engine")))
-        by_version[version] += 1
-        if entry["status"] != "ok":
-            failed[version] += 1
-    for (game, engine), replay_count in sorted(by_version.items()):
-        lines.append(f"  {game} / engine {engine}: {failed[(game, engine)]}/{replay_count} failed")
+    for title, fields in (
+        ("failures per game version", ("game",)),
+        ("failures per engine", ("engine",)),
+    ):
+        lines.append(title + ":")
+        for version, (failed_count, replay_count) in failures_by(entries, fields).items():
+            lines.append(f"  {' / '.join(version)}: {failed_count}/{replay_count} failed")
     return "\n".join(lines)
+
+
+def failures_by(
+    entries: list[dict[str, Any]], fields: tuple[str, ...]
+) -> dict[tuple[str, ...], tuple[int, int]]:
+    """``(failed, total)`` replay counts per value of ``fields`` (e.g. ``("engine",)``)."""
+    totals: Counter[tuple[str, ...]] = Counter()
+    failed: Counter[tuple[str, ...]] = Counter()
+    for entry in entries:
+        key = tuple(str(entry.get(field_name)) for field_name in fields)
+        totals[key] += 1
+        if entry["status"] != "ok":
+            failed[key] += 1
+    return {key: (failed[key], totals[key]) for key in sorted(totals)}
 
 
 def main(argv: list[str] | None = None) -> int:
