@@ -152,6 +152,8 @@ costs and thresholds will live in `docs/compute.md`.
   replays, then offline RL; also the main lesson on human-like limits.
 - See [`docs/barb.md`](docs/barb.md) for how BARb works and where a learned
   model can hook in.
+- See [`docs/related-work.md`](docs/related-work.md) for what Apex changed in
+  BARb, what it measured, and what we reuse or do differently.
 
 ## Being a good citizen
 
