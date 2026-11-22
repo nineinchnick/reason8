@@ -2,12 +2,13 @@ import math
 from collections import Counter
 from pathlib import Path
 
+import synthetic
+
 from reason8.opening_shift import (
     NextUnitModel,
     Opening,
     accuracy,
     accuracy_difference_interval,
-    assign_positions,
     feature_distance,
     first_factory,
     group_of,
@@ -18,7 +19,8 @@ from reason8.opening_shift import (
     total_variation,
     transfer_scores,
 )
-from reason8.replay import load_replay
+from reason8.positions import replay_positions
+from reason8.replay import Replay, load_replay
 
 FIXTURE = Path(__file__).parent / "fixtures" / "replay.json"
 
@@ -41,6 +43,35 @@ def test_openings_from_replay():
     assert len(openings(replay, seconds=60)[0].units) < len(found[0].units)
 
 
+def test_openings_carry_position_role_and_skill():
+    replay = Replay(synthetic.with_own_starts_recommended(load_replay(FIXTURE).doc))
+    found = openings(replay, map_list={})
+    expected = replay_positions(replay, {})
+    assert [o.position for o in found] == [expected[o.team].spawn_point for o in found]
+    assert len({o.position for o in found}) == 16
+    assert {o.role for o in found} == {"front"}
+    skills = {player["teamId"]: player["skill"] for player in replay.players}
+    assert all(o.skill is not None and str(o.skill) in skills[o.team] for o in found)
+
+
+def test_openings_off_the_recommended_positions_have_no_position():
+    stray = (4300.0, 6000.0)
+    replay = synthetic.replay(
+        {0: [stray, (1000.0, 9000.0)], 1: [(7000.0, 3000.0), (9000.0, 1000.0)]},
+        options=synthetic.start_options(),
+    )
+    found = openings(replay, map_list={})
+    assert [(o.position, o.role) for o in found] == [
+        (None, None),
+        ("P2", "air"),
+        ("P3", "front"),
+        ("P4", "air"),
+    ]
+    # without recommended positions nobody has one
+    plain = synthetic.replay({0: [stray], 1: [(7000.0, 3000.0)]})
+    assert [o.position for o in openings(plain, map_list={})] == [None, None]
+
+
 def test_first_factory_and_shape():
     assert first_factory(BOTS) == "bot lab"
     assert first_factory(AIR) == "aircraft plant"
@@ -56,37 +87,6 @@ def test_total_variation():
     assert total_variation(Counter(a=1), Counter(b=1)) == 1
     assert total_variation(Counter(a=3, b=1), Counter(a=1, b=3)) == 0.5
     assert math.isnan(total_variation(Counter(), Counter(a=1)))
-
-
-def test_assign_positions_lays_both_sides_over_each_other():
-    # Two spots per side on a point-symmetric map; players click near them, not on them.
-    spots = [(1000.0, 9000.0), (3000.0, 7000.0)]
-    placed_openings = []
-    for match in range(6):
-        for index, (x, z) in enumerate(spots):
-            jitter = 20.0 * match
-            placed_openings.append(opening(match, index, side=0, start=(x + jitter, z - jitter)))
-            placed_openings.append(
-                opening(match, 2 + index, side=1, start=(10000.0 - x - jitter, 10000.0 - z))
-            )
-    placed = assign_positions(placed_openings, spots=2, radius=300.0)
-    by_team = {(o.match, o.team): o.position for o in placed}
-    for match in range(6):
-        # spot 0 is the one nearer the middle of the map
-        assert by_team[(str(match), 1)] == by_team[(str(match), 3)] == 0
-        assert by_team[(str(match), 0)] == by_team[(str(match), 2)] == 1
-
-
-def test_assign_positions_leaves_far_starts_unplaced():
-    placed_openings = [
-        opening(match, team, side=team % 2, start=(1000.0 + 8000.0 * (team % 2), 5000.0))
-        for match in range(4)
-        for team in range(2)
-    ]
-    placed_openings.append(opening(0, 2, side=0, start=(1000.0, 9000.0)))
-    placed = assign_positions(placed_openings, spots=1, radius=300.0)
-    assert [o.position for o in placed] == [0] * 8 + [None]
-    assert assign_positions([opening(0)])[0].position is None
 
 
 def test_next_unit_model_backs_off():

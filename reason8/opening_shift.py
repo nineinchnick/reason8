@@ -18,7 +18,7 @@ from __future__ import annotations
 import argparse
 import math
 import random
-import statistics
+import re
 import sys
 from collections import Counter, defaultdict
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
@@ -27,7 +27,9 @@ from datetime import datetime
 from pathlib import Path
 
 from reason8.game_versions import BALANCE_OPTIONS, balance_options, build_number
+from reason8.map_metadata import MapMetadata
 from reason8.parse import output_path
+from reason8.positions import position_order, replay_positions
 from reason8.replay import GAME_SPEED, Replay, load_replay
 
 OPENING_SECONDS = 8 * 60
@@ -59,20 +61,42 @@ class Opening:
     faction: str | None
     start: tuple[float, float] | None
     units: tuple[str, ...]
-    position: int | None = None
+    position: str | None = None  # recommended start position taken (reason8.positions)
+    role: str | None = None  # that position's role in the map metadata
+    skill: float | None = None  # OpenSkill mu before the game
+    frames: tuple[int, ...] = ()  # game frame of each order in `units`
+
+    def until(self, seconds: float) -> Opening:
+        """The same opening cut off after `seconds` of game time."""
+        kept = sum(frame <= seconds * GAME_SPEED for frame in self.frames)
+        return replace(self, units=self.units[:kept], frames=self.frames[:kept])
 
 
-def openings(replay: Replay, seconds: int = OPENING_SECONDS) -> list[Opening]:
+def openings(
+    replay: Replay,
+    seconds: int = OPENING_SECONDS,
+    map_list: Mapping[str, MapMetadata] | None = None,
+) -> list[Opening]:
     """The units each human player ordered in the first `seconds` of the game, in order.
 
     These are orders, not finished units (see docs/replay-format.md). Orders that take units
-    out of a factory queue are left out.
+    out of a factory queue are left out. `position` is the recommended start position the
+    player started on; it is None for a start that is on none of them and for games
+    without recommended positions.
     """
     by_team: dict[int, list[str]] = defaultdict(list)
+    frames: dict[int, list[int]] = defaultdict(list)
     for order in replay.build_orders(until_frame=seconds * GAME_SPEED):
         if order.team is not None and order.unit and order.count > 0:
             by_team[order.team].append(order.unit)
+            frames[order.team].append(order.frame)
     match = str(replay.meta.get("serverMatchId") or replay.meta.get("gameId"))
+    positions = {
+        team: position
+        for team, position in replay_positions(replay, map_list).items()
+        if position.on_spot
+    }
+    skills = {player["teamId"]: _skill(player.get("skill")) for player in replay.players}
     return [
         Opening(
             match=match,
@@ -81,10 +105,20 @@ def openings(replay: Replay, seconds: int = OPENING_SECONDS) -> list[Opening]:
             faction=team.faction,
             start=team.start_pos,
             units=tuple(by_team[team.team_id]),
+            position=(positions[team.team_id].spawn_point if team.team_id in positions else None),
+            role=positions[team.team_id].role if team.team_id in positions else None,
+            skill=skills.get(team.team_id),
+            frames=tuple(frames[team.team_id]),
         )
         for team in replay.teams().values()
         if not team.is_ai
     ]
+
+
+def _skill(text: str | None) -> float | None:
+    """OpenSkill mu from the replay's skill string, e.g. ``"[20.5]"`` or ``"~(12.3)"``."""
+    found = re.search(r"\d+(?:\.\d+)?", text or "")
+    return float(found.group()) if found else None
 
 
 def unit_role(unit: str) -> str:
@@ -114,71 +148,6 @@ def opening_shape(units: Sequence[str], length: int = 4) -> tuple[str, ...]:
             if len(shape) == length:
                 break
     return tuple(shape)
-
-
-def _mean(points: Sequence[tuple[float, float]]) -> tuple[float, float]:
-    return (sum(p[0] for p in points) / len(points), sum(p[1] for p in points) / len(points))
-
-
-def assign_positions(
-    all_openings: Sequence[Opening], spots: int = 8, radius: float = 500.0
-) -> list[Opening]:
-    """Number the start spots of a two-sided, point-symmetric map, both sides as one.
-
-    Players pick their start point freely inside their side's box, but they pick the same
-    few spots. Each match's sides are laid over each other by reflecting one through the
-    middle of the map; the `spots` densest places (most start points within `radius`) become
-    the spots, numbered from the middle of the map outwards. A start further than two radii
-    from every spot gets no position.
-    """
-    by_match: dict[str, list[Opening]] = defaultdict(list)
-    for opening in all_openings:
-        if opening.start is not None:
-            by_match[opening.match].append(opening)
-    # Per match: the two sides' mean start points. Their midpoint estimates the middle of
-    # the map; the median over all matches is not thrown off by one odd start.
-    side_means: dict[str, list[tuple[int, tuple[float, float]]]] = {}
-    for match, match_openings in by_match.items():
-        sides: dict[int, list[tuple[float, float]]] = defaultdict(list)
-        for opening in match_openings:
-            sides[opening.side].append(opening.start)
-        if len(sides) == 2:
-            side_means[match] = sorted((side, _mean(starts)) for side, starts in sides.items())
-    points: dict[tuple[str, int], tuple[float, float]] = {}
-    if side_means:
-        middles = [_mean([first, second]) for (_, first), (_, second) in side_means.values()]
-        middle = (
-            statistics.median(m[0] for m in middles),
-            statistics.median(m[1] for m in middles),
-        )
-    for match, ((first_side, first_mean), (_, second_mean)) in side_means.items():
-        # The side to keep is the same in every match: the one with the larger x - z.
-        keep_first = (first_mean[0] - first_mean[1]) >= (second_mean[0] - second_mean[1])
-        for opening in by_match[match]:
-            x, z = opening.start[0] - middle[0], opening.start[1] - middle[1]
-            if (opening.side == first_side) != keep_first:
-                x, z = -x, -z
-            points[(opening.match, opening.team)] = (x, z)
-
-    remaining = list(points.values())
-    centres: list[tuple[float, float]] = []
-    while remaining and len(centres) < spots:
-        neighbours = [[q for q in remaining if math.dist(p, q) <= radius] for p in remaining]
-        densest = max(neighbours, key=len)
-        centres.append(_mean(densest))
-        remaining = [p for p in remaining if math.dist(p, centres[-1]) > radius]
-    centres.sort(key=lambda centre: math.hypot(*centre))
-
-    placed = []
-    for opening in all_openings:
-        point = points.get((opening.match, opening.team))
-        position = None
-        if point is not None and centres:
-            nearest = min(range(len(centres)), key=lambda i: math.dist(point, centres[i]))
-            if math.dist(point, centres[nearest]) <= 2 * radius:
-                position = nearest
-        placed.append(replace(opening, position=position))
-    return placed
 
 
 def total_variation(first: Counter, second: Counter) -> float:
@@ -403,7 +372,7 @@ def load_sample(parsed_dir: Path) -> tuple[list[Opening], dict[str, SampleMatch]
         matches[match_openings[0].match] = SampleMatch(
             build, balance_options(replay.doc.get("modoptions") or {})
         )
-    return assign_positions(loaded), matches
+    return loaded, matches
 
 
 def _table(header: Sequence[str], rows: Iterable[Sequence[str]]) -> list[str]:
@@ -484,26 +453,24 @@ def report(all_openings: Sequence[Opening], matches: Mapping[str, SampleMatch], 
 
     lines += ["", "## Most common first factory per start spot", ""]
     rows = []
-    for position in sorted({o.position for o in all_openings if o.position is not None}):
-        here = [o for o in all_openings if o.position == position]
+    by_position: dict[str | None, list[Opening]] = defaultdict(list)
+    for opening in all_openings:
+        by_position[opening.position].append(opening)
+    spots = sorted((name for name in by_position if name is not None), key=position_order)
+    for position in spots:
+        here = by_position[position]
         top = Counter(first_factory(o.units) for o in here).most_common(1)[0][0]
         cells = []
         for group in groups.values():
             members = [o for o in group if o.position == position]
             share = sum(first_factory(o.units) == top for o in members) / max(1, len(members))
             cells.append(f"{100 * share:.0f}% of {len(members)}")
-        rows.append([str(position), top, *cells])
+        rows.append([position, top, *cells])
     lines += _table(["spot", "first factory", *groups], rows)
     spot_pairs = [
-        feature_distance(
-            [o for o in all_openings if o.position == first],
-            [o for o in all_openings if o.position == second],
-            lambda o: first_factory(o.units),
-        )
-        for first in range(8)
-        for second in range(first + 1, 8)
-        if any(o.position == first for o in all_openings)
-        and any(o.position == second for o in all_openings)
+        feature_distance(by_position[first], by_position[second], lambda o: first_factory(o.units))
+        for index, first in enumerate(spots)
+        for second in spots[index + 1 :]
     ]
     if spot_pairs:
         spot_pairs.sort()
