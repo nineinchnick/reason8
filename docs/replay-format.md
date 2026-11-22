@@ -350,23 +350,32 @@ with 32 threads and sdfz-demo-parser 5.15.1.
 ### Compression
 
 Parsed replays are written once and read many times, so they are compressed
-with zstd at level 19 (`--zstd-level`, default 19). On 20 parsed 8v8 replays:
+with zstd, at level 12 by default (`--zstd-level`). On 20 parsed 8v8 replays:
 
 | Output        | Size vs gzip | Compress per file | Decompress per file |
 | ------------- | ------------ | ----------------- | ------------------- |
 | gzip level 6  | 100%         | 0.07 s            | 15 ms               |
 | zstd level 9  | 87%          | 0.07 s            | 6 ms                |
+| zstd level 12 | 85%          | 0.14 s            | 6 ms                |
 | zstd level 15 | 82%          | 0.47 s            | 8 ms                |
 | zstd level 19 | 69%          | 4.2 s             | 7 ms                |
 
-Long-distance matching with a 128 MB window made no difference at any level.
+Long-distance matching with a 128 MB window made no difference at any level,
+and several compression threads per file didn't speed up level 19.
 
-Re-parsing all 168 local replays at level 19 with `--jobs 8` took 4 min 22 s
-(1.6 s of wall time per replay) and wrote 211 MB, against 308 MB as gzip: 1.25
-MB per replay on average. For the whole slice (42,913 replays) that is about
-54 GB of parsed JSON next to 175 GB of replays, and about 19 h with 8 jobs.
-Use `--zstd-level 9` for quick experiments: as fast as gzip and still 13%
-smaller.
+Level 19 looked worth it at first, but profiling one replay showed it is three
+quarters of the time per replay: 7.9 s of 10.7 s for a median 8v8 game (3.7 MB
+`.sdfz`) and 22 s of 29 s for a large one (7.6 MB). The rest is the parser
+(0.9 to 1.8 s), reading its JSON (0.6 to 1.5 s), reading the command packets
+(0.5 to 1.1 s) and building our document (0.7 to 2.2 s). Level 19 saves about
+18% of space over level 12, about 12 GB for the whole slice, and costs about
+65 CPU-hours per full parse.
+
+With level 12 and the default `--jobs` (three quarters of the CPU threads, 24
+here), 240 replays took 88 s: 164 replays a minute, against 35 a minute at
+level 19 with 8 jobs. That is about 4.5 h for the whole slice (42,913
+replays), and about 70 GB of parsed JSON (1.64 MB per replay) next to 175 GB
+of replays.
 
 ### Earlier replays
 
