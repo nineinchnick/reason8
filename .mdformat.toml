@@ -1,0 +1,4 @@
+# Markdown formatting for `uv run mdformat` (run by the pre-commit hook).
+wrap = 78
+number = true
+exclude = [".venv/**", ".claude/**", ".pytest_cache/**", ".ruff_cache/**", "data/**"]
