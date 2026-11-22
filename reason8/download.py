@@ -175,6 +175,21 @@ def write_manifest(path: Path, rows: Iterable[dict[str, Any]]) -> None:
     os.replace(temporary_path, path)
 
 
+def merge_manifests(destination: bytes, source: bytes) -> bytes | None:
+    """Rows of both manifests, the later ``updated_at`` winning for a match in both.
+
+    Returns ``None`` when ``destination`` already holds every row of the result.
+    """
+    rows = read_manifest(destination)
+    changed = False
+    for match_id, row in read_manifest(source).items():
+        current = rows.get(match_id)
+        if current is None or row["updated_at"] > current["updated_at"]:
+            rows[match_id] = row
+            changed = True
+    return manifest_bytes(rows.values()) if changed else None
+
+
 @dataclass
 class FetchResult:
     status: str

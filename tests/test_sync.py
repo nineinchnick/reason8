@@ -1,0 +1,211 @@
+"""Tests for ``reason8 sync`` against moto's in-memory S3 (no network, no real AWS)."""
+
+from datetime import UTC, datetime
+
+import pytest
+
+from reason8 import cli
+from reason8.bucket import Bucket, configured_bucket
+from reason8.download import MANIFEST_NAME, manifest_bytes, merge_manifests, read_manifest
+from reason8.parse import INDEX_NAME, index_text, merge_indexes, parse_index
+from reason8.sync import PULL, PUSH, sync_area
+
+
+def put(bucket, relative_path, data):
+    bucket.client.put_object(Bucket=bucket.name, Key=bucket.key(relative_path), Body=data)
+
+
+def all_keys(bucket):
+    response = bucket.client.list_objects_v2(Bucket=bucket.name)
+    return sorted(listed["Key"] for listed in response.get("Contents", []))
+
+
+def manifest_row(match_id, status="ok", updated_at=datetime(2026, 11, 1, tzinfo=UTC)):
+    return {
+        "match_id": match_id,
+        "replay_file_name": f"{match_id}.sdfz",
+        "status": status,
+        "attempts": 1,
+        "updated_at": updated_at,
+    }
+
+
+def sync(bucket, data_directory, area_name, direction, **options):
+    return sync_area(
+        bucket,
+        area_name,
+        direction,
+        data_directory=data_directory,
+        log=lambda line: None,
+        **options,
+    )
+
+
+def test_bucket_uri():
+    assert Bucket("s3://name", client=object()).key("replays/a.sdfz") == "replays/a.sdfz"
+    with_prefix = Bucket("s3://name/some/prefix/", client=object())
+    assert (with_prefix.name, with_prefix.key("parsed/b")) == ("name", "some/prefix/parsed/b")
+    for wrong in ("name", "s3://", "https://name"):
+        with pytest.raises(ValueError):
+            Bucket(wrong, client=object())
+
+
+def test_s3_is_opt_in(monkeypatch):
+    monkeypatch.delenv("REASON8_S3_URI", raising=False)
+    assert configured_bucket() is None
+    monkeypatch.setenv("REASON8_S3_URI", "s3://from-environment")
+    assert configured_bucket().name == "from-environment"
+    assert configured_bucket("s3://from-option").name == "from-option"
+
+
+def test_sync_without_a_bucket_fails(monkeypatch, capsys):
+    monkeypatch.delenv("REASON8_S3_URI", raising=False)
+    assert cli.main(["sync", "push"]) == 2
+    assert "REASON8_S3_URI" in capsys.readouterr().err
+
+
+def test_push_copies_new_and_changed_files_and_deletes_nothing(bucket, tmp_path):
+    replays = tmp_path / "replays"
+    replays.mkdir()
+    (replays / "new.sdfz").write_bytes(b"new replay")
+    (replays / "same.sdfz").write_bytes(b"same")
+    (replays / "grown.sdfz").write_bytes(b"complete replay")
+    (replays / "partial.sdfz.part").write_bytes(b"half")
+    (replays / "notes.txt").write_bytes(b"not data")
+    put(bucket, "replays/same.sdfz", b"SAME")  # same size: not copied
+    put(bucket, "replays/grown.sdfz", b"truncated")
+    put(bucket, "replays/only-in-bucket.sdfz", b"kept")
+
+    summary = sync(bucket, tmp_path, "replays", PUSH)
+
+    assert (summary.files, summary.already_there, summary.copied) == (3, 1, 2)
+    assert summary.bytes == len(b"new replay") + len(b"complete replay")
+    assert bucket.read("replays/new.sdfz") == b"new replay"
+    assert bucket.read("replays/grown.sdfz") == b"complete replay"
+    assert bucket.read("replays/same.sdfz") == b"SAME"
+    assert all_keys(bucket) == [
+        "shared/replays/grown.sdfz",
+        "shared/replays/new.sdfz",
+        "shared/replays/only-in-bucket.sdfz",
+        "shared/replays/same.sdfz",
+    ]
+    again = sync(bucket, tmp_path, "replays", PUSH)
+    assert (again.already_there, again.copied, again.merged) == (3, 0, [])
+
+
+def test_pull_copies_missing_files_and_deletes_nothing(bucket, tmp_path):
+    put(bucket, "parsed/a.json.zst", b"parsed a")
+    put(bucket, "parsed/b.json.zst", b"parsed b")
+    put(bucket, "parsed/old.json.gz", b"earlier format")
+    put(bucket, "parsed/nested/c.json.zst", b"in a subdirectory")
+    put(bucket, "replays/a.sdfz", b"another area")
+    parsed = tmp_path / "parsed"
+    parsed.mkdir()
+    (parsed / "local-only.json.zst").write_bytes(b"kept")
+
+    summary = sync(bucket, tmp_path, "parsed", PULL, jobs=2)
+
+    assert (summary.files, summary.copied) == (2, 2)
+    assert sorted(path.name for path in parsed.iterdir()) == [
+        "a.json.zst",
+        "b.json.zst",
+        "local-only.json.zst",
+    ]
+    assert (parsed / "a.json.zst").read_bytes() == b"parsed a"
+    assert sync(bucket, tmp_path, "parsed", PULL).copied == 0
+
+
+def test_match_and_dry_run(bucket, tmp_path):
+    for name in ("2026-10-01_a.sdfz", "2026-11-01_b.sdfz", "2026-11-02_c.sdfz"):
+        put(bucket, f"replays/{name}", name.encode())
+    put(bucket, f"replays/{MANIFEST_NAME}", manifest_bytes([manifest_row(1)]))
+
+    planned = sync(bucket, tmp_path, "replays", PULL, match="2026-11-*", dry_run=True)
+    assert (planned.files, planned.copied) == (2, 2)
+    assert not (tmp_path / "replays").exists()
+
+    assert sync(bucket, tmp_path, "replays", PULL, match="2026-11-*").merged == []
+    assert sorted(path.name for path in (tmp_path / "replays").iterdir()) == [
+        "2026-11-01_b.sdfz",
+        "2026-11-02_c.sdfz",
+    ]
+
+
+def test_manifests_are_merged_both_ways(bucket, tmp_path):
+    replays = tmp_path / "replays"
+    replays.mkdir()
+    earlier, later = datetime(2026, 11, 1, tzinfo=UTC), datetime(2026, 11, 2, tzinfo=UTC)
+    local_rows = [manifest_row(1), manifest_row(2, "error", earlier)]
+    bucket_rows = [manifest_row(2, "ok", later), manifest_row(3)]
+    (replays / MANIFEST_NAME).write_bytes(manifest_bytes(local_rows))
+    put(bucket, f"replays/{MANIFEST_NAME}", manifest_bytes(bucket_rows))
+
+    assert sync(bucket, tmp_path, "replays", PUSH).merged == [MANIFEST_NAME]
+    in_bucket = read_manifest(bucket.read(f"replays/{MANIFEST_NAME}"))
+    assert {match_id: row["status"] for match_id, row in in_bucket.items()} == {
+        1: "ok",
+        2: "ok",
+        3: "ok",
+    }
+    # push wrote only to the bucket
+    assert set(read_manifest(replays / MANIFEST_NAME)) == {1, 2}
+
+    assert sync(bucket, tmp_path, "replays", PULL).merged == [MANIFEST_NAME]
+    assert set(read_manifest(replays / MANIFEST_NAME)) == {1, 2, 3}
+    assert sync(bucket, tmp_path, "replays", PULL).merged == []
+    assert sync(bucket, tmp_path, "replays", PUSH).merged == []
+
+
+def test_manifest_is_copied_when_the_other_side_has_none(bucket, tmp_path):
+    put(bucket, f"replays/{MANIFEST_NAME}", manifest_bytes([manifest_row(7)]))
+    assert sync(bucket, tmp_path, "replays", PULL).merged == [MANIFEST_NAME]
+    assert set(read_manifest(tmp_path / "replays" / MANIFEST_NAME)) == {7}
+
+
+def test_merge_manifests_keeps_the_later_row():
+    earlier, later = datetime(2026, 11, 1, tzinfo=UTC), datetime(2026, 11, 2, tzinfo=UTC)
+    destination = manifest_bytes([manifest_row(1, "ok", later)])
+    assert merge_manifests(destination, manifest_bytes([manifest_row(1, "error", earlier)])) is None
+    merged = merge_manifests(
+        manifest_bytes([manifest_row(1, "error", earlier)]),
+        manifest_bytes([manifest_row(1, "ok", later), manifest_row(2)]),
+    )
+    rows = read_manifest(merged)
+    assert (rows[1]["status"], set(rows)) == ("ok", {1, 2})
+
+
+def test_merge_indexes_prefers_the_source_and_keeps_the_rest():
+    destination = index_text(
+        {
+            "a.sdfz": {"file": "a.sdfz", "status": "error"},
+            "b.sdfz": {"file": "b.sdfz", "status": "ok"},
+        }
+    ).encode()
+    source = index_text({"a.sdfz": {"file": "a.sdfz", "status": "ok"}}).encode()
+    merged = parse_index(merge_indexes(destination, source).decode())
+    assert {name: entry["status"] for name, entry in merged.items()} == {
+        "a.sdfz": "ok",
+        "b.sdfz": "ok",
+    }
+    assert merge_indexes(destination, destination) is None
+
+
+def test_index_is_merged_on_push(bucket, tmp_path):
+    parsed = tmp_path / "parsed"
+    parsed.mkdir()
+    (parsed / INDEX_NAME).write_text(index_text({"a.sdfz": {"file": "a.sdfz", "status": "ok"}}))
+    put(bucket, f"parsed/{INDEX_NAME}", index_text({"b.sdfz": {"file": "b.sdfz"}}).encode())
+    assert sync(bucket, tmp_path, "parsed", PUSH).merged == [INDEX_NAME]
+    assert set(parse_index(bucket.read(f"parsed/{INDEX_NAME}").decode())) == {"a.sdfz", "b.sdfz"}
+
+
+def test_cli_sync(bucket, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("REASON8_DATA_DIR", str(tmp_path))
+    (tmp_path / "matches").mkdir()
+    (tmp_path / "matches" / "matches.parquet").write_bytes(b"dump")
+    # the CLI makes its own client; moto intercepts it too
+    uri = f"s3://{bucket.name}/{bucket.prefix}"
+    assert cli.main(["sync", "push", "matches", "--s3-uri", uri]) == 0
+    assert bucket.read("matches/matches.parquet") == b"dump"
+    assert "matches: 1 files, 0 already there, 1 copied" in capsys.readouterr().err
+    assert cli.main(["sync", "pull", "nonsense", "--s3-uri", uri]) == 2

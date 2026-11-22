@@ -34,6 +34,25 @@ fetches a file twice, and records every match's status in
 the selection and [`docs/replay-format.md`](docs/replay-format.md) for the
 parsed output.
 
+## Data storage
+
+The shared copy of the data directory lives in a private S3 bucket; a local
+`data/` is a working copy
+([ADR 0014](docs/adr/0014-keep-the-data-in-a-private-s3-bucket.md)). Raw
+replays contain player names and are never published. Using the bucket is
+opt-in: ask the maintainer for access, configure AWS credentials as usual
+(`aws configure` or `aws login`), and name the bucket:
+
+```sh
+export REASON8_S3_URI=s3://<bucket>     # or pass --s3-uri to each command
+uv run reason8 sync pull replays parsed # bucket -> data/
+uv run reason8 sync push                # data/ -> bucket: replays, parsed, matches
+```
+
+`sync` copies files that are missing or differ in size, merges the manifest
+and the parse index, and never deletes anything. Storing the whole first slice
+(about 175 GB of replays and 54 GB of parsed replays) costs about $6 a month.
+
 ## The idea in one paragraph
 
 Instead of hand-writing rules ("build 2 mexes, then a lab, then…"), we show a
