@@ -330,17 +330,30 @@ Unit type ids change between game versions, which is why every file carries
 its own id-to-name table.
 
 The `hit` and `damage` lines are what [`first-contact.md`](first-contact.md)
-is measured from. Who did the damage is not simple to get: the engine tells
-LuaUI the attacker, but BAR's widget handler passes a widget only the first
-five arguments of `UnitDamaged` (unit, type, team, damage, paralyzer). Game
-versions up to autumn 2026 give a user widget that asks for it
-(`handler = true`) the handler itself, and the widget wraps the handler's
-call-in to see the attacker (`"attackers":"attacker"` in the `end` line).
-Later versions (seen from `test-31820`) keep the handler from user widgets;
-there the damage is put down to the nearest enemy unit within 1,300 map units
-of the damaged unit, and left out when there is none
-(`"attackers":"nearest"`). How well the guess agrees with the engine's answer
-is measured in [`first-contact.md`](first-contact.md).
+is measured from. BAR's widget handler passes a widget only the first five
+arguments of `UnitDamaged` (unit, type, team, damage, paralyzer), not the
+attacker, so the widget asks the engine instead: `Spring.GetUnitLastAttacker`
+returns the unit that last damaged a unit, in every game version and without
+access to the handler (`"attackers":"last_attacker"` in the `end` line).
+Damage with no attacker (wreckage, fire, terrain) is left out.
+
+Checked on two Supreme Isthmus 8v8 replays, first 6 game minutes:
+
+- `test-30868`, where a widget can still wrap the handler and read the real
+  attacker: `GetUnitLastAttacker` named the same unit in 1,457 of 1,497 damage
+  events (97.3%). In the other 40 it named an earlier attacker of the same
+  unit, or none; the function doesn't say when the attack happened, so a hit
+  without an attacker of its own can be put down to the previous one. A unit's
+  first hit, which is what first contact uses, is not affected.
+- `test-31986`, where the handler is closed to user widgets: the call-in gave
+  no attacker in any of 400 damage events, and `GetUnitLastAttacker` gave one,
+  always an enemy unit, in 394.
+
+Older state files (format 2) used two other ways: wrapping the handler
+(`"attackers":"attacker"`, exact) and, in game versions from `test-31820`
+where that is no longer allowed, the nearest enemy unit within 1,300 map units
+(`"attackers":"nearest"`, a guess). How well the guess agrees with the real
+attacker is measured in [`first-contact.md`](first-contact.md).
 
 ### Size per game
 

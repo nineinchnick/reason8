@@ -41,6 +41,10 @@ from reason8.replays.replay import GAME_SPEED, Replay, load_replay
 COMMANDER_PREFIXES = ("armcom", "corcom", "legcom")
 
 
+#: Attacker sources in a state file's "end" line that name the real attacker.
+EXACT_ATTACKERS = ("last_attacker", "attacker")
+
+
 @dataclass(frozen=True)
 class Hit:
     """The first time a unit was damaged by a unit of an enemy player."""
@@ -71,7 +75,9 @@ class Fights:
     map: str | None = None
     last_frame: int = 0
     complete: bool = False  # the file ends with its "end" line
-    # how the widget knew who did the damage: "attacker", "nearest" or "none" (no damage)
+    # how the widget knew who did the damage: "last_attacker" (asked from the
+    # engine), or in older files "attacker" (read through BAR's widget handler) or
+    # "nearest" (guessed: the nearest enemy unit); "none" when there was no damage
     attackers: str | None = None
     ally_teams: dict[int, int] = field(default_factory=dict)  # player -> side, without Gaia
     hits: list[Hit] = field(default_factory=list)
@@ -461,7 +467,9 @@ def report(table: pl.DataFrame, window_seconds: int = OPENING_SECONDS) -> str:
                 map_name,
                 games.filter(pl.col("map") == map_name).height,
                 table.filter(pl.col("map") == map_name).height,
-                games.filter(pl.col("map") == map_name, pl.col("attackers") == "attacker").height,
+                games.filter(
+                    pl.col("map") == map_name, pl.col("attackers").is_in(EXACT_ATTACKERS)
+                ).height,
                 games.filter(pl.col("map") == map_name, pl.col("attackers") == "nearest").height,
             ]
             for map_name in maps
