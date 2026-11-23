@@ -152,6 +152,7 @@ Tournaments, leagues and casts
 
 ```
 reason8/              # the Python package
+  game/               #   game versions and balance patches
 tests/                # mirrors reason8/
 docs/
   decisions/          # architecture decision records, from the most fundamental
