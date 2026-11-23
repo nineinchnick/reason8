@@ -1,6 +1,7 @@
 """Tests for the ``reason8`` command line: every command is there and parses its flags."""
 
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -31,3 +32,11 @@ def test_download_flags():
     )
     assert args.limit == 3 and args.dry_run
     assert (args.since, args.until) == (datetime(2026, 5, 23), datetime(2026, 11, 22))
+
+
+def test_parse_flags():
+    args = cli.make_parser().parse_args(
+        ["parse", "a.sdfz", "replays", "--jobs", "4", "--zstd-level", "3", "--out", "parsed"]
+    )
+    assert args.inputs == [Path("a.sdfz"), Path("replays")]
+    assert (args.jobs, args.zstd_level, args.out) == (4, 3, Path("parsed"))

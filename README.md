@@ -25,12 +25,15 @@ Getting the data (into the git-ignored `data/`, or `$REASON8_DATA_DIR`):
 
 ```sh
 uv run reason8 download --limit 100   # match dumps, then 100 replays of the slice
+tools/fetch-parser.sh                 # once: the pinned replay parser
+uv run reason8 parse                  # data/replays -> data/parsed/*.json.zst
 ```
 
 The downloader keeps one connection at about one request per second, never
 fetches a file twice, and records every match's status in
 `data/replays/manifest.parquet`. See [`dataset.md`](docs/reference/dataset.md)
-for the selection.
+for the selection and [`replay-format.md`](docs/reference/replay-format.md)
+for the parsed output.
 
 ## Commands
 
@@ -40,6 +43,15 @@ more.
 `download`
 : Download the match dumps and the replays of the training slice, politely
   (`--limit N --since YYYY-MM-DD --until YYYY-MM-DD`, `--dry-run`).
+
+`parse [paths] --jobs N --zstd-level L --out DIR`
+: Parse replays into compact, zstd-compressed JSON.
+
+`header REPLAY`
+: Print which engine, game version and map a replay needs.
+
+`make-fixture SOURCE DEST`
+: Make the anonymised test fixture from a parsed replay.
 
 ## Data storage
 
@@ -159,6 +171,19 @@ Tournaments, leagues and casts
 : A smaller hand-picked set of expert games (Alpha Cup, weekly leagues,
   YouTube casts), used for evaluation and extra weight.
 
+### An important caveat about replays
+
+BAR runs on the Recoil engine, which uses *lockstep* simulation: a replay
+records **player commands**, not the game state. Build orders are visible
+directly in the commands, but a command is an intention: builds can be
+cancelled or re-queued, and the replay does not say what the player had or
+what they answered. To know "what the map looked like" at minute 7 you have to
+re-run the replay through the engine; models learn each decision with that
+context
+([ADR 0005](docs/decisions/0005-learn-decisions-with-their-context.md)).
+[`state-extraction.md`](docs/research/state-extraction.md) shows how to
+recover the state with a headless engine and what it costs.
+
 ## Compute
 
 Training and headless simulation run **locally first**. Bulk jobs (re-running
@@ -196,8 +221,10 @@ of containerised headless engines when local machines aren't enough
 ```
 reason8/              # the Python package and the `reason8` command (cli.py)
   data/               #   match dumps and the slice, downloads, the S3 bucket
+  replays/            #   reading .sdfz files, parsing them, reading parsed replays
   game/               #   game versions and balance patches
-tests/                # mirrors reason8/
+tools/                # fetch-parser.sh: the pinned sdfz-demo-parser
+tests/                # mirrors reason8/; fixtures/ holds an anonymised replay
 notebooks/            # exploration of the match dumps
 docs/
   decisions/          # architecture decision records, from the most fundamental
