@@ -20,7 +20,6 @@
 --   Reason8Speed           game speed to ask for (default 0 = leave alone)
 --   Reason8MaxFrame        quit at this frame (default 0 = only at game over)
 --   Reason8Events          1 = also write per-unit event lines (default 1)
---   Reason8DamageAttacker  0 = always guess the attacker (default 1, see below)
 --
 -- No player names are written: teams and players are numbers only.
 --------------------------------------------------------------------------------
@@ -34,12 +33,11 @@ function widget:GetInfo()
 		license = "GNU GPL, v2",
 		layer = 0,
 		enabled = true,
-		handler = true, -- the widget handler itself: see watchDamage()
 	}
 end
 
 local OUT_PATH = "LuaUI/Config/reason8_state.jsonl"
-local FORMAT_VERSION = 2 -- 2: hit and damage lines, wind
+local FORMAT_VERSION = 3 -- 2: hit and damage lines, wind; 3: exact attacker
 
 local spGetGameFrame = Spring.GetGameFrame
 local spGetAllUnits = Spring.GetAllUnits
@@ -48,7 +46,7 @@ local spGetUnitTeam = Spring.GetUnitTeam
 local spGetUnitPosition = Spring.GetUnitPosition
 local spGetUnitHealth = Spring.GetUnitHealth
 local spGetTeamResources = Spring.GetTeamResources
-local spGetUnitsInSphere = Spring.GetUnitsInSphere
+local spGetUnitLastAttacker = Spring.GetUnitLastAttacker
 local spGetWind = Spring.GetWind
 local floor = math.floor
 local format = string.format
@@ -58,12 +56,8 @@ local snapshotFrames = Spring.GetConfigInt("Reason8SnapshotFrames", 150)
 local wantedSpeed = Spring.GetConfigInt("Reason8Speed", 0)
 local maxFrame = Spring.GetConfigInt("Reason8MaxFrame", 0)
 local writeEvents = Spring.GetConfigInt("Reason8Events", 1) ~= 0
-local useHandler = Spring.GetConfigInt("Reason8DamageAttacker", 1) ~= 0
 
 local DAMAGE_FRAMES = 30 -- damage between teams is summed over this many frames
--- Beyond the reach of what is built in the first minutes: the longest first-tier
--- weapons, the coastal guns, reach 1,245.
-local NEAREST_ENEMY_RANGE = 1300
 
 local outputFile
 local teams = {}
@@ -255,69 +249,29 @@ local function recordDamage(unitID, unitDefID, unitTeam, damage, paralyzer, atta
 	end
 end
 
--- Who did the damage. The engine tells LuaUI the attacker, but BAR's widget
--- handler gives a widget only the first five arguments of UnitDamaged. There
--- are two ways around that, and the "end" line says which one a file used:
---   "attacker": game versions up to autumn 2026 hand a widget that asks for it
---          (`handler = true`) the handler itself; its call-in is wrapped here
---          to see every argument.
---   "nearest": later versions keep the handler from user widgets. The damage
---          is then put down to the nearest enemy unit within NEAREST_ENEMY_RANGE
---          of the damaged unit, and left out when there is none. This also
---          counts damage nobody aimed (debris, fire) when an enemy is close.
--- Reason8DamageAttacker = 0 forces "nearest", to compare the two on one replay.
+-- Who did the damage. BAR's widget handler gives a widget only the first five
+-- arguments of UnitDamaged, so the attacker is asked from the engine instead:
+-- Spring.GetUnitLastAttacker returns the unit that last damaged the unit. It
+-- works the same in every game version, needs no access to the handler, and is
+-- left out when there is no attacker (debris, fire, terrain). It doesn't say
+-- when that attack happened, so damage without an attacker of its own can be
+-- put down to the unit's previous attacker; a unit's first hit is always right.
 local attackerSource = "none"
-local seenByHandler = false
-local handlerUnitDamaged
 
-local function watchDamage()
-	if not useHandler or type(widgetHandler.UnitDamaged) ~= "function" or not widgetHandler.UpdateCallIn then
-		return
-	end
-	handlerUnitDamaged = widgetHandler.UnitDamaged
-	widgetHandler.UnitDamaged = function(handler, unitID, unitDefID, unitTeam, damage, paralyzer, weaponDefID, projectileID, attackerID, attackerDefID, attackerTeam)
-		seenByHandler = true
-		attackerSource = "attacker"
-		recordDamage(unitID, unitDefID, unitTeam, damage, paralyzer, attackerID, attackerDefID, attackerTeam)
-		handlerUnitDamaged(handler, unitID, unitDefID, unitTeam, damage, paralyzer, weaponDefID, projectileID, attackerID, attackerDefID, attackerTeam)
-		seenByHandler = false
-	end
-	widgetHandler:UpdateCallIn("UnitDamaged") -- the engine's call-in holds the old function
-end
-
-local function nearestEnemy(unitID, unitTeam)
-	local x, y, z = spGetUnitPosition(unitID)
-	if not x then
-		return
-	end
-	local allyTeam = allyTeamOfTeam[unitTeam]
-	local nearestID, nearestTeam, nearestDistance
-	local candidates = spGetUnitsInSphere(x, y, z, NEAREST_ENEMY_RANGE)
-	for i = 1, #candidates do
-		local candidateTeam = spGetUnitTeam(candidates[i])
-		if candidateTeam and candidateTeam ~= gaiaTeam and allyTeamOfTeam[candidateTeam] ~= allyTeam then
-			local candidateX, candidateY, candidateZ = spGetUnitPosition(candidates[i])
-			local distance = (candidateX - x) ^ 2 + (candidateY - y) ^ 2 + (candidateZ - z) ^ 2
-			-- the lower unit id wins a tie, so the choice does not depend on the list's order
-			if not nearestDistance or distance < nearestDistance or (distance == nearestDistance and candidates[i] < nearestID) then
-				nearestID, nearestTeam, nearestDistance = candidates[i], candidateTeam, distance
-			end
-		end
-	end
-	return nearestID, nearestTeam
-end
-
--- Called by the handler for every damaged unit; without it the handler would
--- not listen to the engine's UnitDamaged at all.
 function widget:UnitDamaged(unitID, unitDefID, unitTeam, damage, paralyzer)
-	if seenByHandler or not writeEvents or not unitTeam or unitTeam == gaiaTeam then
+	if not writeEvents or not unitTeam or unitTeam == gaiaTeam then
 		return
 	end
-	local attackerID, attackerTeam = nearestEnemy(unitID, unitTeam)
-	if attackerID then
-		attackerSource = "nearest"
-		recordDamage(unitID, unitDefID, unitTeam, damage, paralyzer, attackerID, spGetUnitDefID(attackerID), attackerTeam)
+	local attackerID = spGetUnitLastAttacker(unitID)
+	if not attackerID then
+		return
 	end
+	local attackerTeam = spGetUnitTeam(attackerID)
+	if not attackerTeam then
+		return
+	end
+	attackerSource = "last_attacker"
+	recordDamage(unitID, unitDefID, unitTeam, damage, paralyzer, attackerID, spGetUnitDefID(attackerID), attackerTeam)
 end
 
 local function writeDamageSums(frame)
@@ -372,9 +326,6 @@ function widget:Initialize()
 	Spring.CreateDir("LuaUI/Config")
 	outputFile = io.open(OUT_PATH, "w")
 	writeHeader()
-	if writeEvents then
-		watchDamage()
-	end
 	Spring.SendCommands("specfullview 1")
 	if wantedSpeed > 0 then
 		-- a replay plays at 1x unless told otherwise; min = max pins the speed
@@ -430,8 +381,4 @@ end
 
 function widget:Shutdown()
 	finish("shutdown")
-	if handlerUnitDamaged then
-		widgetHandler.UnitDamaged = handlerUnitDamaged
-		widgetHandler:UpdateCallIn("UnitDamaged")
-	end
 end

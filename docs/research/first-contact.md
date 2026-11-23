@@ -74,12 +74,16 @@ the neutral team does not count, and neither does damage that has no attacker
 (wreckage, fire, collisions) where the attacker is known.
 
 **Who did the damage.** The engine knows the attacker, but BAR's widget
-handler does not pass it on to widgets. In game versions up to autumn 2026 the
-widget can wrap the handler and read it (52 of the 72 games). Later versions
-do not allow that, and the widget puts the damage down to the nearest enemy
+handler does not pass it on to widgets. The state files measured here were
+written by an earlier version of the widget: in game versions up to autumn
+2026 it wrapped the handler and read the attacker (52 of the 72 games); later
+versions don't allow that, and it put the damage down to the nearest enemy
 unit within 1,300 map units instead (20 games: all 18 on engine 2026.09.03 and
 2 on 2026.07.04, game versions from `test-31820`). The two ways are compared
-[below](#known-attacker-against-nearest-enemy).
+[below](#known-attacker-against-nearest-enemy). The widget now asks the engine
+(`Spring.GetUnitLastAttacker`, see
+[`state-extraction.md`](state-extraction.md)), which works in every version;
+re-running those 20 games with it removes the guess.
 
 **A player** is one of the 16 players of a game (a team, to the engine); a
 **side** is one of the two ally teams. A player's **position** is the

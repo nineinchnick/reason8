@@ -242,3 +242,23 @@ def test_measure_game_and_load_measured(tmp_path):
     assert load_measured(tmp_path / "missing.parquet") == {}
     assert replay_name("dir/2026-01-01_Map_1.2.jsonl.gz") == "2026-01-01_Map_1.2"
     assert replay_name("2026-01-01_Map_1.2.json.zst", ".json.zst") == "2026-01-01_Map_1.2"
+
+
+def test_report_counts_the_engines_attacker_as_known():
+    table = contact_table(
+        [
+            ("a.sdfz", 0, "P1", 0, 3000, [100]),
+            ("b.sdfz", 0, "P1", 0, 3000, [100]),
+            ("c.sdfz", 0, "P1", 0, 3000, [100]),
+        ]
+    ).with_columns(
+        pl.when(pl.col("replay") == "a.sdfz")
+        .then(pl.lit("last_attacker"))
+        .when(pl.col("replay") == "b.sdfz")
+        .then(pl.lit("attacker"))
+        .otherwise(pl.lit("nearest"))
+        .alias("attackers")
+    )
+    sample_row = next(line for line in report(table).splitlines() if line.startswith("| M "))
+    cells = [cell.strip() for cell in sample_row.strip("|").split("|")]
+    assert cells[3:5] == ["2", "1"]  # attacker known, attacker guessed
