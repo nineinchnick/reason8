@@ -6,7 +6,7 @@ import argparse
 import sys
 from types import ModuleType
 
-from reason8.data import download
+from reason8.data import download, sync
 from reason8.replays import fixture, parse, sdfz
 
 # (name, module, summary): each module has `run(args)` and, when it takes arguments,
@@ -14,6 +14,7 @@ from reason8.replays import fixture, parse, sdfz
 Command = tuple[str, ModuleType, str]
 COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
     ("download", download, "download replays of the selected matches"),
+    ("sync", sync, "copy the data directory to or from the S3 bucket"),
     ("parse", parse, "parse replays into compact JSON"),
     ("header", sdfz, "print which engine, game and map a replay needs"),
     ("make-fixture", fixture, "make the anonymised test fixture from a parsed replay"),

@@ -34,6 +34,11 @@ def test_download_flags():
     assert (args.since, args.until) == (datetime(2026, 5, 23), datetime(2026, 11, 22))
 
 
+def test_sync_flags():
+    args = cli.make_parser().parse_args(["sync", "pull", "replays", "parsed", "--dry-run"])
+    assert args.direction == "pull" and args.areas == ["replays", "parsed"] and args.dry_run
+
+
 def test_parse_flags():
     args = cli.make_parser().parse_args(
         ["parse", "a.sdfz", "replays", "--jobs", "4", "--zstd-level", "3", "--out", "parsed"]
