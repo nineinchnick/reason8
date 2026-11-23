@@ -18,7 +18,42 @@ git clone https://github.com/nineinchnick/reason8.git && cd reason8
 uv sync                       # create .venv with all dependencies
 uv run pre-commit install     # run the checks on every commit
 uv run pytest                 # run the tests
+uv run reason8 --help         # every command
 ```
+
+Getting the data (into the git-ignored `data/`, or `$REASON8_DATA_DIR`):
+
+```sh
+uv run reason8 download --limit 100   # match dumps, then 100 replays of the slice
+```
+
+The downloader keeps one connection at about one request per second, never
+fetches a file twice, and records every match's status in
+`data/replays/manifest.parquet`. See [`dataset.md`](docs/reference/dataset.md)
+for the selection.
+
+## Commands
+
+Everything runs as `uv run reason8 <command>`; `--help` on any of them says
+more.
+
+`download`
+: Download the match dumps and the replays of the training slice, politely
+  (`--limit N --since YYYY-MM-DD --until YYYY-MM-DD`, `--dry-run`).
+
+## Data storage
+
+The shared copy of the data directory lives in a private S3 bucket; a local
+`data/` is a working copy
+([ADR 0016](docs/decisions/0016-download-and-store-the-data.md)). Raw replays
+contain player names and are never published. Using the bucket is opt-in: ask
+the maintainer for access, configure AWS credentials as usual (`aws configure`
+or `aws login`), and name the bucket in `REASON8_S3_URI` or `--s3-uri`.
+
+With the bucket configured, `reason8 download` looks there before asking BAR's
+servers and uploads what it downloads from them. Storing the whole first slice
+(about 175 GB of replays and about 70 GB of parsed replays) costs about $6 a
+month.
 
 ## The idea in one paragraph
 
@@ -124,6 +159,13 @@ Tournaments, leagues and casts
 : A smaller hand-picked set of expert games (Alpha Cup, weekly leagues,
   YouTube casts), used for evaluation and extra weight.
 
+## Compute
+
+Training and headless simulation run **locally first**. Bulk jobs (re-running
+thousands of replays, large evaluation runs) can move to a **cloud cluster**
+of containerised headless engines when local machines aren't enough
+([ADR 0016](docs/decisions/0016-download-and-store-the-data.md)).
+
 ## Related work
 
 - **BARb** — the AI that ships with BAR, built on
@@ -140,7 +182,8 @@ Tournaments, leagues and casts
 ## Being a good citizen
 
 - Download replays politely (rate-limited, cached, never re-downloaded) — this
-  is community-funded infrastructure.
+  is community-funded infrastructure. `reason8 download` does this and stops
+  when the server answers 429 or 503.
 - BAR repos have an AI usage policy (`AI_POLICY.md`); follow it if
   contributing upstream.
 - Player names in replays are personal data — the training data we publish
@@ -151,8 +194,8 @@ Tournaments, leagues and casts
 ## Layout
 
 ```
-reason8/              # the Python package
-  data/               #   match dumps and the slice
+reason8/              # the Python package and the `reason8` command (cli.py)
+  data/               #   match dumps and the slice, downloads, the S3 bucket
   game/               #   game versions and balance patches
 tests/                # mirrors reason8/
 notebooks/            # exploration of the match dumps

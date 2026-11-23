@@ -16,3 +16,4 @@ number and add it to the list below, which is in the same order.
 - [0003. Define success as in-game measures](0003-define-success-as-in-game-measures.md)
 - [0004. Learn from human replays by imitation](0004-learn-from-human-replays-by-imitation.md)
 - [0014. First training slice](0014-first-training-slice.md)
+- [0016. Download in a fixed order, keep the data in a private S3 bucket, run locally first](0016-download-and-store-the-data.md)
