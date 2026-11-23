@@ -6,6 +6,7 @@ import argparse
 import sys
 from types import ModuleType
 
+from reason8.bot import build, check
 from reason8.data import download, sync
 from reason8.game import maps, positions
 from reason8.headless import batch, run, setup, state
@@ -43,6 +44,14 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
     ("contact", contact, "measure first contact in re-simulated replays"),
     ("dataset", dataset, "build the opening dataset from parsed replays"),
     ("baseline", evaluate, "fit, score and save the next-build baselines"),
+    (
+        "bot",
+        "the Reason8 AI, a BARb variant",
+        [
+            ("build", build, "build the AI folder from BARb and ai/Reason8"),
+            ("check", check, "check from a replay that the AI played its opening"),
+        ],
+    ),
 ]
 
 

@@ -75,6 +75,10 @@ more.
 `baseline`
 : Fit, score and save the counting baselines for the next build.
 
+`bot build`, `bot check`
+: Build the Reason8 AI from BARb and `ai/Reason8`; check from a replay that it
+  played its opening.
+
 ## Data storage
 
 The shared copy of the data directory lives in a private S3 bucket; a local
@@ -247,8 +251,12 @@ of containerised headless engines when local machines aren't enough
   relevant to us. Reason8 differs by learning from **human** replays.
 - **AlphaStar / AlphaStar Unplugged** (StarCraft II) — imitation from human
   replays, then offline RL; also the main lesson on human-like limits.
+- See [`barb.md`](docs/research/barb.md) for how BARb works and where a
+  learned model can hook in.
 - See [`related-work.md`](docs/research/related-work.md) for what Apex changed
   in BARb, what it measured, and what we reuse or do differently.
+- See [`in-game.md`](docs/reference/in-game.md) for how a model's decisions
+  get into a running game, and how to build and run the Reason8 AI headlessly.
 
 ## Being a good citizen
 
@@ -272,6 +280,8 @@ reason8/              # the Python package and the `reason8` command (cli.py)
   headless/           #   headless engine runs, the state export widget, start scripts
   openings/           #   opening extraction, first contact, the opening dataset
   models/             #   next-build baselines and their evaluation
+  bot/                #   building and checking the Reason8 AI
+ai/Reason8/           # in-game side: a BARb variant (AngelScript, Lua, JSON)
 tools/                # fetch-parser.sh: the pinned sdfz-demo-parser
 tests/                # mirrors reason8/; fixtures/ holds an anonymised replay
 notebooks/            # exploration of the match dumps

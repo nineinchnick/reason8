@@ -1,0 +1,8 @@
+{
+  "comment": "BARb scripts that ai/Reason8 replaces, with the SHA-256 of the stock file each copy was made from. reason8/bot/build.py compares them with the installed game.",
+  "game": "Beyond All Reason test-32018-ad135b9",
+  "replaced": {
+    "script/hard/manager/builder.as": "5b4d5f7d0948cbf5a55908cf2d72313d14bc831f1ed7000194e2848b1b675e07",
+    "script/hard/manager/factory.as": "8220d563ffb8674b696753a46fc308466264a6b964d0d0b8d0eb9c2308e4e4a9"
+  }
+}
