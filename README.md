@@ -79,6 +79,10 @@ more.
 : Build the Reason8 AI from BARb and `ai/Reason8`; check from a replay that it
   played its opening.
 
+`analysis opening-shift`, `analysis map-meta`
+: The measurements behind the research on balance patches and on the opening
+  meta of each start position.
+
 ## Data storage
 
 The shared copy of the data directory lives in a private S3 bucket; a local
@@ -217,6 +221,33 @@ context
 [`state-extraction.md`](docs/research/state-extraction.md) shows how to
 recover the state with a headless engine and what it costs.
 
+### Game versions
+
+BAR is rebalanced every few weeks, so openings from old versions could be
+wrong today. Measured on Supreme Isthmus, a year of balance patches moved
+openings less than sampling noise, so the dataset keeps its whole time window
+across patches, records the version and patch era of every game, and models
+record the versions they were trained on and check them when loaded. See
+[`game-versions.md`](docs/research/game-versions.md) for the patches, the
+measurement and the routine after a patch, and
+[ADR 0015](docs/decisions/0015-train-across-balance-patches.md) for the
+policy.
+
+### Map meta
+
+BAR's map metadata recommends start positions per map, each with a role
+(front, tech, air, sea), and the game shows them before the start. On the
+slice maps 97 to 99% of players start on one. `reason8.game.positions` gives
+every player of a replay that position, from the game's own lobby options or
+from the map list fetched by `reason8 maps fetch`: sixteen positions on an 8v8
+map, eight per side. Supreme Isthmus has seven recognisably different openings
+per side; All That Glitters and Rosetta have three (front, tech, air). The
+meta is strongest in the first factory and loose in the exact build order. See
+[`maps/`](docs/research/maps/README.md) for the positions, the sources and the
+numbers per map, and
+[ADR 0011](docs/decisions/0011-take-positions-from-the-map-metadata.md) for
+how positions are defined.
+
 ### Opening dataset
 
 `reason8 dataset` turns the parsed replays into the training data: every build
@@ -281,6 +312,7 @@ reason8/              # the Python package and the `reason8` command (cli.py)
   openings/           #   opening extraction, first contact, the opening dataset
   models/             #   next-build baselines and their evaluation
   bot/                #   building and checking the Reason8 AI
+  analysis/           #   measurements behind the research docs
 ai/Reason8/           # in-game side: a BARb variant (AngelScript, Lua, JSON)
 tools/                # fetch-parser.sh: the pinned sdfz-demo-parser
 tests/                # mirrors reason8/; fixtures/ holds an anonymised replay

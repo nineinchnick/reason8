@@ -6,6 +6,7 @@ import argparse
 import sys
 from types import ModuleType
 
+from reason8.analysis import map_meta, opening_shift
 from reason8.bot import build, check
 from reason8.data import download, sync
 from reason8.game import maps, positions
@@ -50,6 +51,14 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
         [
             ("build", build, "build the AI folder from BARb and ai/Reason8"),
             ("check", check, "check from a replay that the AI played its opening"),
+        ],
+    ),
+    (
+        "analysis",
+        "measurements behind the research docs",
+        [
+            ("opening-shift", opening_shift, "how openings shift between groups of games"),
+            ("map-meta", map_meta, "the opening meta of each start position"),
         ],
     ),
 ]
