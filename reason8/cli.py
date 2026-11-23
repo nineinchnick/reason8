@@ -9,7 +9,7 @@ from types import ModuleType
 from reason8.data import download, sync
 from reason8.game import maps, positions
 from reason8.headless import batch, run, setup, state
-from reason8.openings import contact
+from reason8.openings import contact, dataset
 from reason8.replays import fixture, parse, sdfz
 
 # (name, module, summary): each module has `run(args)` and, when it takes arguments,
@@ -40,6 +40,7 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
         ],
     ),
     ("contact", contact, "measure first contact in re-simulated replays"),
+    ("dataset", dataset, "build the opening dataset from parsed replays"),
 ]
 
 

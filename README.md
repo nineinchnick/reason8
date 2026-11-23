@@ -68,6 +68,10 @@ more.
 : Measure first contact in re-simulated replays (`--report` prints the
   tables).
 
+`dataset`
+: Build the opening dataset from the parsed replays (`--stats` prints the
+  tables).
+
 ## Data storage
 
 The shared copy of the data directory lives in a private S3 bucket; a local
@@ -206,6 +210,21 @@ context
 [`state-extraction.md`](docs/research/state-extraction.md) shows how to
 recover the state with a headless engine and what it costs.
 
+### Opening dataset
+
+`reason8 dataset` turns the parsed replays into the training data: every build
+order a player gave until their units were first hit by the enemy, and at most
+the first 8 minutes, with the player's position, faction, skill and result and
+the game's version, split by game into train, validation and test. After first
+contact orders answer raids and losses that the replay's commands do not show;
+when it happens is measured on re-simulated replays
+([`first-contact.md`](docs/research/first-contact.md)): 2 to 4.5 minutes into
+the game at front positions, and not within 8 minutes at most tech positions.
+See [`openings-dataset.md`](docs/reference/openings-dataset.md) for the
+columns and the numbers, and
+[ADR 0012](docs/decisions/0012-end-openings-at-first-contact.md) for where an
+opening ends and how games are split.
+
 ## Compute
 
 Training and headless simulation run **locally first**. Bulk jobs (re-running
@@ -246,7 +265,7 @@ reason8/              # the Python package and the `reason8` command (cli.py)
   replays/            #   reading .sdfz files, parsing them, reading parsed replays
   game/               #   game versions and balance patches, map metadata, positions
   headless/           #   headless engine runs, the state export widget, start scripts
-  openings/           #   opening extraction, first contact
+  openings/           #   opening extraction, first contact, the opening dataset
 tools/                # fetch-parser.sh: the pinned sdfz-demo-parser
 tests/                # mirrors reason8/; fixtures/ holds an anonymised replay
 notebooks/            # exploration of the match dumps
