@@ -152,11 +152,14 @@ Tournaments, leagues and casts
 
 ```
 reason8/              # the Python package
+  data/               #   match dumps and the slice
   game/               #   game versions and balance patches
 tests/                # mirrors reason8/
+notebooks/            # exploration of the match dumps
 docs/
   decisions/          # architecture decision records, from the most fundamental
   research/           # studies and measurements behind the decisions
+  reference/          # the data, its formats, and how-tos
 data/                 # local data — git-ignored
 ```
 
