@@ -20,5 +20,6 @@ number and add it to the list below, which is in the same order.
 - [0010. Re-simulate replays headlessly for game state](0010-re-simulate-replays-headlessly-for-game-state.md)
 - [0011. Take positions from BAR's map metadata](0011-take-positions-from-the-map-metadata.md)
 - [0012. End openings at first contact and split games by match id](0012-end-openings-at-first-contact.md)
+- [0013. Evaluate on held-out games, one step per decision](0013-evaluate-on-held-out-games.md)
 - [0014. First training slice](0014-first-training-slice.md)
 - [0016. Download in a fixed order, keep the data in a private S3 bucket, run locally first](0016-download-and-store-the-data.md)

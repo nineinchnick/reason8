@@ -72,6 +72,9 @@ more.
 : Build the opening dataset from the parsed replays (`--stats` prints the
   tables).
 
+`baseline`
+: Fit, score and save the counting baselines for the next build.
+
 ## Data storage
 
 The shared copy of the data directory lives in a private S3 bucket; a local
@@ -223,7 +226,9 @@ the game at front positions, and not within 8 minutes at most tech positions.
 See [`openings-dataset.md`](docs/reference/openings-dataset.md) for the
 columns and the numbers, and
 [ADR 0012](docs/decisions/0012-end-openings-at-first-contact.md) for where an
-opening ends and how games are split.
+opening ends and how games are split. Counting baselines that predict the next
+build set the bar for every later model: [`results.md`](docs/results.md),
+measured as in [ADR 0013](docs/decisions/0013-evaluate-on-held-out-games.md).
 
 ## Compute
 
@@ -266,6 +271,7 @@ reason8/              # the Python package and the `reason8` command (cli.py)
   game/               #   game versions and balance patches, map metadata, positions
   headless/           #   headless engine runs, the state export widget, start scripts
   openings/           #   opening extraction, first contact, the opening dataset
+  models/             #   next-build baselines and their evaluation
 tools/                # fetch-parser.sh: the pinned sdfz-demo-parser
 tests/                # mirrors reason8/; fixtures/ holds an anonymised replay
 notebooks/            # exploration of the match dumps
@@ -273,6 +279,7 @@ docs/
   decisions/          # architecture decision records, from the most fundamental
   research/           # studies and measurements behind the decisions
   reference/          # the data, its formats, and how-tos
+  results.md          # model results
 data/                 # local data — git-ignored
 ```
 
