@@ -74,6 +74,11 @@ start position on a popular team map**, then have a bot play it in team games.
   games. Reason8 replaces its decisions one layer at a time (openings → macro
   → production), so the bot can always finish a game.
 
+The first milestone succeeds when, on Supreme Isthmus, a classifier cannot
+tell the bot's openings from human ones at the same position, and its economy
+at first contact is at least stock BARb's
+([ADR 0003](docs/decisions/0003-define-success-as-in-game-measures.md)).
+
 ## Roadmap
 
 **1. PoC: learned openings**
@@ -119,6 +124,19 @@ Tournaments, leagues and casts
 : A smaller hand-picked set of expert games (Alpha Cup, weekly leagues,
   YouTube casts), used for evaluation and extra weight.
 
+## Related work
+
+- **BARb** — the AI that ships with BAR, built on
+  [CircuitAI](https://github.com/rlcevg/CircuitAI).
+- **[Apex](https://github.com/apexearth/bar-ai)** — a BARb fork where small
+  neural nets adjust a build "market", trained on AI-vs-AI games. It also has
+  tooling to re-play replays headlessly and log game state, which is directly
+  relevant to us. Reason8 differs by learning from **human** replays.
+- **AlphaStar / AlphaStar Unplugged** (StarCraft II) — imitation from human
+  replays, then offline RL; also the main lesson on human-like limits.
+- See [`related-work.md`](docs/research/related-work.md) for what Apex changed
+  in BARb, what it measured, and what we reuse or do differently.
+
 ## Being a good citizen
 
 - Download replays politely (rate-limited, cached, never re-downloaded) — this
@@ -135,5 +153,15 @@ Tournaments, leagues and casts
 ```
 reason8/              # the Python package
 tests/                # mirrors reason8/
+docs/
+  decisions/          # architecture decision records, from the most fundamental
+  research/           # studies and measurements behind the decisions
 data/                 # local data — git-ignored
 ```
+
+## License
+
+GPL-2.0-or-later, the same as Beyond All Reason's code: you can use it under
+version 2 of the GNU General Public License or any later version. The licence
+text is in [LICENSE](LICENSE); see
+[ADR 0002](docs/decisions/0002-license-the-project-gpl-2-0-or-later.md).
