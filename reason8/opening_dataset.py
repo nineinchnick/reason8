@@ -3,7 +3,8 @@
 Usage::
 
     uv run python -m reason8.map_metadata              # once: the pinned map list
-    uv run python -m reason8.opening_dataset           # parsed replays -> openings_v1/
+    uv run python -m reason8.contact                   # once: re-simulated games -> contact
+    uv run python -m reason8.opening_dataset           # parsed replays -> openings_v2/
     uv run python -m reason8.opening_dataset --stats   # the tables of docs/openings-dataset.md
 
 The games are the training slice (`reason8.match_dumps.select_matches()` over the pinned
@@ -12,9 +13,11 @@ again reads whatever is parsed by then and rewrites the dataset: the split of a 
 depends only on its match id, so games never move between splits as more replays are
 parsed.
 
-What an opening is and how the games are split is ADR 0017; which games and openings are
-left out follows ADR 0012 (balance patches) and ADR 0015 (positions). The output, in
-``<data dir>/datasets/openings_v1/``:
+An opening is a player's build orders until their first contact with the enemy, and at
+most the first 8 minutes (ADR 0019, `reason8.contact`): the measured contact when the game
+was re-simulated, and otherwise the usual one of the map and start position. How the games
+are split is ADR 0017; which games and openings are left out follows ADR 0012 (balance
+patches) and ADR 0015 (positions). The output, in ``<data dir>/datasets/openings_v2/``:
 
 ``train.parquet``, ``validation.parquet``, ``test.parquet``
     One row per build order of an opening, with the columns of the game and the player.
@@ -48,7 +51,7 @@ from typing import Any
 
 import polars as pl
 
-from reason8 import match_dumps
+from reason8 import contact, match_dumps
 from reason8.game_versions import (
     balance_options,
     build_number,
@@ -65,12 +68,17 @@ from reason8.openings import (
     opening_orders,
     unit_role,
 )
-from reason8.parse import output_path
+from reason8.parse import PARSED_SUFFIX, output_path
 from reason8.positions import game_shape, position_order, replay_positions, start_setup
-from reason8.replay import Replay, load_replay
+from reason8.replay import GAME_SPEED, Replay, load_replay
 
-NAME = "openings_v1"
-FORMAT = "reason8.openings/1"
+NAME = "openings_v2"
+FORMAT = "reason8.openings/2"
+# Where an opening ends: at the player's first contact with the enemy (ADR 0019), or only
+# at the end of the opening window, as in openings_v1 (ADR 0017).
+UNTIL_CONTACT = "contact"
+WHOLE_WINDOW = "window"
+CUTOFFS = (UNTIL_CONTACT, WHOLE_WINDOW)
 # The slice window of docs/dataset.md, pinned so the selection does not move with the dumps.
 SLICE_SINCE = datetime(2026, 5, 23)
 SLICE_UNTIL = datetime(2026, 11, 22)
@@ -159,8 +167,17 @@ def extract_game(
     match_id: int,
     map_list: Mapping[str, MapMetadata] | None = None,
     seconds: int = OPENING_SECONDS,
+    cutoff: str = UNTIL_CONTACT,
+    measured: Mapping[int, int | None] | None = None,
+    position_cutoffs: Mapping[str, Mapping[str, int]] | None = None,
 ) -> GameExtract:
-    """The game record, and for a game that is used its players and opening orders."""
+    """The game record, and for a game that is used its players and opening orders.
+
+    `seconds` is the opening window. With the `UNTIL_CONTACT` cutoff an opening ends
+    earlier, at the player's first contact: `measured` (player -> frame) when the game was
+    re-simulated, and otherwise the usual one of the map and position (`position_cutoffs`,
+    by default `reason8.contact.POSITION_CUTOFF_SECONDS`).
+    """
     game_version = replay.meta.get("game")
     build = build_number(game_version)
     era = opening_era(build) if build is not None else None
@@ -184,6 +201,7 @@ def extract_game(
         "positions_shown": setup.overlay,
         "default_boxes": setup.default_boxes,
         "parser": (replay.doc.get("source") or {}).get("parser"),
+        "contact_measured": cutoff == UNTIL_CONTACT and measured is not None,
     }
     extract = GameExtract(game)
     if status is not None:
@@ -192,9 +210,21 @@ def extract_game(
     positions = replay_positions(replay, map_list)
     users = {player["teamId"]: player.get("userId") for player in replay.players}
     orders_by_team = opening_orders(replay, seconds)
+    window_frames = seconds * GAME_SPEED
     for team in replay.teams().values():
         position = positions.get(team.team_id)
-        orders = orders_by_team.get(team.team_id, [])
+        window_orders = orders_by_team.get(team.team_id, [])
+        cutoff_frame, cutoff_source = window_frames, contact.WINDOW
+        if cutoff == UNTIL_CONTACT:
+            cutoff_frame, cutoff_source = contact.opening_cutoff(
+                replay.meta.get("map"),
+                position.spawn_point if position else None,
+                window_frames,
+                measured,
+                team.team_id,
+                position_cutoffs,
+            )
+        orders = [order for order in window_orders if order.frame <= cutoff_frame]
         units = [current_unit_name(order.unit) for order in orders]
         faction = team.faction if team.faction in FACTIONS else ordered_faction(units)
         extract.players.append(
@@ -214,6 +244,9 @@ def extract_game(
                 "position_distance": position.distance if position else None,
                 "on_spot": position.on_spot if position else None,
                 "won": team.ally_team_id in winners if winners else None,
+                "cutoff_frame": cutoff_frame,
+                "cutoff_source": cutoff_source,
+                "orders_in_window": len(window_orders),
                 "orders": len(orders),
                 "added": sum(order.count > 0 for order in orders),
                 "units": sorted(set(units)),
@@ -247,11 +280,26 @@ def extract_game(
 
 
 _worker_map_list: Mapping[str, MapMetadata] | None = None
+_worker_seconds = OPENING_SECONDS
+_worker_cutoff = UNTIL_CONTACT
+_worker_measured: Mapping[str, Mapping[int, int | None]] = {}
+_worker_position_cutoffs: Mapping[str, Mapping[str, int]] | None = None
 
 
-def _start_worker(map_list: Mapping[str, MapMetadata] | None) -> None:
-    global _worker_map_list
+def _start_worker(
+    map_list: Mapping[str, MapMetadata] | None,
+    seconds: int,
+    cutoff: str,
+    measured: Mapping[str, Mapping[int, int | None]],
+    position_cutoffs: Mapping[str, Mapping[str, int]] | None,
+) -> None:
+    global _worker_map_list, _worker_seconds, _worker_cutoff, _worker_measured
+    global _worker_position_cutoffs
     _worker_map_list = map_list
+    _worker_seconds = seconds
+    _worker_cutoff = cutoff
+    _worker_measured = measured
+    _worker_position_cutoffs = position_cutoffs
 
 
 def _extract_file(task: tuple[str, int]) -> GameExtract:
@@ -267,7 +315,15 @@ def _extract_file(task: tuple[str, int]) -> GameExtract:
                 "error": str(error),
             }
         )
-    return extract_game(replay, match_id, _worker_map_list)
+    return extract_game(
+        replay,
+        match_id,
+        _worker_map_list,
+        _worker_seconds,
+        _worker_cutoff,
+        _worker_measured.get(contact.replay_name(path, PARSED_SUFFIX)),
+        _worker_position_cutoffs,
+    )
 
 
 def ordered_faction(units: Iterable[str]) -> str | None:
@@ -336,6 +392,7 @@ GAME_SCHEMA = {
     "positions_shown": pl.Boolean,
     "default_boxes": pl.Boolean,
     "parser": pl.String,
+    "contact_measured": pl.Boolean,
     "error": pl.String,
 }
 PLAYER_SCHEMA = {
@@ -354,6 +411,9 @@ PLAYER_SCHEMA = {
     "position_distance": pl.Float32,
     "on_spot": pl.Boolean,
     "won": pl.Boolean,
+    "cutoff_frame": pl.Int32,  # the last frame of the opening
+    "cutoff_source": pl.String,  # reason8.contact: measured, position or window
+    "orders_in_window": pl.Int32,  # build orders of the whole opening window
     "orders": pl.Int32,
     "added": pl.Int32,
     "units": pl.List(pl.String),
@@ -381,6 +441,8 @@ PLAYER_COLUMNS_ON_ROWS = (
     "on_spot",
     "won",
     "skill",
+    "cutoff_frame",
+    "cutoff_source",
 )
 
 
@@ -392,13 +454,26 @@ def build_dataset(
     *,
     jobs: int = 1,
     map_list: Mapping[str, MapMetadata] | None = None,
+    seconds: int = OPENING_SECONDS,
+    cutoff: str = UNTIL_CONTACT,
+    measured: Mapping[str, Mapping[int, int | None]] | None = None,
+    position_cutoffs: Mapping[str, Mapping[str, int]] | None = None,
 ) -> dict[str, Any]:
     """Build the dataset from the parsed replays of `selection` and return its manifest.
 
     `selection` has a row per game (``match_id``, ``replay_file_name``, ``start_time``,
     ``avg_skill``), as `select_matches()` returns it; games whose replay is not parsed
-    are skipped. `match_players` gives each player's skill before the game.
+    are skipped. `match_players` gives each player's skill before the game. `seconds` is
+    the opening window and `cutoff` says whether openings end at first contact: `measured`
+    is the first contacts of the re-simulated games (`reason8.contact.load_measured()`),
+    `position_cutoffs` the cutoffs of the others (`reason8.contact.POSITION_CUTOFF_SECONDS`).
     """
+    if cutoff not in CUTOFFS:
+        raise ValueError(f"cutoff must be one of {CUTOFFS}, not {cutoff!r}")
+    until_contact = cutoff == UNTIL_CONTACT
+    measured = measured if until_contact and measured is not None else {}
+    if position_cutoffs is None:
+        position_cutoffs = contact.POSITION_CUTOFF_SECONDS
     map_list = load_map_list() if map_list is None else map_list
     tasks = []
     for row in selection.select("match_id", "replay_file_name").iter_rows(named=True):
@@ -424,7 +499,9 @@ def build_dataset(
             part_orders.clear()
 
     with ProcessPoolExecutor(
-        max_workers=max(1, jobs), initializer=_start_worker, initargs=(map_list,)
+        max_workers=max(1, jobs),
+        initializer=_start_worker,
+        initargs=(map_list, seconds, cutoff, measured, position_cutoffs),
     ) as pool:
         for count, extract in enumerate(pool.map(_extract_file, tasks, chunksize=8), start=1):
             games.append(extract.game)
@@ -542,8 +619,13 @@ def build_dataset(
         "built_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "code": _code_version(),
         "opening": {
-            "seconds": OPENING_SECONDS,
-            "definition": "docs/adr/0017-define-openings-by-time-and-split-games-by-match-id.md",
+            "definition": "docs/adr/0019-end-openings-at-first-contact.md",
+            "window_seconds": seconds,
+            "cutoff": cutoff,
+            "contact": contact.MEASURES[contact.CONTACT] if until_contact else None,
+            "measured_games": int(included["contact_measured"].sum()),
+            "position_cutoff_quantile": contact.CUTOFF_QUANTILE if until_contact else None,
+            "position_cutoff_seconds": position_cutoffs if until_contact else None,
         },
         "selection": {
             "since": SLICE_SINCE.date().isoformat(),
@@ -570,6 +652,9 @@ def build_dataset(
         "counts": {
             "games_by_status": dict(Counter(game_frame["status"].to_list()).most_common()),
             "openings_by_status": dict(Counter(player_frame["status"].to_list()).most_common()),
+            "openings_by_cutoff_source": dict(
+                Counter(kept_players["cutoff_source"].to_list()).most_common()
+            ),
             "games": _counts_by_split(included),
             "openings": _counts_by_split(kept_players),
             "rows": row_counts,
@@ -601,14 +686,16 @@ def _readme(manifest: Mapping[str, Any]) -> str:
         "",
         "Opening build orders of the training slice, one row per build order.",
         "Built by `uv run python -m reason8.opening_dataset`; see",
-        "docs/openings-dataset.md and docs/adr/0017 in the repository.",
+        "docs/openings-dataset.md, docs/adr/0017 and docs/adr/0019 in the repository.",
         "",
+        f"- openings end: {_cutoff_text(manifest['opening'])}",
         f"- built: {manifest['built_at']}, code {manifest['code']['commit']}"
         + (" (with uncommitted changes)" if manifest["code"]["dirty"] else ""),
         f"- slice games: {manifest['selection']['games']}, parsed: "
         f"{manifest['selection']['parsed']}",
         f"- games by status: {counts['games_by_status']}",
         f"- openings by status: {counts['openings_by_status']}",
+        f"- openings by where their end comes from: {counts['openings_by_cutoff_source']}",
         "",
         "| split | games | openings | rows |",
         "| --- | --- | --- | --- |",
@@ -619,6 +706,16 @@ def _readme(manifest: Mapping[str, Any]) -> str:
             f"| {counts['rows'][split]} |"
         )
     return "\n".join(lines) + "\n"
+
+
+def _cutoff_text(opening: Mapping[str, Any]) -> str:
+    window = f"after {opening['window_seconds'] // 60} minutes"
+    if opening["cutoff"] != UNTIL_CONTACT:
+        return window
+    return (
+        f"at the player's first contact with the enemy, at the latest {window} "
+        f"({opening['measured_games']} games with a measured contact)"
+    )
 
 
 def dataset_dir(name: str = NAME) -> Path:
@@ -639,6 +736,11 @@ def _table(header: Sequence[str], rows: Iterable[Sequence[object]]) -> list[str]
 
 def _percent(part: int, whole: int) -> str:
     return f"{100 * part / whole:.1f}%" if whole else "-"
+
+
+def _clock(frame: int) -> str:
+    seconds = frame // GAME_SPEED
+    return f"{seconds // 60}:{seconds % 60:02d}"
 
 
 def _quantiles(values: Sequence[int]) -> tuple[int, int, int]:
@@ -775,6 +877,27 @@ def stats(out_dir: Path) -> str:
         ["map", "openings", "orders p10", "median", "p90", "steps p10", "median", "p90"], rows
     )
 
+    lines += ["", "## Where openings end", ""]
+    opening = manifest["opening"]
+    lines += [f"Openings end {_cutoff_text(opening)}.", ""]
+    rows = []
+    with_map = kept.join(included.select("match_id", "map"), on="match_id")
+    for map_name in sorted(with_map["map"].unique().to_list()):
+        group = with_map.filter(pl.col("map") == map_name)
+        sources = Counter(group["cutoff_source"].to_list())
+        rows.append(
+            [map_name, group.height]
+            + [sources[source] for source in (contact.MEASURED, contact.BY_POSITION)]
+            + [sources[contact.WINDOW]]
+            + [_clock(frame) for frame in _quantiles(group["cutoff_frame"].to_list())]
+            + [_percent(group["orders"].sum(), group["orders_in_window"].sum())]
+        )
+    lines += _table(
+        ["map", "openings", "measured contact", "by position", "whole window"]
+        + ["end p10", "median", "p90", "orders of the window kept"],
+        rows,
+    )
+
     lines += ["", f"## Top {TOP_OPENINGS} openings (first {FIRST_ORDERS} orders)", ""]
     with_text = sequences.with_columns(
         pl.col("units")
@@ -844,6 +967,21 @@ def main(argv: list[str] | None = None) -> int:
     argument_parser.add_argument("--out", type=Path, default=dataset_dir())
     argument_parser.add_argument("--jobs", type=int, default=min(8, os.cpu_count() or 1))
     argument_parser.add_argument(
+        "--cutoff",
+        choices=CUTOFFS,
+        default=UNTIL_CONTACT,
+        help="where openings end: at first contact, or only with the opening window",
+    )
+    argument_parser.add_argument(
+        "--window-seconds", type=int, default=OPENING_SECONDS, help="the opening window"
+    )
+    argument_parser.add_argument(
+        "--contact",
+        type=Path,
+        default=contact.contact_dir() / contact.TABLE_NAME,
+        help="first contacts of the re-simulated games (python -m reason8.contact)",
+    )
+    argument_parser.add_argument(
         "--stats", action="store_true", help="print the tables of a built dataset"
     )
     args = argument_parser.parse_args(argv)
@@ -859,6 +997,9 @@ def main(argv: list[str] | None = None) -> int:
         slice_selection(),
         match_dumps.scan_dump("match_players"),
         jobs=args.jobs,
+        seconds=args.window_seconds,
+        cutoff=args.cutoff,
+        measured=contact.load_measured(args.contact),
     )
     print(json.dumps(manifest["counts"], indent=2))
     return 0

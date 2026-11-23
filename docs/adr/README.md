@@ -41,6 +41,8 @@ one "Superseded by NNNN".
 - [0016. License the project GPL-2.0-or-later](0016-license-the-project-gpl-2-0-or-later.md):
   Accepted
 - [0017. Define openings by time and split games by match id](0017-define-openings-by-time-and-split-games-by-match-id.md):
-  Accepted
+  Accepted; superseded in part by 0019
 - [0018. Evaluate next-build models on held-out games, one step per decision](0018-evaluate-next-build-models-on-held-out-games.md):
+  Accepted
+- [0019. End openings at first contact](0019-end-openings-at-first-contact.md):
   Accepted

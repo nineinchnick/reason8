@@ -8,13 +8,16 @@ from pathlib import Path
 import polars as pl
 import synthetic
 
+from reason8.contact import BY_POSITION, MEASURED, WINDOW
 from reason8.opening_dataset import (
     INCLUDED,
     NOT_A_RELEASE,
     REMOVED_UNIT,
     SPLITS,
     UNIT_TWEAKS,
+    UNTIL_CONTACT,
     WATER_LEVEL,
+    WHOLE_WINDOW,
     WITH_BOTS,
     WRONG_SHAPE,
     build_dataset,
@@ -64,7 +67,7 @@ def test_game_exclusion():
 
 def test_extract_game_has_a_row_per_order():
     replay = Replay(fixture_document())
-    extract = extract_game(replay, 77, map_list={})
+    extract = extract_game(replay, 77, map_list={}, cutoff=WHOLE_WINDOW)
     assert extract.game["status"] == INCLUDED
     assert extract.game["split"] == split_of(77)
     assert extract.game["build"] == 32018
@@ -75,6 +78,9 @@ def test_extract_game_has_a_row_per_order():
     assert {player["position"] for player in extract.players} == {f"P{n}" for n in range(1, 17)}
     assert all(player["on_spot"] for player in extract.players)
     assert {player["won"] for player in extract.players} == {True, False}
+    assert {player["cutoff_frame"] for player in extract.players} == {8 * 60 * 30}
+    assert {player["cutoff_source"] for player in extract.players} == {WINDOW}
+    assert all(player["orders"] == player["orders_in_window"] for player in extract.players)
 
     orders = opening_orders(replay)
     rows = pl.DataFrame(dict(extract.orders))
@@ -100,6 +106,48 @@ def test_extract_game_has_a_row_per_order():
     extract = extract_game(Replay(excluded), 78, map_list={})
     assert extract.game["status"] == WATER_LEVEL
     assert not extract.players and not extract.orders
+
+
+def test_extract_game_ends_openings_at_first_contact():
+    replay = Replay(fixture_document())
+    orders = opening_orders(replay)  # players 0, 7 and 8 give orders until frame 5,700
+    whole = extract_game(replay, 77, map_list={}, cutoff=WHOLE_WINDOW)
+    position_of = {player["player_slot"]: player["position"] for player in whole.players}
+    map_name = replay.meta["map"]
+    position_cutoffs = {map_name: {position_of[8]: 100}}
+
+    # player 0 was hit at frame 3,000, player 7 not at all; player 8 is not in the state
+    # file and has a cutoff for the position; the others have neither
+    extract = extract_game(
+        replay,
+        77,
+        map_list={},
+        cutoff=UNTIL_CONTACT,
+        measured={0: 3000, 7: None},
+        position_cutoffs=position_cutoffs,
+    )
+    assert extract.game["contact_measured"] is True
+    players = {player["player_slot"]: player for player in extract.players}
+    assert (players[0]["cutoff_frame"], players[0]["cutoff_source"]) == (3000, MEASURED)
+    assert (players[7]["cutoff_frame"], players[7]["cutoff_source"]) == (14400, MEASURED)
+    assert (players[8]["cutoff_frame"], players[8]["cutoff_source"]) == (3000, BY_POSITION)
+    assert (players[1]["cutoff_frame"], players[1]["cutoff_source"]) == (14400, WINDOW)
+    rows = pl.DataFrame(dict(extract.orders))
+    for slot in (0, 7, 8):
+        cutoff_frame = players[slot]["cutoff_frame"]
+        expected = [order for order in orders[slot] if order.frame <= cutoff_frame]
+        player_rows = rows.filter(pl.col("player_slot") == slot)
+        assert player_rows["frame"].to_list() == [order.frame for order in expected]
+        assert player_rows["order_index"].to_list() == list(range(len(expected)))
+        assert players[slot]["orders"] == len(expected)
+        assert players[slot]["orders_in_window"] == len(orders[slot])
+    assert 0 < players[0]["orders"] < players[0]["orders_in_window"]
+    assert players[7]["orders"] == players[7]["orders_in_window"]
+
+    # without measurements and cutoffs nothing is known: the whole window
+    extract = extract_game(replay, 77, map_list={}, position_cutoffs={})
+    assert extract.game["contact_measured"] is False
+    assert {player["cutoff_source"] for player in extract.players} == {WINDOW}
 
 
 def test_ordered_faction_and_removed_units():
@@ -157,8 +205,17 @@ def test_build_dataset(tmp_path):
     match_players = pl.DataFrame(
         {"match_id": [1002], "user_id": [5], "old_skill": [30.0], "old_uncertainty": [2.0]}
     )
-    out = tmp_path / "datasets" / "openings_v1"
-    manifest = build_dataset(parsed, out, selection, match_players, jobs=2, map_list={})
+    out = tmp_path / "datasets" / "openings_v2"
+    position_of = {
+        player["player_slot"]: player["position"]
+        for player in extract_game(Replay(document), 1, map_list={}).players
+    }
+    settings = {
+        "map_list": {},
+        "measured": {"game2": {0: 3000, 7: None}, "game11": {0: 1}},
+        "position_cutoffs": {document["meta"]["map"]: {position_of[8]: 100}},
+    }
+    manifest = build_dataset(parsed, out, selection, match_players, jobs=2, **settings)
 
     assert manifest["selection"] == {
         "since": "2026-05-23",
@@ -166,6 +223,22 @@ def test_build_dataset(tmp_path):
         "maps": [document["meta"]["map"]],
         "games": 12,
         "parsed": 11,
+    }
+    assert manifest["opening"] == {
+        "definition": "docs/adr/0019-end-openings-at-first-contact.md",
+        "window_seconds": 480,
+        "cutoff": UNTIL_CONTACT,
+        "contact": "a unit of the player other than a scout is hit by an enemy unit",
+        "measured_games": 1,
+        "position_cutoff_quantile": 0.5,
+        "position_cutoff_seconds": settings["position_cutoffs"],
+    }
+    # of the 159 openings kept: players 0 and 7 of the re-simulated game, and player 8 of
+    # each of the 10 games through the position
+    assert manifest["counts"]["openings_by_cutoff_source"] == {
+        WINDOW: 147,
+        BY_POSITION: 10,
+        MEASURED: 2,
     }
     assert manifest["counts"]["games_by_status"] == {INCLUDED: 10, UNIT_TWEAKS: 1}
     assert manifest["counts"]["openings_by_status"] == {INCLUDED: 159, REMOVED_UNIT: 1}
@@ -184,6 +257,11 @@ def test_build_dataset(tmp_path):
     assert openings_frame.filter(pl.col("status") == REMOVED_UNIT)["removed_units"].to_list() == [
         ["armgone"]
     ]
+    measured_game = openings_frame.filter(pl.col("match_id") == 1002)
+    assert Counter(measured_game["cutoff_source"]) == {MEASURED: 2, BY_POSITION: 1, WINDOW: 13}
+    assert measured_game.filter(pl.col("player_slot") == 0)["cutoff_frame"].item() == 3000
+    assert 0 < measured_game.filter(pl.col("player_slot") == 0)["orders"].item() < 47
+    assert games_frame.filter(pl.col("contact_measured"))["match_id"].to_list() == [1002]
 
     listed = []
     total_rows = 0
@@ -194,6 +272,8 @@ def test_build_dataset(tmp_path):
         rows = pl.read_parquet(out / f"{split}.parquet")
         assert set(rows["match_id"].unique().to_list()) <= set(ids)
         assert rows.height == manifest["counts"]["rows"][split]
+        assert rows.filter(pl.col("frame") > pl.col("cutoff_frame")).height == 0
+        assert set(rows["cutoff_source"].unique().to_list()) <= {MEASURED, BY_POSITION, WINDOW}
         total_rows += rows.height
     assert sorted(listed) == list(range(1001, 1011))
     assert (
@@ -204,7 +284,7 @@ def test_build_dataset(tmp_path):
     )
     assert total_rows > 0
     assert json.loads((out / "manifest.json").read_text()) == manifest
-    assert not out.with_name("openings_v1.building").exists()
+    assert not out.with_name("openings_v2.building").exists()
 
     sequences = load_sequences(out)
     with_orders = openings_frame.filter(pl.col("status") == INCLUDED, pl.col("added") > 0)
@@ -212,8 +292,19 @@ def test_build_dataset(tmp_path):
     assert all(len(units) > 0 for units in sequences["units"].to_list())
     report = stats(out)
     assert "## Top 20 openings" in report
+    assert "## Where openings end" in report
     assert "Supreme Isthmus" in report
 
     # building again gives the same rows
-    again = build_dataset(parsed, out, selection, match_players, jobs=1, map_list={})
+    again = build_dataset(parsed, out, selection, match_players, jobs=1, **settings)
     assert again["counts"] == manifest["counts"]
+
+    # the whole opening window, as before openings ended at first contact
+    window = build_dataset(
+        parsed, tmp_path / "window", selection, match_players, cutoff=WHOLE_WINDOW, **settings
+    )
+    assert window["opening"]["cutoff"] == WHOLE_WINDOW
+    assert window["opening"]["measured_games"] == 0
+    assert window["opening"]["position_cutoff_seconds"] is None
+    assert window["counts"]["openings_by_cutoff_source"] == {WINDOW: 159}
+    assert sum(window["counts"]["rows"].values()) > total_rows

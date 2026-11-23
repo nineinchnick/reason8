@@ -9,7 +9,8 @@ Before any learned model we need to know what counting scores. Every model here 
 the unit of the next step of an opening from the steps before it and what is known before
 the game: the player's faction, the map and the start position. A step is one decision:
 the orders of one drag (the same unit in the same frame) are merged into one step. The
-evaluation protocol is ADR 0018; the dataset is `reason8.opening_dataset` (ADR 0017).
+evaluation protocol is ADR 0018; the dataset is `reason8.opening_dataset` (ADR 0017 and
+ADR 0019: an opening ends at the player's first contact with the enemy).
 
 The n-gram models interpolate from specific contexts to general ones with Witten-Bell
 smoothing: a context's counts are trusted as much as it has seen different next units,
@@ -45,9 +46,9 @@ from reason8.positions import position_order
 FORMAT = "reason8.ngram/1"
 START = "<start>"
 UNKNOWN = "<unknown>"
-# Steps scored per opening. An opening has a median of 48 to 61 steps in 8 minutes; the
-# first 30 hold the first factory and its first units, and keep long openings from
-# outweighing the others.
+# Steps scored per opening. The first 30 hold the first factory and its first units, and
+# keep long openings from outweighing the others; an opening that ends at first contact
+# before that is scored whole.
 SCORED_STEPS = 30
 STEP_BUCKETS = ((0, 1), (1, 5), (5, 10), (10, 20), (20, 30))
 BOOTSTRAP_ROUNDS = 1000
@@ -623,6 +624,12 @@ def check_model(
 def main(argv: list[str] | None = None) -> int:
     argument_parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     argument_parser.add_argument("--dataset", type=Path, default=dataset_dir())
+    argument_parser.add_argument(
+        "--train-dataset",
+        type=Path,
+        default=None,
+        help="train on another build of the dataset, to compare definitions of an opening",
+    )
     argument_parser.add_argument("--split", default="validation", choices=["validation", "test"])
     argument_parser.add_argument("--rounds", type=int, default=BOOTSTRAP_ROUNDS)
     argument_parser.add_argument(
@@ -630,22 +637,28 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = argument_parser.parse_args(argv)
     manifest = json.loads((args.dataset / "manifest.json").read_text())
-    fitted = fit_models(load_openings(args.dataset, "train"))
+    train_dataset = args.train_dataset or args.dataset
+    fitted = fit_models(load_openings(train_dataset, "train"))
     validation = load_openings(args.dataset, "validation")
     best = choose_model(fitted, validation)
     held_out = validation if args.split == "validation" else load_openings(args.dataset, "test")
     raw = (
-        load_openings(args.dataset, "train", merge=False),
+        load_openings(train_dataset, "train", merge=False),
         load_openings(args.dataset, args.split, merge=False),
     )
     print(
         f"Dataset `{manifest['name']}` built {manifest['built_at']} "
         f"(code {manifest['code']['commit']}).\n"
     )
+    if args.train_dataset:
+        trained_on = json.loads((train_dataset / "manifest.json").read_text())
+        print(f"Trained on `{trained_on['name']}` built {trained_on['built_at']}.\n")
     print(report(fitted, held_out, args.split, best, raw, args.rounds))
+    if args.train_dataset:
+        return 0  # a comparison, not the model to keep
     chosen = fitted[best]
     assert isinstance(chosen, NgramModel)
-    target = args.save or models_dir() / "ngram_v1.json"
+    target = args.save or models_dir() / "ngram_v2.json"
     save_model(chosen, target, manifest)
     print(f"\nsaved {chosen.name!r} to {target}", file=sys.stderr)
     return 0

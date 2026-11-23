@@ -195,15 +195,20 @@ positions are defined.
 ### Opening dataset
 
 `python -m reason8.opening_dataset` turns the parsed replays into the training
-data: every build order a player gave in the first 8 minutes, with the
-player's position, faction, skill and result and the game's version, split by
-game into train, validation and test. See
+data: every build order a player gave until their units were first hit by the
+enemy, and at most the first 8 minutes, with the player's position, faction,
+skill and result and the game's version, split by game into train, validation
+and test. After first contact orders answer raids and losses that the replay's
+commands do not show; when it happens is measured on re-simulated replays
+([`docs/first-contact.md`](docs/first-contact.md)): 2 to 4.5 minutes into the
+game at front positions, and not within 8 minutes at most tech positions. See
 [`docs/openings-dataset.md`](docs/openings-dataset.md) for the columns and the
-numbers, and
+numbers, [ADR 0019](docs/adr/0019-end-openings-at-first-contact.md) for where
+an opening ends and
 [ADR 0017](docs/adr/0017-define-openings-by-time-and-split-games-by-match-id.md)
-for what an opening is and how games are split. Counting baselines that
-predict the next build set the bar for every later model:
-[`docs/results.md`](docs/results.md), measured as in
+for how games are split. Counting baselines that predict the next build set
+the bar for every later model: [`docs/results.md`](docs/results.md), measured
+as in
 [ADR 0018](docs/adr/0018-evaluate-next-build-models-on-held-out-games.md).
 
 ## Compute

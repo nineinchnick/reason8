@@ -1,6 +1,8 @@
 # 0017. Define openings by time and split games by match id
 
-- **Status:** Accepted
+- **Status:** Accepted; superseded in part by
+  [0019](0019-end-openings-at-first-contact.md): an opening ends at first
+  contact, the 8 minutes are the upper limit
 - **Date:** 2026-11-22
 
 ## Context
