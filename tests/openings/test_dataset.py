@@ -29,6 +29,7 @@ from reason8.openings.dataset import (
     stats,
 )
 from reason8.openings.extract import opening_orders
+from reason8.replays.parse import output_path
 from reason8.replays.replay import Replay, load_replay
 from tests import synthetic
 
@@ -160,7 +161,9 @@ def test_ordered_faction_and_removed_units():
 
 def write_parsed(directory: Path, name: str, document: dict) -> None:
     data = json.dumps(document).encode()
-    (directory / f"{name}.json.zst").write_bytes(zstd.compress(data))
+    path = output_path(directory, Path(f"{name}.sdfz"))
+    path.parent.mkdir(exist_ok=True)
+    path.write_bytes(zstd.compress(data))
 
 
 def test_build_dataset(tmp_path):

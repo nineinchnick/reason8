@@ -13,6 +13,7 @@ from reason8.game import maps, positions
 from reason8.headless import batch, run, setup, state
 from reason8.models import evaluate
 from reason8.openings import contact, dataset
+from reason8.paths import LayoutError
 from reason8.replays import fixture, parse, sdfz
 
 # (name, module, summary): each module has `run(args)` and, when it takes arguments,
@@ -94,7 +95,11 @@ def make_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = make_parser().parse_args(argv)
-    return args.run(args)
+    try:
+        return args.run(args)
+    except LayoutError as error:
+        print(error, file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

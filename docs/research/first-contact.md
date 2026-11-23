@@ -332,7 +332,7 @@ Fighting
   enemy units, and the damage between every pair of enemy players per second.
 
 A game's first 12 minutes are about 4 MB of JSON lines, 0.9 MB gzipped, in
-`data/state/<replay name>.jsonl.gz`.
+`data/state/date=<day>/<replay name>.jsonl.gz`.
 
 ## Limits
 

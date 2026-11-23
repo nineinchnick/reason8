@@ -19,6 +19,7 @@ from reason8.data.download import (
     make_client,
     read_manifest,
 )
+from reason8.paths import LayoutError, partitioned_name, partitioned_path
 
 START = datetime(2026, 6, 1)
 MAPS = ("Supreme Isthmus v2.1", "All That Glitters v2.2.3", "Rosetta 1.4.4")
@@ -30,12 +31,13 @@ def selection(count_per_map=(4, 4, 1)):
     for map_name, count in zip(MAPS, count_per_map, strict=True):
         for _ in range(count):
             match_id += 1
+            start_time = START + timedelta(hours=7 * match_id)
             rows.append(
                 {
                     "match_id": match_id,
-                    "replay_file_name": f"{match_id:03d}_{map_name}.sdfz",
+                    "replay_file_name": f"{start_time:%Y-%m-%d_%H-%M-%S}-000_{map_name}.sdfz",
                     "map": map_name,
-                    "start_time": START + timedelta(hours=match_id),
+                    "start_time": start_time,
                     "engine": "2026.09.03",
                     "game_version": "Beyond All Reason test-1",
                 }
@@ -109,6 +111,23 @@ def test_download_order_rejects_unknown_order():
         download_order(selection(), "oldest")
 
 
+def test_replays_are_kept_in_the_partition_of_their_day(tmp_path):
+    queue = download_order(selection((1, 0, 0)), "newest")
+    run_download(tmp_path, FakeServer(), queue, 1)
+    name = queue["replay_file_name"][0]
+    assert name.startswith("2026-06-01_07-00-00")
+    assert (tmp_path / "date=2026-06-01" / name).is_file()
+
+
+def test_a_flat_layout_is_not_downloaded_again(tmp_path):
+    queue = download_order(selection((1, 0, 0)), "newest")
+    (tmp_path / queue["replay_file_name"][0]).write_bytes(b"flat")
+    server = FakeServer()
+    with pytest.raises(LayoutError, match="migrate-layout"):
+        run_download(tmp_path, server, queue, 1)
+    assert server.requests == []
+
+
 def test_downloads_until_limit_and_records_manifest(tmp_path):
     server = FakeServer()
     queue = download_order(selection(), "newest")
@@ -116,9 +135,9 @@ def test_downloads_until_limit_and_records_manifest(tmp_path):
 
     assert summary.on_disk == 3
     assert summary.requests == 3
-    files = sorted(path.name for path in tmp_path.glob("*.sdfz"))
+    files = sorted(path.name for path in tmp_path.rglob("*.sdfz"))
     assert files == sorted(queue["replay_file_name"].head(3).to_list())
-    assert not list(tmp_path.glob("*.part"))
+    assert not list(tmp_path.rglob("*.part"))
     assert all(request.headers["User-Agent"] == USER_AGENT for request in server.requests)
     assert "github.com/nineinchnick/reason8" in USER_AGENT
     first_name = queue["replay_file_name"][0]
@@ -128,19 +147,21 @@ def test_downloads_until_limit_and_records_manifest(tmp_path):
     assert {row["status"] for row in manifest.values()} == {OK}
     assert {row["attempts"] for row in manifest.values()} == {1}
     first = manifest[queue["match_id"][0]]
-    assert first["bytes"] == (tmp_path / first["replay_file_name"]).stat().st_size
+    assert first["bytes"] == partitioned_path(tmp_path, first["replay_file_name"]).stat().st_size
     assert first["engine"] == "2026.09.03"
 
 
 def test_existing_files_count_and_are_not_requested(tmp_path):
     queue = download_order(selection(), "newest")
-    (tmp_path / queue["replay_file_name"][0]).write_bytes(b"already here")
+    existing = partitioned_path(tmp_path, queue["replay_file_name"][0])
+    existing.parent.mkdir()
+    existing.write_bytes(b"already here")
     server = FakeServer()
     summary = run_download(tmp_path, server, queue, 2)
 
     assert summary.requests == 1
     assert len(server.requests) == 1
-    assert (tmp_path / queue["replay_file_name"][0]).read_bytes() == b"already here"
+    assert existing.read_bytes() == b"already here"
     assert read_manifest(tmp_path / MANIFEST_NAME)[queue["match_id"][0]]["status"] == OK
 
     # a second run with the same limit asks for nothing
@@ -159,7 +180,7 @@ def test_missing_replays_are_recorded_skipped_and_replaced(tmp_path):
     assert summary.requests == 3
     row = read_manifest(tmp_path / MANIFEST_NAME)[queue["match_id"][0]]
     assert (row["status"], row["http_status"], row["attempts"]) == (MISSING, 404, 1)
-    assert not (tmp_path / expired).exists()
+    assert not partitioned_path(tmp_path, expired).exists()
 
     again = FakeServer()
     assert run_download(tmp_path, again, queue, 2).requests == 0
@@ -196,7 +217,7 @@ def test_broken_connection_leaves_no_partial_file(tmp_path):
     queue = download_order(selection((1, 0, 0)), "newest")
     summary = run_download(tmp_path, server, queue, 1)
     assert summary.on_disk == 0
-    assert list(tmp_path.glob("*.sdfz*")) == []
+    assert list(tmp_path.rglob("*.sdfz*")) == []
     row = read_manifest(tmp_path / MANIFEST_NAME)[queue["match_id"][0]]
     assert row["status"] == ERROR
     assert "ReadError" in row["error"]
@@ -208,7 +229,7 @@ def test_incomplete_body_is_an_error(tmp_path):
 
     queue = download_order(selection((1, 0, 0)), "newest")
     run_download(tmp_path, server, queue, 1)
-    assert list(tmp_path.glob("*.sdfz*")) == []
+    assert list(tmp_path.rglob("*.sdfz*")) == []
     assert read_manifest(tmp_path / MANIFEST_NAME)[queue["match_id"][0]]["status"] == ERROR
 
 
@@ -249,7 +270,7 @@ class CountingLimiter(RateLimiter):
 def test_replays_in_the_bucket_are_copied_without_asking_bar(tmp_path, bucket):
     queue = download_order(selection(), "newest")
     in_bucket = queue["replay_file_name"][0]
-    bucket.write(f"replays/{in_bucket}", b"from the bucket")
+    bucket.write(f"replays/{partitioned_name(in_bucket)}", b"from the bucket")
     server = FakeServer()
     limiter = CountingLimiter()
     with make_client(httpx.MockTransport(server)) as client:
@@ -273,9 +294,10 @@ def test_replays_in_the_bucket_are_copied_without_asking_bar(tmp_path, bucket):
     assert [request.url.path.rsplit("/", 1)[-1] for request in server.requests] == [
         queue["replay_file_name"][1]
     ]
-    assert (tmp_path / in_bucket).read_bytes() == b"from the bucket"
+    assert partitioned_path(tmp_path, in_bucket).read_bytes() == b"from the bucket"
     from_bar = queue["replay_file_name"][1]
-    assert bucket.read(f"replays/{from_bar}") == (tmp_path / from_bar).read_bytes()
+    from_bar_path = partitioned_path(tmp_path, from_bar)
+    assert bucket.read(f"replays/{partitioned_name(from_bar)}") == from_bar_path.read_bytes()
     manifest = read_manifest(tmp_path / MANIFEST_NAME)
     first, second = manifest[queue["match_id"][0]], manifest[queue["match_id"][1]]
     assert (first["status"], first["source"], first["attempts"]) == (OK, FROM_BUCKET, 0)
@@ -288,7 +310,7 @@ def test_missing_replays_are_not_uploaded(tmp_path, bucket):
     file_name = queue["replay_file_name"][0]
     summary = run_download(tmp_path, FakeServer({file_name: 404}), queue, 1, bucket=bucket)
     assert (summary.requests, summary.uploaded) == (1, 0)
-    assert bucket.read(f"replays/{file_name}") is None
+    assert bucket.read(f"replays/{partitioned_name(file_name)}") is None
     row = read_manifest(tmp_path / MANIFEST_NAME)[queue["match_id"][0]]
     assert (row["status"], row["source"]) == (MISSING, FROM_BAR)
 

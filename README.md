@@ -26,7 +26,7 @@ Getting the data (into the git-ignored `data/`, or `$REASON8_DATA_DIR`):
 ```sh
 uv run reason8 download --limit 100   # match dumps, then 100 replays of the slice
 tools/fetch-parser.sh                 # once: the pinned replay parser
-uv run reason8 parse                  # data/replays -> data/parsed/*.json.zst
+uv run reason8 parse                  # data/replays -> data/parsed
 ```
 
 The downloader keeps one connection at about one request per second, never
@@ -45,9 +45,11 @@ more.
   (`--limit N --since YYYY-MM-DD --until YYYY-MM-DD`, `--dry-run`).
 
 `sync push|pull [replays|parsed|matches]`
-: Copy the data directory to or from the private S3 bucket.
+: Copy the data directory to or from the private S3 bucket
+  (`--since YYYY-MM-DD --until YYYY-MM-DD` for some days, `--match`,
+  `--dry-run`).
 
-`parse [paths] --jobs N --zstd-level L --out DIR`
+`parse [paths] --jobs N --zstd-level L --out DIR --since D --until D`
 : Parse replays into compact, zstd-compressed JSON.
 
 `header REPLAY`
@@ -95,14 +97,19 @@ or `aws login`), and name the bucket:
 ```sh
 export REASON8_S3_URI=s3://<bucket>       # or pass --s3-uri to each command
 uv run reason8 sync pull replays parsed   # bucket -> data/
+uv run reason8 sync pull parsed --since 2026-11-01 --until 2026-11-08  # a week
 uv run reason8 sync push                  # data/ -> bucket: replays, parsed, matches
 ```
 
-`sync` copies files that are missing or differ in size, merges the manifest
-and the parse index, and never deletes anything. With the bucket configured,
-`reason8 download` looks there before asking BAR's servers and uploads what it
-downloads from them. Storing the whole first slice (about 175 GB of replays
-and about 70 GB of parsed replays) costs about $6 a month.
+Replays, parsed replays and state files are kept in daily partitions by the
+day the match started (`replays/date=2026-11-01/<name>.sdfz`), the same in
+`data/` and in the bucket
+([`dataset.md`](docs/reference/dataset.md#data-layout)). `sync` copies files
+that are missing or differ in size, merges the manifest and the parse index,
+and never deletes anything. With the bucket configured, `reason8 download`
+looks there before asking BAR's servers and uploads what it downloads from
+them. Storing the whole first slice (about 175 GB of replays and about 70 GB
+of parsed replays) costs about $6 a month.
 
 ## The idea in one paragraph
 

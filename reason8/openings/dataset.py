@@ -5,10 +5,12 @@ Usage::
     uv run reason8 maps fetch         # once: the pinned map list
     uv run reason8 contact            # once: re-simulated games -> contact
     uv run reason8 dataset            # parsed replays -> openings_v2/
+    uv run reason8 dataset --since 2026-11-01 --out data/datasets/november    # a part of it
     uv run reason8 dataset --stats    # the tables of docs/reference/openings-dataset.md
 
 The games are the training slice (`reason8.data.matches.select_matches()` over the pinned
-window of docs/reference/dataset.md) whose replays are parsed in ``<data dir>/parsed/``. Building
+window of docs/reference/dataset.md) whose replays are parsed in ``<data dir>/parsed/``;
+``--since`` and ``--until`` narrow the window to the date partitions of those days. Building
 again reads whatever is parsed by then and rewrites the dataset: the split of a game
 depends only on its match id, so games never move between splits as more replays are
 parsed.
@@ -46,7 +48,7 @@ from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -73,7 +75,13 @@ from reason8.openings.extract import (
     opening_orders,
     unit_role,
 )
-from reason8.paths import REPO_ROOT, data_dir
+from reason8.paths import (
+    REPO_ROOT,
+    data_dir,
+    partition,
+    partition_in_range,
+    require_partitioned,
+)
 from reason8.replays.parse import PARSED_SUFFIX, output_path
 from reason8.replays.replay import GAME_SPEED, Replay, load_replay
 
@@ -461,6 +469,8 @@ def build_dataset(
     cutoff: str = UNTIL_CONTACT,
     measured: Mapping[str, Mapping[int, int | None]] | None = None,
     position_cutoffs: Mapping[str, Mapping[str, int]] | None = None,
+    since: date | None = None,
+    until: date | None = None,
 ) -> dict[str, Any]:
     """Build the dataset from the parsed replays of `selection` and return its manifest.
 
@@ -470,6 +480,8 @@ def build_dataset(
     the opening window and `cutoff` says whether openings end at first contact: `measured`
     is the first contacts of the re-simulated games (`contact.load_measured()`), and
     `position_cutoffs` the cutoffs of the others (`contact.POSITION_CUTOFF_SECONDS`).
+    `since` (inclusive) and `until` (exclusive) keep only the games in the date partitions of
+    those days.
     """
     if cutoff not in CUTOFFS:
         raise ValueError(f"cutoff must be one of {CUTOFFS}, not {cutoff!r}")
@@ -478,6 +490,13 @@ def build_dataset(
     if position_cutoffs is None:
         position_cutoffs = contact.POSITION_CUTOFF_SECONDS
     map_list = load_map_list() if map_list is None else map_list
+    if since is not None or until is not None:
+        selection = selection.filter(
+            pl.col("replay_file_name").map_elements(
+                lambda name: partition_in_range(partition(name), since, until),
+                return_dtype=pl.Boolean,
+            )
+        )
     tasks = []
     for row in selection.select("match_id", "replay_file_name").iter_rows(named=True):
         path = output_path(parsed_dir, Path(row["replay_file_name"]))
@@ -631,8 +650,8 @@ def build_dataset(
             "position_cutoff_seconds": position_cutoffs if until_contact else None,
         },
         "selection": {
-            "since": SLICE_SINCE.date().isoformat(),
-            "until": SLICE_UNTIL.date().isoformat(),
+            "since": max(SLICE_SINCE.date(), since or date.min).isoformat(),
+            "until": min(SLICE_UNTIL.date(), until or date.max).isoformat(),
             "maps": sorted(selection["map"].unique().to_list()) if "map" in selection else None,
             "games": selection.height,
             "parsed": len(tasks),
@@ -979,6 +998,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=contact.contact_dir() / contact.TABLE_NAME,
         help="first contacts of the re-simulated games (reason8 contact)",
     )
+    parser.add_argument(
+        "--since",
+        type=date.fromisoformat,
+        help="only the games of the date partitions from this date (YYYY-MM-DD)",
+    )
+    parser.add_argument(
+        "--until",
+        type=date.fromisoformat,
+        help="only the games of the date partitions before this date (YYYY-MM-DD, exclusive)",
+    )
     parser.add_argument("--stats", action="store_true", help="print the tables of a built dataset")
 
 
@@ -989,6 +1018,7 @@ def run(args: argparse.Namespace) -> int:
     if not load_map_list():
         print("no map list: run `reason8 maps fetch` first", file=sys.stderr)
         return 1
+    require_partitioned(args.parsed, "*" + PARSED_SUFFIX)
     manifest = build_dataset(
         args.parsed,
         args.out,
@@ -998,6 +1028,8 @@ def run(args: argparse.Namespace) -> int:
         seconds=args.window_seconds,
         cutoff=args.cutoff,
         measured=contact.load_measured(args.contact),
+        since=args.since,
+        until=args.until,
     )
     print(json.dumps(manifest["counts"], indent=2))
     return 0

@@ -6,7 +6,8 @@
 
 For every replay it fetches what the replay needs (`reason8 headless setup`), plays it
 with the state export widget (`reason8 headless run`) and writes the state to
-<out-dir>/<replay name>.jsonl.gz. A replay whose state file is already there is skipped,
+<out-dir>/date=<date>/<replay name>.jsonl.gz, in the date partition of the replay
+(`reason8.paths`). A replay whose state file is already there is skipped,
 so the command can be repeated after a failure. Content is fetched one replay at a time,
 because the downloads share one pool; the engines run --jobs at once. An engine needs 5
 to 6 GB of RAM (docs/research/state-extraction.md).
@@ -27,7 +28,8 @@ from pathlib import Path
 
 from reason8.headless import run as headless_run
 from reason8.headless import setup
-from reason8.headless.state import state_path
+from reason8.headless.state import STATE_SUFFIX, state_path
+from reason8.paths import require_partitioned
 from reason8.replays import sdfz
 
 
@@ -111,6 +113,7 @@ def run(args: argparse.Namespace) -> int:
     args.data_dir = args.data_dir.resolve()
     args.out_dir = args.out_dir.resolve()
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    require_partitioned(args.out_dir, "*" + STATE_SUFFIX)
     replays = list(args.replays)
     if args.list:
         replays += [Path(line) for line in args.list.read_text().splitlines() if line.strip()]
@@ -134,5 +137,6 @@ def run(args: argparse.Namespace) -> int:
                 ok = False
                 print(json.dumps({"target": replay.name, "ok": False, "missing": failed}))
                 continue
+            target.parent.mkdir(parents=True, exist_ok=True)
             pool.submit(play, replay.resolve(), target, args).add_done_callback(finished)
     return 0 if ok else 1

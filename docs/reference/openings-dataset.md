@@ -25,10 +25,11 @@ uv run reason8 dataset --stats   # the tables below
 
 The games are those of `select_matches()` over the slice's pinned window
 (2026-05-23 to 2026-11-22, [`dataset.md`](dataset.md)) whose replays are
-parsed in `data/parsed/`. Building again reads whatever is parsed by then and
-rewrites the dataset: a game's split depends only on its match id, so nothing
-moves between splits as more replays are parsed. With 12 processes it reads
-about 12 replays a second.
+parsed in `data/parsed/`; `--since` and `--until` narrow the window to some
+days of the date partitions. Building again reads whatever is parsed by then
+and rewrites the dataset: a game's split depends only on its match id, so
+nothing moves between splits as more replays are parsed. With 12 processes it
+reads about 12 replays a second.
 
 `--cutoff window` builds the openings as they were before they ended at first
 contact (`openings_v1`: every order of the first 8 minutes),

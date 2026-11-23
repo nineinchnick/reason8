@@ -34,7 +34,7 @@ from reason8.game.maps import MapMetadata, load_map_list
 from reason8.game.positions import position_order, replay_positions
 from reason8.headless.state import STATE_SUFFIX, read_records
 from reason8.openings.extract import OPENING_SECONDS, opening_orders
-from reason8.paths import data_dir
+from reason8.paths import data_dir, find_files
 from reason8.replays.parse import output_path
 from reason8.replays.replay import GAME_SPEED, Replay, load_replay
 
@@ -252,7 +252,7 @@ def measure(
     """The first contact of every player of every complete state file in `state_dir`."""
     map_list = load_map_list() if map_list is None else map_list
     rows: list[dict[str, Any]] = []
-    for path in sorted(state_dir.glob("*" + STATE_SUFFIX)):
+    for path in find_files(state_dir, "*" + STATE_SUFFIX):
         name = replay_name(path)
         parsed = output_path(parsed_dir, Path(name + ".sdfz"))
         fights = read_fights(path)

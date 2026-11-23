@@ -8,9 +8,10 @@ Usage::
 Replays come from BAR's public object storage, which is community-funded: never ask for a file
 twice, and ask BAR's infrastructure developers before downloading thousands.
 
-Each replay is saved as ``<data dir>/replays/<replay_file_name>``: written to a ``.part`` file
-first and renamed when complete, so an interrupted run leaves no truncated replays. Every match
-the downloader touches gets a row in ``<data dir>/replays/manifest.parquet`` with its status:
+Each replay is saved as ``<data dir>/replays/date=YYYY-MM-DD/<replay_file_name>``, in the
+partition of the day the match started (`reason8.paths`): written to a ``.part`` file first and
+renamed when complete, so an interrupted run leaves no truncated replays. Every match the
+downloader touches gets a row in ``<data dir>/replays/manifest.parquet`` with its status:
 
 ``ok``
     the file is on disk (downloaded now, copied from the S3 bucket, or found there);
@@ -51,7 +52,7 @@ import polars as pl
 
 from reason8.data import matches, storage
 from reason8.data.storage import Bucket
-from reason8.paths import data_dir
+from reason8.paths import data_dir, partitioned_name, partitioned_path, require_partitioned
 
 PROJECT_URL = "https://github.com/nineinchnick/reason8"
 USER_AGENT = f"reason8/{version('reason8')} (+{PROJECT_URL})"
@@ -94,7 +95,7 @@ ORDERS = ("random", "newest")
 
 
 def replays_dir() -> Path:
-    """Directory holding the downloaded ``.sdfz`` files and the manifest."""
+    """Directory holding the downloaded ``.sdfz`` files (in date partitions) and the manifest."""
     return data_dir() / REPLAYS_DIRECTORY
 
 
@@ -274,10 +275,12 @@ def download_replays(
     ``missing``, and those that failed ``max_attempts`` times, are skipped and the next match
     in the queue takes their place. With a ``bucket``, a replay is looked for there before
     asking BAR's servers, and one downloaded from them is uploaded there. The manifest is updated
-    as the run goes.
+    as the run goes. Raises `reason8.paths.LayoutError` when ``dest`` holds replays outside the
+    date partitions, which would otherwise be downloaded again.
     """
     dest = dest or replays_dir()
     dest.mkdir(parents=True, exist_ok=True)
+    require_partitioned(dest, "*.sdfz")
     manifest_path = dest / MANIFEST_NAME
     manifest = read_manifest(manifest_path)
     summary = DownloadSummary()
@@ -312,7 +315,7 @@ def download_replays(
             if Path(file_name).name != file_name or file_name.startswith("."):
                 record(match, FetchResult(ERROR, error="unsafe file name"), attempts, None)
                 continue
-            path = dest / file_name
+            path = partitioned_path(dest, file_name)
             if path.exists():
                 summary.on_disk += 1
                 if previous.get("status") != OK:
@@ -324,7 +327,8 @@ def download_replays(
             if previous.get("status") == ERROR and attempts >= max_attempts:
                 continue
 
-            bucket_path = f"{REPLAYS_DIRECTORY}/{file_name}"
+            path.parent.mkdir(exist_ok=True)
+            bucket_path = f"{REPLAYS_DIRECTORY}/{partitioned_name(file_name)}"
             if bucket is not None and bucket.download(bucket_path, path):
                 size = path.stat().st_size
                 summary.on_disk += 1
@@ -388,7 +392,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--until", type=datetime.fromisoformat, help="latest match start, exclusive (YYYY-MM-DD)"
     )
-    parser.add_argument("--dest", type=Path, help="output directory (default: <data dir>/replays)")
+    parser.add_argument(
+        "--dest",
+        type=Path,
+        help="output directory, in date partitions (default: <data dir>/replays)",
+    )
     parser.add_argument(
         "--interval",
         type=float,

@@ -158,16 +158,17 @@ patch if that ever changes
 ## Downloading the replays
 
 `uv run reason8 download --limit N` (`reason8/data/download.py`) downloads the
-replays of `select_matches()` into `data/replays/`. It uses one connection, at
-most one request per second and a User-Agent naming the project and its
-repository. Files already on disk are never asked for again, and each replay
-is written to a `.part` file and renamed when complete. Every match it touches
-gets a row in `data/replays/manifest.parquet` with the match's map, time,
-engine and game version, and a `status`: `ok`, `missing` (404 or 410, not
-asked for again) or `error` (retried by later runs, at most 3 times). A 429 or
-503 answer stops the run. `--limit N` stops once N replays of the download
-order are on disk, so rerunning it downloads nothing; missing replays are
-replaced by the next ones in the order. The order is recorded as
+replays of `select_matches()` into `data/replays/`, in daily partitions (see
+[Data layout](#data-layout)). It uses one connection, at most one request per
+second and a User-Agent naming the project and its repository. Files already
+on disk are never asked for again, and each replay is written to a `.part`
+file and renamed when complete. Every match it touches gets a row in
+`data/replays/manifest.parquet` with the match's map, time, engine and game
+version, and a `status`: `ok`, `missing` (404 or 410, not asked for again) or
+`error` (retried by later runs, at most 3 times). A 429 or 503 answer stops
+the run. `--limit N` stops once N replays of the download order are on disk,
+so rerunning it downloads nothing; missing replays are replaced by the next
+ones in the order. The order is recorded as
 [ADR 0016](../decisions/0016-download-and-store-the-data.md): pseudo-random
 within each map, with the maps taking turns.
 
@@ -208,6 +209,31 @@ Parse times and failures for the first 100 replays are in
 infrastructure developers before downloading more than this:** the storage is
 community-funded, and the acceptable rate and volume for thousands of replays
 is theirs to set.
+
+## Data layout
+
+Replays, parsed replays and state files are kept in daily partitions by the
+day the match started, Hive style, the same in the data directory and in the
+bucket ([ADR 0016](../decisions/0016-download-and-store-the-data.md)):
+
+```
+data/
+  replays/
+    manifest.parquet
+    date=2026-11-01/2026-11-01_10-26-55-123_Rosetta 1.4.4_2026.09.03.sdfz
+  parsed/
+    _index.jsonl
+    date=2026-11-01/2026-11-01_10-26-55-123_Rosetta 1.4.4_2026.09.03.json.zst
+  state/
+    date=2026-11-01/2026-11-01_10-26-55-123_Rosetta 1.4.4_2026.09.03.jsonl.gz
+  matches/            # the match dumps, not partitioned
+```
+
+The day is the first ten characters of the replay's file name; a file whose
+name doesn't start with a date (our own test games) goes to `date=unknown`.
+`reason8.paths.partition()` is the one place that knows this. Commands that
+read a directory find the files in every partition; `sync`, `parse` and
+`dataset` take `--since` and `--until` (exclusive) to read only some days.
 
 ## Reproducing
 
