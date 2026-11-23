@@ -56,6 +56,10 @@ more.
 `make-fixture SOURCE DEST`
 : Make the anonymised test fixture from a parsed replay.
 
+`maps fetch`, `maps check`
+: Fetch BAR's pinned map list; measure how far real starts are from the
+  recommended start positions.
+
 ## Data storage
 
 The shared copy of the data directory lives in a private S3 bucket; a local
@@ -232,7 +236,7 @@ of containerised headless engines when local machines aren't enough
 reason8/              # the Python package and the `reason8` command (cli.py)
   data/               #   match dumps and the slice, downloads, the S3 bucket, sync
   replays/            #   reading .sdfz files, parsing them, reading parsed replays
-  game/               #   game versions and balance patches
+  game/               #   game versions and balance patches, map metadata, positions
 tools/                # fetch-parser.sh: the pinned sdfz-demo-parser
 tests/                # mirrors reason8/; fixtures/ holds an anonymised replay
 notebooks/            # exploration of the match dumps

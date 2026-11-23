@@ -7,6 +7,7 @@ import sys
 from types import ModuleType
 
 from reason8.data import download, sync
+from reason8.game import maps, positions
 from reason8.replays import fixture, parse, sdfz
 
 # (name, module, summary): each module has `run(args)` and, when it takes arguments,
@@ -18,6 +19,14 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
     ("parse", parse, "parse replays into compact JSON"),
     ("header", sdfz, "print which engine, game and map a replay needs"),
     ("make-fixture", fixture, "make the anonymised test fixture from a parsed replay"),
+    (
+        "maps",
+        "BAR's map metadata and start positions",
+        [
+            ("fetch", maps, "fetch the pinned map list"),
+            ("check", positions, "how far real starts are from the recommended positions"),
+        ],
+    ),
 ]
 
 
