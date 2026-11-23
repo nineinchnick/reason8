@@ -68,5 +68,5 @@ def test_state_summary_tolerates_a_cut_off_last_line(tmp_path):
 def test_state_path():
     replay = Path("replays/2026-07-09_17-35-45-882_Some Map v1.2_2025.06.24.sdfz")
     assert state.state_path(Path("state"), replay) == Path(
-        "state/2026-07-09_17-35-45-882_Some Map v1.2_2025.06.24.jsonl.gz"
+        "state/date=2026-07-09/2026-07-09_17-35-45-882_Some Map v1.2_2025.06.24.jsonl.gz"
     )

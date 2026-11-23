@@ -2,9 +2,11 @@
 
 S3 is opt-in: nothing uses it unless ``--s3-uri`` or the ``REASON8_S3_URI`` environment variable
 names a location, such as ``s3://bucket`` or ``s3://bucket/some/prefix``. Objects are stored
-under that location with the same relative paths as in the data directory
-(``replays/<replay_file_name>``, ``parsed/<name>.json.zst``, ...). Credentials and region come
-from the usual AWS configuration (``~/.aws``, ``AWS_PROFILE``, ...).
+under that location with the same relative paths as in the data directory, date partitions
+included (``replays/date=2026-11-01/<replay_file_name>``,
+``parsed/date=2026-11-01/<name>.json.zst``, ``matches/<dump>.parquet``, ..., see
+`reason8.paths`). Credentials and region come from the usual AWS configuration (``~/.aws``,
+``AWS_PROFILE``, ...).
 """
 
 from __future__ import annotations
@@ -27,6 +29,8 @@ NOT_FOUND_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
 TRANSFER_CONFIG = TransferConfig(preferred_transfer_client="classic")
 #: What a failed transfer raises: credentials, connection, service and upload errors.
 TRANSFER_ERRORS = (BotoCoreError, ClientError, S3UploadFailedError)
+#: The most keys one DeleteObjects request takes.
+DELETE_BATCH_SIZE = 1000
 
 
 class Bucket:
@@ -46,15 +50,15 @@ class Bucket:
         return f"Bucket('s3://{self.name}/{self.prefix}')"
 
     def key(self, relative_path: str) -> str:
-        """Object key of a path relative to the data directory, e.g. ``replays/x.sdfz``."""
+        """Object key of a path relative to the data directory, e.g. ``replays/date=.../x.sdfz``."""
         return self.prefix + relative_path
 
-    def list_directory(self, directory: str) -> dict[str, int]:
-        """Sizes of the objects directly under ``directory`` (not in subdirectories), by name."""
+    def list_files(self, directory: str) -> dict[str, int]:
+        """Sizes of the objects under ``directory`` at any depth, by path relative to it."""
         directory_prefix = self.key(directory.strip("/") + "/")
         sizes = {}
         paginator = self.client.get_paginator("list_objects_v2")
-        for page in paginator.paginate(Bucket=self.name, Prefix=directory_prefix, Delimiter="/"):
+        for page in paginator.paginate(Bucket=self.name, Prefix=directory_prefix):
             for listed_object in page.get("Contents", []):
                 sizes[listed_object["Key"].removeprefix(directory_prefix)] = listed_object["Size"]
         return sizes
@@ -91,6 +95,26 @@ class Bucket:
 
     def write(self, relative_path: str, data: bytes) -> None:
         self.client.put_object(Bucket=self.name, Key=self.key(relative_path), Body=data)
+
+    def copy(self, source_path: str, destination_path: str) -> None:
+        """Copy an object to another key inside S3, without downloading it."""
+        self.client.copy(
+            {"Bucket": self.name, "Key": self.key(source_path)},
+            self.name,
+            self.key(destination_path),
+            Config=TRANSFER_CONFIG,
+        )
+
+    def delete(self, relative_paths: list[str]) -> None:
+        """Delete objects, a thousand per request; raises if any of them could not be deleted."""
+        for start in range(0, len(relative_paths), DELETE_BATCH_SIZE):
+            batch = relative_paths[start : start + DELETE_BATCH_SIZE]
+            response = self.client.delete_objects(
+                Bucket=self.name,
+                Delete={"Objects": [{"Key": self.key(path)} for path in batch], "Quiet": True},
+            )
+            if response.get("Errors"):
+                raise RuntimeError(f"could not delete from S3: {response['Errors'][:5]}")
 
 
 def is_not_found(error: ClientError) -> bool:

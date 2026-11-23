@@ -24,7 +24,10 @@ from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
 
-#: The state of a replay is kept as <replay name>.jsonl.gz (see `reason8 headless batch`).
+from reason8.paths import partitioned_path
+
+#: The state of a replay is kept as date=<date>/<replay name>.jsonl.gz (see `reason8 headless
+#: batch`).
 STATE_SUFFIX = ".jsonl.gz"
 SNAPSHOT_TEAM_FIELDS = (
     "team",
@@ -42,8 +45,9 @@ SNAPSHOT_UNIT_FIELDS = ("unit_id", "unit_def_id", "team", "x", "z", "health_pct"
 
 
 def state_path(out_dir: Path, replay: Path) -> Path:
-    """Where the state of a replay is kept: the replay's name, as JSON lines, gzipped."""
-    return out_dir / (replay.stem + STATE_SUFFIX)
+    """Where the state of a replay is kept: the replay's name, as JSON lines, gzipped, in the
+    date partition of the replay (`reason8.paths.partitioned_path`)."""
+    return partitioned_path(out_dir, replay.stem + STATE_SUFFIX)
 
 
 def read_records(path: str | Path, snapshots: bool = False) -> Iterator[dict]:

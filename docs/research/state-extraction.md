@@ -80,7 +80,8 @@ arguments; nothing is committed from `data/`.
 
 `batch`
 : Plays many replays, several engines at once: fetches what each needs, keeps
-  the state as `<replay name>.jsonl.gz`, skips the ones already done
+  the state as `date=<day>/<replay name>.jsonl.gz`, skips the ones already
+  done
 
 `state`
 : Reads a state file; prints sizes and counts, and the first finished builds
@@ -98,14 +99,14 @@ engine version, game version, map, length.
 ```sh
 # fetch what a replay needs (engine, game version, map)
 uv run reason8 headless setup --data-dir data/bar \
-    --replay data/replays/X.sdfz
+    --replay data/replays/date=D/X.sdfz
 # play it and keep the state
 uv run reason8 headless run --data-dir data/bar --threads 1 --snapshots \
-    --out data/state/X.jsonl data/replays/X.sdfz
-uv run reason8 headless state data/state/X.jsonl --builds
+    --out X.jsonl data/replays/date=D/X.sdfz
+uv run reason8 headless state X.jsonl --builds
 # the first 12 game minutes of many replays, 4 engines at once
 uv run reason8 headless batch --data-dir data/bar --out-dir data/state \
-    --jobs 4 --max-frame 21600 data/replays/A.sdfz data/replays/B.sdfz
+    --jobs 4 --max-frame 21600 data/replays/date=D/A.sdfz data/replays/date=D/B.sdfz
 
 # an AI vs AI game at full speed, 10 game minutes
 uv run reason8 headless run --data-dir data/bar --threads 1 \

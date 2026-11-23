@@ -8,6 +8,7 @@ import gzip
 import json
 import struct
 from compression import zstd
+from pathlib import Path
 
 import pytest
 
@@ -291,7 +292,9 @@ def test_write_json_zst_round_trip(tmp_path):
     document = {"format": FORMAT, "events": [{"frame": 1, "type": "start"}]}
     path = output_path(tmp_path, tmp_path / "game.sdfz")
     uncompressed = write_json_zst(document, path)
-    assert path.name == "game.json.zst"
+    assert path == tmp_path / "date=unknown" / "game.json.zst"
     assert json.loads(zstd.decompress(path.read_bytes())) == document
     assert uncompressed == len(json.dumps(document, separators=(",", ":")))
-    assert not list(tmp_path.glob("*.tmp"))
+    assert not list(tmp_path.rglob("*.tmp"))
+    dated = output_path(tmp_path, Path("replays/date=x/2026-11-01_10-00-00-000_Map_1.sdfz"))
+    assert dated == tmp_path / "date=2026-11-01" / "2026-11-01_10-00-00-000_Map_1.json.zst"

@@ -1,4 +1,4 @@
-# 0016. Download in a fixed order, keep the data in a private S3 bucket, run locally first
+# 0016. Download in a fixed order, keep the data in a private S3 bucket by day, run locally first
 
 - **Status:** Accepted
 - **Date:** 2026-11-23
@@ -33,8 +33,10 @@ much longer
 ([ADR 0010](0010-re-simulate-replays-headlessly-for-game-state.md)). Work runs
 in several git worktrees and will run on more machines, each needing the same
 data without downloading it from BAR again. The whole slice is about 175 GB of
-replays and 70 GB of parsed replays. Replays contain player names, which are
-personal data: raw replays must never be published.
+replays and 70 GB of parsed replays, some 43k files in each directory, while
+much of the work needs only some days of the window (a week to try something,
+the newest games for the current meta). Replays contain player names, which
+are personal data: raw replays must never be published.
 
 A headless engine needs 5 to 6 GB of RAM, so RAM rather than cores limits how
 many run at once ([`state-extraction.md`](../research/state-extraction.md)).
@@ -58,6 +60,21 @@ directory: `replays/`, `parsed/`, `matches/`, later `state/`. The bucket is
 the shared cache; a local data directory is a working copy that can be rebuilt
 from it.
 
+- Replays, parsed replays and state files are kept in daily partitions by the
+  day the match started, Hive style: `replays/date=YYYY-MM-DD/<name>.sdfz`,
+  `parsed/date=YYYY-MM-DD/<name>.json.zst`,
+  `state/date=YYYY-MM-DD/<name>.jsonl.gz`. The day is the first ten characters
+  of the replay's file name, which every derived file keeps; a name that
+  doesn't start with a date goes to `date=unknown`. The bookkeeping files
+  (`manifest.parquet`, `_index.jsonl`) stay at the top of their directory, and
+  the match dumps in `matches/` aren't partitioned. One function
+  (`reason8.paths.partition()`) knows the layout; the data directory and the
+  bucket use the same relative paths, so copying between them needs no
+  mapping.
+- Commands that read a directory find the files in every partition; `sync`,
+  `parse` and `dataset` take `--since` and `--until` to work on some days
+  only. Data files outside the partitions stop the commands that write or copy
+  them, until `reason8 storage migrate-layout` has moved them.
 - `reason8 sync push|pull` copies files that are missing or differ in size,
   merges the bookkeeping files (`manifest.parquet`, `_index.jsonl`), and never
   deletes anything on either side.
@@ -84,6 +101,10 @@ based on measured cost.
   in the parser's failure counts.
 - Each replay is asked from BAR's servers once for all machines, and expired
   replays we already have stay available.
+- A day of the window is one directory, a few hundred files, so a machine can
+  pull, parse or build from some days without listing or copying the rest, and
+  tools that read Hive partitions (Polars, DuckDB, Spark) see the date as a
+  column. A replay's path follows from its name alone.
 - Storing the slice costs about $6 a month (245 GB of S3 Standard at $0.0245
   per GB-month) plus about $0.50 once for the uploads. Pulling it all to a
   machine outside AWS costs about $0.09 per GB above the free 100 GB a month;

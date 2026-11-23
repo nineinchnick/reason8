@@ -1,6 +1,6 @@
 """Tests for ``reason8 sync`` against moto's in-memory S3 (no network, no real AWS)."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -8,7 +8,13 @@ from reason8 import cli
 from reason8.data.download import MANIFEST_NAME, manifest_bytes, merge_manifests, read_manifest
 from reason8.data.storage import Bucket, configured_bucket
 from reason8.data.sync import PULL, PUSH, sync_area
+from reason8.paths import LayoutError, partitioned_name
 from reason8.replays.parse import INDEX_NAME, index_text, merge_indexes, parse_index
+
+NEW = "2026-11-01_10-00-00-000_new.sdfz"
+SAME = "2026-11-01_11-00-00-000_same.sdfz"
+GROWN = "2026-11-02_10-00-00-000_grown.sdfz"
+ONLY_IN_BUCKET = "2026-11-03_10-00-00-000_only.sdfz"
 
 
 def put(bucket, relative_path, data):
@@ -18,6 +24,14 @@ def put(bucket, relative_path, data):
 def all_keys(bucket):
     response = bucket.client.list_objects_v2(Bucket=bucket.name)
     return sorted(listed["Key"] for listed in response.get("Contents", []))
+
+
+def write(directory, name, data):
+    """Write a data file into its date partition under ``directory``."""
+    path = directory / partitioned_name(name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return path
 
 
 def manifest_row(match_id, status="ok", updated_at=datetime(2026, 11, 1, tzinfo=UTC)):
@@ -66,58 +80,62 @@ def test_sync_without_a_bucket_fails(monkeypatch, capsys):
 
 def test_push_copies_new_and_changed_files_and_deletes_nothing(bucket, tmp_path):
     replays = tmp_path / "replays"
-    replays.mkdir()
-    (replays / "new.sdfz").write_bytes(b"new replay")
-    (replays / "same.sdfz").write_bytes(b"same")
-    (replays / "grown.sdfz").write_bytes(b"complete replay")
-    (replays / "partial.sdfz.part").write_bytes(b"half")
-    (replays / "notes.txt").write_bytes(b"not data")
-    put(bucket, "replays/same.sdfz", b"SAME")  # same size: not copied
-    put(bucket, "replays/grown.sdfz", b"truncated")
-    put(bucket, "replays/only-in-bucket.sdfz", b"kept")
+    write(replays, NEW, b"new replay")
+    write(replays, SAME, b"same")
+    write(replays, GROWN, b"complete replay")
+    write(replays, GROWN + ".part", b"half")
+    write(replays, "notes.txt", b"not data")
+    # in a partition that is not its own: not copied
+    (replays / "date=2026-11-02" / "2026-11-05_10-00-00-000_misplaced.sdfz").write_bytes(b"x")
+    put(bucket, f"replays/{partitioned_name(SAME)}", b"SAME")  # same size: not copied
+    put(bucket, f"replays/{partitioned_name(GROWN)}", b"truncated")
+    put(bucket, f"replays/{partitioned_name(ONLY_IN_BUCKET)}", b"kept")
 
     summary = sync(bucket, tmp_path, "replays", PUSH)
 
     assert (summary.files, summary.already_there, summary.copied) == (3, 1, 2)
     assert summary.bytes == len(b"new replay") + len(b"complete replay")
-    assert bucket.read("replays/new.sdfz") == b"new replay"
-    assert bucket.read("replays/grown.sdfz") == b"complete replay"
-    assert bucket.read("replays/same.sdfz") == b"SAME"
+    assert bucket.read(f"replays/date=2026-11-01/{NEW}") == b"new replay"
+    assert bucket.read(f"replays/date=2026-11-02/{GROWN}") == b"complete replay"
+    assert bucket.read(f"replays/date=2026-11-01/{SAME}") == b"SAME"
     assert all_keys(bucket) == [
-        "shared/replays/grown.sdfz",
-        "shared/replays/new.sdfz",
-        "shared/replays/only-in-bucket.sdfz",
-        "shared/replays/same.sdfz",
+        f"shared/replays/date=2026-11-01/{NEW}",
+        f"shared/replays/date=2026-11-01/{SAME}",
+        f"shared/replays/date=2026-11-02/{GROWN}",
+        f"shared/replays/date=2026-11-03/{ONLY_IN_BUCKET}",
     ]
     again = sync(bucket, tmp_path, "replays", PUSH)
     assert (again.already_there, again.copied, again.merged) == (3, 0, [])
 
 
 def test_pull_copies_missing_files_and_deletes_nothing(bucket, tmp_path):
-    put(bucket, "parsed/a.json.zst", b"parsed a")
-    put(bucket, "parsed/b.json.zst", b"parsed b")
-    put(bucket, "parsed/old.json.gz", b"earlier format")
-    put(bucket, "parsed/nested/c.json.zst", b"in a subdirectory")
-    put(bucket, "replays/a.sdfz", b"another area")
+    first, second = "2026-11-01_a.json.zst", "2026-11-02_b.json.zst"
+    put(bucket, f"parsed/{partitioned_name(first)}", b"parsed a")
+    put(bucket, f"parsed/{partitioned_name(second)}", b"parsed b")
+    put(bucket, "parsed/date=2026-11-01/2026-11-01_old.json.gz", b"earlier format")
+    put(bucket, "parsed/date=2026-11-01/nested/2026-11-01_c.json.zst", b"in a subdirectory")
+    put(bucket, f"replays/{partitioned_name('2026-11-01_a.sdfz')}", b"another area")
     parsed = tmp_path / "parsed"
-    parsed.mkdir()
-    (parsed / "local-only.json.zst").write_bytes(b"kept")
+    local_only = write(parsed, "2026-11-01_local.json.zst", b"kept")
 
     summary = sync(bucket, tmp_path, "parsed", PULL, jobs=2)
 
     assert (summary.files, summary.copied) == (2, 2)
-    assert sorted(path.name for path in parsed.iterdir()) == [
-        "a.json.zst",
-        "b.json.zst",
-        "local-only.json.zst",
+    assert sorted(path.relative_to(parsed).as_posix() for path in parsed.rglob("*")) == [
+        "date=2026-11-01",
+        f"date=2026-11-01/{first}",
+        "date=2026-11-01/2026-11-01_local.json.zst",
+        "date=2026-11-02",
+        f"date=2026-11-02/{second}",
     ]
-    assert (parsed / "a.json.zst").read_bytes() == b"parsed a"
+    assert (parsed / partitioned_name(first)).read_bytes() == b"parsed a"
+    assert local_only.read_bytes() == b"kept"
     assert sync(bucket, tmp_path, "parsed", PULL).copied == 0
 
 
 def test_match_and_dry_run(bucket, tmp_path):
     for name in ("2026-10-01_a.sdfz", "2026-11-01_b.sdfz", "2026-11-02_c.sdfz"):
-        put(bucket, f"replays/{name}", name.encode())
+        put(bucket, f"replays/{partitioned_name(name)}", name.encode())
     put(bucket, f"replays/{MANIFEST_NAME}", manifest_bytes([manifest_row(1)]))
 
     planned = sync(bucket, tmp_path, "replays", PULL, match="2026-11-*", dry_run=True)
@@ -125,10 +143,43 @@ def test_match_and_dry_run(bucket, tmp_path):
     assert not (tmp_path / "replays").exists()
 
     assert sync(bucket, tmp_path, "replays", PULL, match="2026-11-*").merged == []
-    assert sorted(path.name for path in (tmp_path / "replays").iterdir()) == [
+    assert sorted(path.name for path in (tmp_path / "replays").rglob("*.sdfz")) == [
         "2026-11-01_b.sdfz",
         "2026-11-02_c.sdfz",
     ]
+
+
+def test_since_and_until_select_partitions(bucket, tmp_path):
+    for name in ("2026-10-31_a.sdfz", "2026-11-01_b.sdfz", "2026-11-02_c.sdfz", "test.sdfz"):
+        put(bucket, f"replays/{partitioned_name(name)}", name.encode())
+    put(bucket, f"replays/{MANIFEST_NAME}", manifest_bytes([manifest_row(1)]))
+    put(bucket, "matches/matches.parquet", b"dump")
+
+    window = {"since": date(2026, 11, 1), "until": date(2026, 11, 2)}
+    summary = sync(bucket, tmp_path, "replays", PULL, **window)
+    assert (summary.files, summary.copied, summary.merged) == (1, 1, [])
+    assert [path.name for path in (tmp_path / "replays").rglob("*.sdfz")] == ["2026-11-01_b.sdfz"]
+    # areas without partitions have nothing in a date range
+    assert sync(bucket, tmp_path, "matches", PULL, **window).files == 0
+    # without a range, undated files are in date=unknown
+    sync(bucket, tmp_path, "replays", PULL)
+    assert (tmp_path / "replays" / "date=unknown" / "test.sdfz").read_bytes() == b"test.sdfz"
+
+
+def test_a_flat_layout_stops_the_sync(bucket, tmp_path):
+    put(bucket, "replays/2026-11-01_flat.sdfz", b"flat")
+    with pytest.raises(LayoutError, match="bucket"):
+        sync(bucket, tmp_path, "replays", PULL)
+    assert not (tmp_path / "replays").exists()
+
+    put(bucket, "parsed/date=2026-11-01/2026-11-01_a.json.zst", b"partitioned")
+    parsed = tmp_path / "parsed"
+    parsed.mkdir()
+    (parsed / "2026-11-01_b.json.zst").write_bytes(b"flat")
+    with pytest.raises(LayoutError, match="data directory"):
+        sync(bucket, tmp_path, "parsed", PUSH)
+    with pytest.raises(LayoutError, match="migrate-layout local"):
+        sync(bucket, tmp_path, "parsed", PULL)
 
 
 def test_manifests_are_merged_both_ways(bucket, tmp_path):

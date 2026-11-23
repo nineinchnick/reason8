@@ -12,8 +12,10 @@ replays: [ADR 0005](../decisions/0005-learn-decisions-with-their-context.md).
 ```sh
 # once: download the pinned sdfz-demo-parser 5.15.1 into data/tools/
 tools/fetch-parser.sh
-# data/replays/**/*.sdfz -> data/parsed/<name>.json.zst
+# data/replays/**/*.sdfz -> data/parsed/date=<day>/<name>.json.zst
 uv run reason8 parse
+# only the replays of some days
+uv run reason8 parse --since 2026-11-01 --until 2026-11-08
 # other inputs and output directory
 uv run reason8 parse some/dir file.sdfz --out other/dir \
     --jobs 8 --force
@@ -34,7 +36,8 @@ uv run reason8 parse some/dir file.sdfz --out other/dir \
    error. Both bugs are worth reporting upstream.
 3. **`reason8/replays/parse.py`** keeps what we need (metadata, players,
    statistics and a flat list of events) and writes one zstd-compressed JSON
-   document per replay.
+   document per replay, in the date partition of the replay
+   ([`dataset.md`](dataset.md#data-layout)).
 
 Failures don't stop the run. Each replay gets a line in
 `data/parsed/_index.jsonl` with `status` (`ok` or `error`), the error message,

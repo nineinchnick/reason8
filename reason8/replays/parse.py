@@ -3,10 +3,13 @@
 Usage::
 
     tools/fetch-parser.sh                # once: download the pinned parser binary
-    uv run reason8 parse                 # data/replays/*.sdfz -> data/parsed/*.json.zst
+    uv run reason8 parse                 # data/replays/**/*.sdfz -> data/parsed/date=*/*.json.zst
+    uv run reason8 parse --since 2026-11-01 --until 2026-11-08    # the replays of one week
     uv run reason8 parse DIR_OR_FILE ... --out OUT --jobs 24
 
-Each replay becomes one zstd-compressed JSON document (see docs/reference/replay-format.md).
+Each replay becomes one zstd-compressed JSON document (see docs/reference/replay-format.md),
+written to the date partition of the replay (``<out>/date=YYYY-MM-DD/``, see `reason8.paths`).
+Directories are searched at any depth; ``--since`` and ``--until`` read only their partitions.
 A replay that fails to parse gets an entry with the error in `<out>/_index.jsonl`
 instead of stopping the run. Already parsed replays are skipped unless `--force`.
 Default paths are under the data directory (``REASON8_DATA_DIR``, or ``data/`` in the repo).
@@ -24,10 +27,11 @@ import time
 from collections import Counter
 from compression import zstd
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from datetime import date
 from pathlib import Path
 from typing import Any
 
-from reason8.paths import data_dir
+from reason8.paths import data_dir, find_files, partitioned_path, require_partitioned
 from reason8.replays.replay import FORMAT
 from reason8.replays.sdfz import GAME_SPEED, RawCommandPacket, read_command_packets_file
 
@@ -516,11 +520,13 @@ def parse_replay(parser: Path, replay: Path) -> tuple[dict[str, Any], int]:
 
 
 def output_path(out_dir: Path, replay: Path) -> Path:
-    return out_dir / (replay.stem + PARSED_SUFFIX)
+    """Where the parsed replay is kept: in the date partition of the replay."""
+    return partitioned_path(out_dir, replay.stem + PARSED_SUFFIX)
 
 
 def write_json_zst(document: Any, path: Path, level: int = ZSTD_LEVEL) -> int:
     """Write compact JSON compressed with zstd; return the uncompressed size."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = path.with_name(path.name + ".tmp")
     data = json.dumps(document, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     temporary_path.write_bytes(zstd.compress(data, level=level))
@@ -535,7 +541,8 @@ def process_one(
     start_time = time.perf_counter()
     try:
         document, parser_json_bytes = parse_replay(parser, replay)
-        json_bytes = write_json_zst(document, output_path(out_dir, replay), zstd_level)
+        path = output_path(out_dir, replay)
+        json_bytes = write_json_zst(document, path, zstd_level)
         meta = document["meta"]
         entry.update(
             status="ok",
@@ -546,7 +553,7 @@ def process_one(
             events=len(document["events"]),
             parser_json_bytes=parser_json_bytes,
             json_bytes=json_bytes,
-            compressed_bytes=output_path(out_dir, replay).stat().st_size,
+            compressed_bytes=path.stat().st_size,
         )
     except Exception as error:  # record any failure per file, keep going
         entry.update(status="error", error=f"{type(error).__name__}: {error}"[:2000])
@@ -559,11 +566,15 @@ def process_one(
     return entry
 
 
-def find_replays(inputs: list[Path]) -> list[Path]:
+def find_replays(
+    inputs: list[Path], since: date | None = None, until: date | None = None
+) -> list[Path]:
+    """The replays given and those in the directories given (with ``since`` or ``until``, in
+    their date partitions of that range)."""
     found: list[Path] = []
     for input_path in inputs:
         if input_path.is_dir():
-            found += sorted(input_path.rglob("*.sdfz"))
+            found += find_files(input_path, "*.sdfz", since=since, until=until)
         elif input_path.suffix == ".sdfz":
             found.append(input_path)
     return found
@@ -665,6 +676,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help=f"zstd compression level (default {ZSTD_LEVEL})",
     )
     parser.add_argument("--force", action="store_true", help="re-parse replays already done")
+    parser.add_argument(
+        "--since",
+        type=date.fromisoformat,
+        help="read only the partitions of directories from this date (YYYY-MM-DD)",
+    )
+    parser.add_argument(
+        "--until",
+        type=date.fromisoformat,
+        help="read only the partitions of directories before this date (YYYY-MM-DD)",
+    )
 
 
 def run(args: argparse.Namespace) -> int:
@@ -673,8 +694,9 @@ def run(args: argparse.Namespace) -> int:
             f"parser not found at {args.parser}; run tools/fetch-parser.sh first", file=sys.stderr
         )
         return 2
-    replays = find_replays(args.inputs or [data_dir() / "replays"])
+    replays = find_replays(args.inputs or [data_dir() / "replays"], args.since, args.until)
     args.out.mkdir(parents=True, exist_ok=True)
+    require_partitioned(args.out, "*" + PARSED_SUFFIX)
     index = read_index(args.out)
     replays_to_parse = [
         replay

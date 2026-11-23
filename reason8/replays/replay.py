@@ -6,9 +6,11 @@ import json
 from collections.abc import Iterator
 from compression import zstd
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any
 
+from reason8.paths import find_files
 from reason8.replays.sdfz import GAME_SPEED as GAME_SPEED
 
 FORMAT = "reason8.replay/1"
@@ -200,7 +202,12 @@ def load_replay(path: str | Path) -> Replay:
     return Replay(document)
 
 
-def iter_replays(directory: str | Path) -> Iterator[Replay]:
-    """All parsed replays in a directory (as written by `reason8 parse`)."""
-    for path in sorted(Path(directory).glob("*.json.zst")):
+def iter_replays(
+    directory: str | Path, *, since: date | None = None, until: date | None = None
+) -> Iterator[Replay]:
+    """All parsed replays in a directory and its date partitions (as written by `reason8 parse`).
+
+    ``since`` (inclusive) and ``until`` (exclusive) read only the partitions of those dates.
+    """
+    for path in find_files(Path(directory), "*.json.zst", since=since, until=until):
         yield load_replay(path)
