@@ -60,6 +60,10 @@ more.
 : Fetch BAR's pinned map list; measure how far real starts are from the
   recommended start positions.
 
+`headless setup|run|batch|state`
+: Fetch an engine, game and map; run a game or play back a replay headlessly;
+  play many replays and keep their state; summarise a state file.
+
 ## Data storage
 
 The shared copy of the data directory lives in a private S3 bucket; a local
@@ -237,6 +241,7 @@ reason8/              # the Python package and the `reason8` command (cli.py)
   data/               #   match dumps and the slice, downloads, the S3 bucket, sync
   replays/            #   reading .sdfz files, parsing them, reading parsed replays
   game/               #   game versions and balance patches, map metadata, positions
+  headless/           #   headless engine runs, the state export widget, start scripts
 tools/                # fetch-parser.sh: the pinned sdfz-demo-parser
 tests/                # mirrors reason8/; fixtures/ holds an anonymised replay
 notebooks/            # exploration of the match dumps

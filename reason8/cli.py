@@ -8,6 +8,7 @@ from types import ModuleType
 
 from reason8.data import download, sync
 from reason8.game import maps, positions
+from reason8.headless import batch, run, setup, state
 from reason8.replays import fixture, parse, sdfz
 
 # (name, module, summary): each module has `run(args)` and, when it takes arguments,
@@ -25,6 +26,16 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
         [
             ("fetch", maps, "fetch the pinned map list"),
             ("check", positions, "how far real starts are from the recommended positions"),
+        ],
+    ),
+    (
+        "headless",
+        "run games and replays in a headless engine",
+        [
+            ("setup", setup, "fetch the engine, game and map a run needs"),
+            ("run", run, "run a start script or play back a replay"),
+            ("batch", batch, "play many replays and keep their state"),
+            ("state", state, "summarise a state file"),
         ],
     ),
 ]

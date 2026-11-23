@@ -1,0 +1,27 @@
+[GAME]
+{
+	MapName=$MAP;
+	GameType=$GAME;
+	GameStartDelay=0;
+	StartPosType=0;
+	RecordDemo=1;
+	MyPlayerName=Reason8Runner;
+	IsHost=1;
+	FixedRNGSeed=$SEED;
+	NumPlayers=1;
+	NumUsers=1;
+	HostIP=127.0.0.1;
+	HostPort=0;
+	[MODOPTIONS]
+	{
+		deathmode=neverend;
+		debugcommands=$FRAMES:quitforce;
+	}
+	[ALLYTEAM0] { NumAllies=0; }
+	[ALLYTEAM1] { NumAllies=0; }
+	[TEAM0] { Side=Armada; Handicap=0; AllyTeam=0; TeamLeader=0; }
+	[TEAM1] { Side=Cortex; Handicap=0; AllyTeam=1; TeamLeader=0; }
+	[AI0] { Host=0; IsFromDemo=0; Name=First; $AI0 Team=0; }
+	[AI1] { Host=0; IsFromDemo=0; Name=Second; $AI1 Team=1; }
+	[PLAYER0] { IsFromDemo=0; Name=Reason8Runner; Team=0; Spectator=1; Rank=0; }
+}
