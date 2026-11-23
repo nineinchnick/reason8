@@ -64,6 +64,10 @@ more.
 : Fetch an engine, game and map; run a game or play back a replay headlessly;
   play many replays and keep their state; summarise a state file.
 
+`contact`
+: Measure first contact in re-simulated replays (`--report` prints the
+  tables).
+
 ## Data storage
 
 The shared copy of the data directory lives in a private S3 bucket; a local
@@ -242,6 +246,7 @@ reason8/              # the Python package and the `reason8` command (cli.py)
   replays/            #   reading .sdfz files, parsing them, reading parsed replays
   game/               #   game versions and balance patches, map metadata, positions
   headless/           #   headless engine runs, the state export widget, start scripts
+  openings/           #   opening extraction, first contact
 tools/                # fetch-parser.sh: the pinned sdfz-demo-parser
 tests/                # mirrors reason8/; fixtures/ holds an anonymised replay
 notebooks/            # exploration of the match dumps
