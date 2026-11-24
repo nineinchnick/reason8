@@ -6,7 +6,7 @@ import argparse
 import sys
 from types import ModuleType
 
-from reason8.analysis import map_meta, opening_shift
+from reason8.analysis import apm, map_meta, opening_shift
 from reason8.bot import build, check
 from reason8.data import download, migrate, sync
 from reason8.game import maps, positions
@@ -65,6 +65,7 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
         [
             ("opening-shift", opening_shift, "how openings shift between groups of games"),
             ("map-meta", map_meta, "the opening meta of each start position"),
+            ("apm", apm, "how many actions per minute people take, by phase and skill"),
         ],
     ),
 ]

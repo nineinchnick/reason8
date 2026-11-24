@@ -84,9 +84,9 @@ more.
 : Build the Reason8 AI from BARb and `ai/Reason8`; check from a replay that it
   played its opening.
 
-`analysis opening-shift`, `analysis map-meta`
-: The measurements behind the research on balance patches and on the opening
-  meta of each start position.
+`analysis opening-shift`, `analysis map-meta`, `analysis apm`
+: The measurements behind the research on balance patches, on the opening meta
+  of each start position and on how many actions per minute people take.
 
 ## Data storage
 
