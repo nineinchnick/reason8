@@ -9,6 +9,8 @@ from types import ModuleType
 from reason8.analysis import apm, map_meta, opening_shift
 from reason8.bot import build, check, export, game
 from reason8.data import download, migrate, sync
+from reason8.evaluation import games as evaluation_games
+from reason8.evaluation import report as evaluation_report
 from reason8.game import maps, positions
 from reason8.headless import batch, run, setup, state
 from reason8.models import evaluate
@@ -60,6 +62,14 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
             ("export", export, "export the model's openings for the AI"),
             ("game", game, "write the start script of an 8v8 AI game"),
             ("check", check, "check from a replay that the AI played its opening"),
+        ],
+    ),
+    (
+        "eval",
+        "play evaluation games and compare the AIs (ADR 0003)",
+        [
+            ("games", evaluation_games, "play paired 8v8 games and measure each team"),
+            ("report", evaluation_report, "compare the evaluated AI with its opponent"),
         ],
     ),
     (
