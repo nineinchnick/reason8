@@ -13,7 +13,11 @@ from reason8.game import package as game_package
 from reason8.paths import REPO_ROOT
 
 SOURCE = REPO_ROOT / "ai" / "Reason8"
-OPENINGS = json.loads((SOURCE / "openings.json").read_text(encoding="utf-8"))
+# Openings no human or stock BARb would play, so a game shows whether they were played.
+OPENINGS = json.loads(
+    (REPO_ROOT / "tests" / "fixtures" / "bot" / "unusual_openings.json").read_text(encoding="utf-8")
+)
+EXPORTED = json.loads((SOURCE / "openings.json").read_text(encoding="utf-8"))
 TASKS = OPENINGS["tasks"]
 ARMADA = next(opening for opening in OPENINGS["openings"] if opening["side"] == "armada")
 
@@ -34,7 +38,7 @@ def test_ai_identity_needs_both_keys():
 def test_opening_table_of_our_openings():
     table = build.opening_table(OPENINGS)
     assert "array<SOpening> MakeOpenings()" in table
-    assert 'SOpening("armada", array<SStep> = {' in table
+    assert 'SOpening("armada", "", "", 0.0f, 0.0f, array<SStep> = {' in table
     assert 'SStep("armmex", Task::BuildType::MEX)' in table
     assert 'SFactoryOpening("armlab", array<string> = {"armrectr", "armjeth", "armjeth"' in table
     assert table.count("{") == table.count("}")
@@ -47,7 +51,15 @@ def test_opening_table_without_openings():
 
 def test_opening_table_empty_lists():
     table = build.opening_table({"openings": [{"side": "armada"}]})
-    assert 'SOpening("armada", array<SStep>(), array<SFactoryOpening>())' in table
+    assert 'SOpening("armada", "", "", 0.0f, 0.0f, array<SStep>(), array<SFactoryOpening>())' in (
+        table
+    )
+
+
+def test_opening_table_with_map_and_position():
+    opening = {"side": "cortex", "map": "Supreme Isthmus v2.1", "position": "P4", "start": [1, 2]}
+    table = build.opening_table({"openings": [opening]})
+    assert 'SOpening("cortex", "Supreme Isthmus v2.1", "P4", 1.0f, 2.0f,' in table
 
 
 @pytest.mark.parametrize(
@@ -58,6 +70,7 @@ def test_opening_table_empty_lists():
         {"side": "armada", "commander": ['armwin"); Evil(']},
         {"side": "armada", "factories": {"armlab": ["Arm Peewee"]}},
         {"side": "Not A Side"},
+        {"side": "armada", "map": 'Map"); Evil('},
     ],
 )
 def test_opening_table_rejects_bad_input(opening):
@@ -67,9 +80,19 @@ def test_opening_table_rejects_bad_input(opening):
 
 
 def test_every_commander_structure_has_a_task():
-    for opening in OPENINGS["openings"]:
-        for unit in opening["commander"]:
-            assert TASKS[unit] in build.TASK_TYPES
+    for openings in (OPENINGS, EXPORTED):
+        for opening in openings["openings"]:
+            for unit in opening["commander"]:
+                assert openings["tasks"][unit] in build.TASK_TYPES
+
+
+def test_exported_openings_build():
+    table = build.opening_table(EXPORTED)
+    assert table.count("SOpening(") == len(EXPORTED["openings"]) > 0
+    for opening in EXPORTED["openings"]:
+        assert opening["side"] in ("armada", "cortex") and opening["map"] and opening["position"]
+        # the first factory is the commander's and its units are listed for it
+        assert set(opening["factories"]) <= set(opening["commander"])
 
 
 def write_rapid_package(data_dir: Path, game: str, files: dict[str, bytes]) -> None:

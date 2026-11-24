@@ -1,0 +1,51 @@
+{
+  "comment": "Deliberately unusual openings that prove the bot plays what this file says, not what stock BARb would. Stock BARb (hard) starts with four extractors, then wind, then a factory whose first units are a constructor or a scout.",
+  "tasks": {
+    "armlab": "factory",
+    "armmex": "mex",
+    "armrad": "radar",
+    "armwin": "energy",
+    "corllt": "defence",
+    "cormex": "mex",
+    "corsolar": "energy",
+    "corvp": "factory"
+  },
+  "openings": [
+    {
+      "side": "armada",
+      "commander": [
+        "armwin",
+        "armwin",
+        "armmex",
+        "armrad",
+        "armlab"
+      ],
+      "factories": {
+        "armlab": [
+          "armrectr",
+          "armjeth",
+          "armjeth",
+          "armck",
+          "armham"
+        ]
+      }
+    },
+    {
+      "side": "cortex",
+      "commander": [
+        "corsolar",
+        "cormex",
+        "corllt",
+        "corvp"
+      ],
+      "factories": {
+        "corvp": [
+          "cormist",
+          "cormist",
+          "corcv",
+          "corgator"
+        ]
+      }
+    }
+  ]
+}

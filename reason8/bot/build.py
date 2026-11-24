@@ -63,6 +63,7 @@ TASK_TYPES = {
     "mex": "MEX",
 }
 UNIT_NAME = re.compile(r"^[a-z0-9_]+$")
+MAP_TEXT = re.compile(r"^[A-Za-z0-9 ._()\-]*$")  # map and position names, quoted as they are
 
 
 def sha256(data: bytes) -> str:
@@ -126,8 +127,15 @@ def opening_table(openings: dict) -> str:
             names = ", ".join(f'"{check_unit(unit)}"' for unit in units)
             unit_list = f"array<string> = {{{names}}}" if units else "array<string>()"
             factories.append(f'SFactoryOpening("{check_unit(factory)}", {unit_list})')
+        map_name = opening.get("map", "")
+        position = opening.get("position", "")
+        for text in (map_name, position):
+            if not isinstance(text, str) or not MAP_TEXT.match(text):
+                raise SystemExit(f"{OPENINGS_NAME}: bad map or position {text!r}")
+        start_x, start_z = opening.get("start", (0, 0))
         entries.append(
-            f'SOpening("{side}", {array("SStep", steps, "\t\t")}, '
+            f'SOpening("{side}", "{map_name}", "{position}", {float(start_x)}f, '
+            f"{float(start_z)}f, {array('SStep', steps, '\t\t')}, "
             f"{array('SFactoryOpening', factories, '\t\t')})"
         )
     return (
@@ -200,7 +208,7 @@ def assemble(
         "stock_files": len(stock),
         "replaced": replaced,
         "base_drift": drifted,
-        "openings": [opening["side"] for opening in openings.get("openings", [])],
+        "openings": len(openings.get("openings", [])),
         "openings_sha256": sha256((source_dir / OPENINGS_NAME).read_bytes()),
     }
     return files, facts
