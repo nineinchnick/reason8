@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from reason8.bot import build
+from reason8.game import package as game_package
 from reason8.paths import REPO_ROOT
 
 SOURCE = REPO_ROOT / "ai" / "Reason8"
@@ -104,8 +105,8 @@ GAME_FILES = {
 
 def test_read_installed_game(tmp_path):
     write_rapid_package(tmp_path, "Some Game test-1", GAME_FILES)
-    package = build.find_game_package(tmp_path, "Some Game test-1")
-    game_side = build.read_package(tmp_path, package, build.GAME_SIDE_PREFIX)
+    package = game_package.find_game_package(tmp_path, "Some Game test-1")
+    game_side = game_package.read_package(tmp_path, package, build.GAME_SIDE_PREFIX)
     assert game_side["script/hard/main.as"] == b"// hard main\n"
     assert "units/armcom.lua" not in game_side and len(game_side) == 6
     assert sorted(build.profile_files(game_side, "hard")) == [
@@ -120,7 +121,7 @@ def test_read_installed_game(tmp_path):
 def test_game_not_installed(tmp_path):
     write_rapid_package(tmp_path, "Some Game test-1", GAME_FILES)
     with pytest.raises(SystemExit):
-        build.find_game_package(tmp_path, "Some Game test-2")
+        game_package.find_game_package(tmp_path, "Some Game test-2")
 
 
 def make_inputs(tmp_path: Path, stock_factory_hash: str) -> dict:

@@ -31,13 +31,13 @@ reason8_build.json.
 from __future__ import annotations
 
 import argparse
-import gzip
 import hashlib
 import json
 import re
 import shutil
 from pathlib import Path
 
+from reason8.game.package import find_game_package, read_package
 from reason8.headless.run import find_engine
 from reason8.paths import REPO_ROOT
 
@@ -78,43 +78,6 @@ def ai_identity(ai_info: str) -> tuple[str, str]:
             raise SystemExit(f"AIInfo.lua has no '{key}'")
         values[key] = match.group(1)
     return values["shortName"], values["version"]
-
-
-def find_game_package(data_dir: Path, game: str) -> Path:
-    """The rapid package (.sdp) of an installed game version, looked up by its name."""
-    for versions in sorted(data_dir.glob("rapid/*/*/versions.gz")):
-        with gzip.open(versions, "rt", encoding="utf-8") as file:
-            for line in file:
-                # tag, package hash, dependencies, name
-                fields = line.rstrip("\n").split(",", 3)
-                if len(fields) == 4 and fields[3] == game:
-                    package = data_dir / "packages" / f"{fields[1]}.sdp"
-                    if package.is_file():
-                        return package
-    raise SystemExit(
-        f"game {game!r} is not installed under {data_dir} (see `reason8 headless setup`)"
-    )
-
-
-def read_package(data_dir: Path, package: Path, prefix: str) -> dict[str, bytes]:
-    """Files of a rapid package under `prefix` (compared in lower case), keyed by the rest
-    of their path.
-
-    A package is a gzipped list of entries: name length (1 byte), name, MD5 (16),
-    CRC32 (4), size (4). The content is in pool/<first two hex digits>/<the rest>.gz.
-    """
-    index = gzip.decompress(package.read_bytes())
-    files: dict[str, bytes] = {}
-    offset = 0
-    while offset < len(index):
-        name_length = index[offset]
-        name = index[offset + 1 : offset + 1 + name_length].decode("utf-8")
-        digest = index[offset + 1 + name_length : offset + 17 + name_length].hex()
-        offset += 1 + name_length + 16 + 4 + 4
-        if name.lower().startswith(prefix):
-            pooled = data_dir / "pool" / digest[:2] / f"{digest[2:]}.gz"
-            files[name[len(prefix) :]] = gzip.decompress(pooled.read_bytes())
-    return files
 
 
 def profile_files(game_side: dict[str, bytes], profile: str) -> dict[str, bytes]:
