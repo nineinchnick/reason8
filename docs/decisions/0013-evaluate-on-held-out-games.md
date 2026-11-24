@@ -67,9 +67,9 @@ same frame merged into it (`OpeningSteps`, `merge_repeats()` in
 - Drags no longer inflate accuracy, and a model is not rewarded for guessing
   the length of a drag. How many buildings a drag places is not predicted at
   all; the in-game export has to choose that separately.
-- The counting baselines set the bar: the repeat baseline already scores 43%
-  top-1 and the chosen n-gram (faction, map and role) 49.5% on test
-  ([`results.md`](../results.md)).
+- The counting baselines set the bar: the repeat baseline already scores 40%
+  top-1 and the chosen n-gram (4-gram, faction, map and position) 51.2% on
+  test ([`results.md`](../results.md)).
 - Intervals over games make small maps and positions honest: a position of
   Rosetta has about 110 openings in a held-out split of the whole slice.
 - Choosing on validation and reporting test keeps the test numbers unbiased,
