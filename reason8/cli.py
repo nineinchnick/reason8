@@ -14,7 +14,7 @@ from reason8.headless import batch, run, setup, state
 from reason8.models import evaluate
 from reason8.openings import contact, dataset
 from reason8.paths import LayoutError
-from reason8.replays import fixture, parse, sdfz
+from reason8.replays import fixture, parse, sdfz, widgets
 
 # (name, module, summary): each module has `run(args)` and, when it takes arguments,
 # `add_arguments(parser)`. A group is (name, summary, [commands]).
@@ -29,6 +29,7 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
     ),
     ("parse", parse, "parse replays into compact JSON"),
     ("header", sdfz, "print which engine, game and map a replay needs"),
+    ("widgets", widgets, "read the user widgets of each player from the replays"),
     ("make-fixture", fixture, "make the anonymised test fixture from a parsed replay"),
     (
         "maps",
