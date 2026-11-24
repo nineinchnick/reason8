@@ -28,8 +28,8 @@ The games are those of `select_matches()` over the slice's pinned window
 parsed in `data/parsed/`; `--since` and `--until` narrow the window to some
 days of the date partitions. Building again reads whatever is parsed by then
 and rewrites the dataset: a game's split depends only on its match id, so
-nothing moves between splits as more replays are parsed. With 12 processes it
-reads about 12 replays a second.
+nothing moves between splits as more replays are parsed. With 24 processes it
+reads about 35 replays a second.
 
 `--cutoff window` builds the openings as they were before they ended at first
 contact (`openings_v1`: every order of the first 8 minutes),
@@ -229,73 +229,72 @@ game was re-simulated), `replay_file_name`, `game_duration` and `avg_skill`.
 
 ## Statistics
 
-`openings_v2` as built on 2026-11-22 from the 5,066 slice replays parsed by
-then, 11.8% of the 42,913 games, with the first contacts of the 72
-re-simulated games of [`first-contact.md`](../research/first-contact.md). The
-parsed replays are not a random sample of the window. Rebuild and rerun
-`--stats` for the whole slice.
+`openings_v2` as built on 2026-11-24 from the 42,904 replays of the slice that
+parsed (42,909 were downloaded; 4 of the 42,913 games are no longer on the
+server and 5 replays fail to parse), with the first contacts of the 72
+re-simulated games of [`first-contact.md`](../research/first-contact.md).
 
 ### Size
 
 | map                      | train games | validation games | test games | openings |
 | ------------------------ | ----------- | ---------------- | ---------- | -------- |
-| All That Glitters v2.2.3 | 1556        | 165              | 190        | 30501    |
+| All That Glitters v2.2.3 | 15542       | 1873             | 1961       | 309364   |
 | Rosetta 1.4.4            | 885         | 103              | 128        | 16964    |
-| Supreme Isthmus v2.1     | 1590        | 180              | 174        | 30999    |
+| Supreme Isthmus v2.1     | 17230       | 2192             | 2181       | 344486   |
 
 Rows (build orders) per split:
 
-| split      | games | openings | rows    |
-| ---------- | ----- | -------- | ------- |
-| train      | 4031  | 63636    | 5354862 |
-| validation | 448   | 7063     | 599359  |
-| test       | 492   | 7765     | 635943  |
+| split      | games | openings | rows     |
+| ---------- | ----- | -------- | -------- |
+| train      | 33657 | 536310   | 49994328 |
+| validation | 4168  | 66433    | 6198578  |
+| test       | 4270  | 68071    | 6315705  |
 
 Games of the slice that were parsed, by status:
 
 | status                                 | games |
 | -------------------------------------- | ----- |
-| changed water level                    | 8     |
-| custom unit tweaks or stat multipliers | 87    |
-| ok                                     | 4971  |
+| changed water level                    | 14    |
+| custom unit tweaks or stat multipliers | 795   |
+| ok                                     | 42095 |
 
 Openings of the games used, by status:
 
 | status                | openings |
 | --------------------- | -------- |
-| ok                    | 78464    |
-| orders a removed unit | 1072     |
+| ok                    | 670814   |
+| orders a removed unit | 2706     |
 
-- starts on the spot: 76940 of 78464 (98.1%)
-- games that showed the recommended positions: 4903 of 4971
-- start boxes: cannot tell 1124, changed 21, default 3826
-- games with a balance-changing lobby option: 2933 of 4971
+- starts on the spot: 658300 of 670814 (98.1%)
+- games that showed the recommended positions: 41405 of 42095
+- start boxes: cannot tell 12276, changed 247, default 29572
+- games with a balance-changing lobby option: 24084 of 42095
 
 Games per opening era:
 
 | opening era                         | first build | games |
 | ----------------------------------- | ----------- | ----- |
-| Season 3                            | 29241       | 204   |
-| May balance patch                   | 30236       | 1757  |
-| July balance patch                  | 30755       | 1010  |
-| August balance patch                | 31075       | 610   |
-| Air constructors and mobile jammers | 31357       | 1390  |
+| Season 3                            | 29241       | 1955  |
+| May balance patch                   | 30236       | 14096 |
+| July balance patch                  | 30755       | 7692  |
+| August balance patch                | 31075       | 5578  |
+| Air constructors and mobile jammers | 31357       | 12774 |
 
 ### Vocabulary per faction
 
-| faction | unit names ordered | names for 99% of orders | orders  |
-| ------- | ------------------ | ----------------------- | ------- |
-| Armada  | 270                | 60                      | 3698744 |
-| Cortex  | 262                | 62                      | 2538660 |
-| Legion  | 189                | 64                      | 229999  |
+| faction | unit names ordered | names for 99% of orders | orders   |
+| ------- | ------------------ | ----------------------- | -------- |
+| Armada  | 393                | 60                      | 36584900 |
+| Cortex  | 364                | 62                      | 23577774 |
+| Legion  | 320                | 74                      | 1292788  |
 
 ### Sequence lengths
 
 | map                      | openings | orders p10 | median | p90 | steps p10 | median | p90 |
 | ------------------------ | -------- | ---------- | ------ | --- | --------- | ------ | --- |
-| All That Glitters v2.2.3 | 30499    | 37         | 71     | 144 | 25        | 39     | 60  |
+| All That Glitters v2.2.3 | 309350   | 37         | 71     | 143 | 25        | 39     | 60  |
 | Rosetta 1.4.4            | 16964    | 24         | 40     | 74  | 20        | 34     | 56  |
-| Supreme Isthmus v2.1     | 30998    | 23         | 66     | 212 | 18        | 33     | 57  |
+| Supreme Isthmus v2.1     | 344470   | 23         | 65     | 212 | 18        | 33     | 57  |
 
 ### Where openings end
 
@@ -304,34 +303,34 @@ Openings end at the player's first contact with the enemy, at the latest after
 
 | map                      | openings | measured contact | by position | whole window | end p10 | median | p90  | orders of the window kept |
 | ------------------------ | -------- | ---------------- | ----------- | ------------ | ------- | ------ | ---- | ------------------------- |
-| All That Glitters v2.2.3 | 30501    | 383              | 30118       | 0            | 3:15    | 3:50   | 8:00 | 67.2%                     |
+| All That Glitters v2.2.3 | 309364   | 383              | 308981      | 0            | 3:15    | 3:50   | 8:00 | 67.1%                     |
 | Rosetta 1.4.4            | 16964    | 363              | 16601       | 0            | 2:45    | 3:00   | 6:35 | 53.2%                     |
-| Supreme Isthmus v2.1     | 30999    | 382              | 30617       | 0            | 2:05    | 4:55   | 8:00 | 69.5%                     |
+| Supreme Isthmus v2.1     | 344486   | 382              | 344104      | 0            | 2:05    | 4:25   | 8:00 | 69.5%                     |
 
 ### Top 20 openings (first 6 orders)
 
 | opening                         | openings | share |
 | ------------------------------- | -------- | ----- |
-| `mex mex mex win win win`       | 15211    | 19.4% |
-| `mex mex mex solar solar lab`   | 12358    | 15.8% |
-| `mex mex mex solar win win`     | 5081     | 6.5%  |
-| `tide tide tide tide tide tide` | 3726     | 4.7%  |
-| `mex mex mex solar solar solar` | 3017     | 3.8%  |
-| `mex mex mex solar solar vp`    | 2206     | 2.8%  |
-| `mex mex win win win win`       | 1842     | 2.3%  |
-| `mex mex mex mex solar solar`   | 1686     | 2.1%  |
-| `mex mex mex solar mex solar`   | 1361     | 1.7%  |
-| `mex mex mex solar solar win`   | 1174     | 1.5%  |
-| `mex mex mex solar solar ap`    | 917      | 1.2%  |
-| `mex mex win mex win win`       | 859      | 1.1%  |
-| `mex mex win win mex win`       | 772      | 1.0%  |
-| `mex mex mex mex win win`       | 720      | 0.9%  |
-| `mex mex mex solar lab solar`   | 659      | 0.8%  |
-| `mex mex mex solar mex mex`     | 655      | 0.8%  |
-| `mex mex mex mex mex mex`       | 649      | 0.8%  |
-| `mex mex mex win win lab`       | 566      | 0.7%  |
-| `mex mex mex mex mex solar`     | 541      | 0.7%  |
-| `mex mex win win win lab`       | 537      | 0.7%  |
+| `mex mex mex win win win`       | 161245   | 24.0% |
+| `mex mex mex solar solar lab`   | 75176    | 11.2% |
+| `mex mex mex solar win win`     | 50631    | 7.5%  |
+| `tide tide tide tide tide tide` | 41386    | 6.2%  |
+| `mex mex win win win win`       | 20570    | 3.1%  |
+| `mex mex mex solar solar vp`    | 17742    | 2.6%  |
+| `mex mex mex solar solar solar` | 15104    | 2.3%  |
+| `mex mex mex solar solar win`   | 11975    | 1.8%  |
+| `mex mex mex mex solar solar`   | 10253    | 1.5%  |
+| `mex mex win mex win win`       | 9158     | 1.4%  |
+| `mex mex win win mex win`       | 8166     | 1.2%  |
+| `mex mex mex mex win win`       | 6865     | 1.0%  |
+| `mex mex win win win lab`       | 6046     | 0.9%  |
+| `mex mex mex win win lab`       | 5860     | 0.9%  |
+| `mex mex mex solar solar ap`    | 5269     | 0.8%  |
+| `mex mex win win win mex`       | 4720     | 0.7%  |
+| `mex mex mex mex mex mex`       | 3960     | 0.6%  |
+| `mex mex mex solar mex solar`   | 3925     | 0.6%  |
+| `mex mex mex mex solar win`     | 3904     | 0.6%  |
+| `mex mex mex solar win lab`     | 3223     | 0.5%  |
 
 ### Per map and position
 
@@ -342,22 +341,22 @@ position.
 
 | position | role  | openings | on the spot | Armada | Cortex | Legion | first factory  | share | first 6 orders                | share |
 | -------- | ----- | -------- | ----------- | ------ | ------ | ------ | -------------- | ----- | ----------------------------- | ----- |
-| P1       | front | 1892     | 1863        | 970    | 884    | 38     | bot lab        | 65.5% | `mex mex mex solar solar lab` | 22.1% |
-| P2       | air   | 1905     | 1891        | 287    | 1573   | 45     | aircraft plant | 94.2% | `mex mex mex win win win`     | 12.3% |
-| P3       | tech  | 1886     | 1881        | 1512   | 354    | 20     | bot lab        | 91.8% | `mex mex mex win win win`     | 10.9% |
-| P4       | front | 1879     | 1874        | 1042   | 785    | 52     | bot lab        | 60.2% | `mex mex mex solar solar lab` | 18.1% |
-| P5       | front | 1920     | 1874        | 791    | 1091   | 38     | bot lab        | 79.9% | `mex mex mex solar solar lab` | 31.1% |
-| P6       | front | 1925     | 1877        | 1032   | 866    | 27     | bot lab        | 71.8% | `mex mex mex solar solar lab` | 28.2% |
-| P7       | front | 1931     | 1900        | 1089   | 801    | 41     | bot lab        | 73.8% | `mex mex mex solar solar lab` | 32.1% |
-| P8       | front | 1913     | 1887        | 879    | 973    | 61     | bot lab        | 74.1% | `mex mex mex solar solar lab` | 31.5% |
-| P9       | front | 1892     | 1871        | 974    | 879    | 39     | bot lab        | 64.4% | `mex mex mex solar solar lab` | 21.8% |
-| P10      | air   | 1894     | 1889        | 292    | 1551   | 51     | aircraft plant | 94.1% | `mex mex mex win win win`     | 17.8% |
-| P11      | tech  | 1905     | 1897        | 1476   | 415    | 14     | bot lab        | 90.8% | `mex mex mex mex solar solar` | 13.1% |
-| P12      | front | 1866     | 1858        | 1042   | 788    | 36     | bot lab        | 59.0% | `mex mex mex solar solar lab` | 18.7% |
-| P13      | front | 1937     | 1881        | 811    | 1075   | 51     | bot lab        | 78.4% | `mex mex mex solar solar lab` | 29.9% |
-| P14      | front | 1933     | 1885        | 1028   | 869    | 36     | bot lab        | 68.8% | `mex mex mex solar solar lab` | 26.6% |
-| P15      | front | 1935     | 1890        | 1107   | 794    | 34     | bot lab        | 73.3% | `mex mex mex solar solar lab` | 30.1% |
-| P16      | front | 1888     | 1862        | 868    | 971    | 49     | bot lab        | 73.6% | `mex mex mex solar solar lab` | 32.4% |
+| P1       | front | 19199    | 18894       | 9868   | 8968   | 363    | bot lab        | 66.9% | `mex mex mex solar solar lab` | 22.5% |
+| P2       | air   | 19320    | 19163       | 3084   | 15804  | 432    | aircraft plant | 94.2% | `mex mex mex mex solar solar` | 12.5% |
+| P3       | tech  | 19200    | 19127       | 15045  | 3977   | 178    | bot lab        | 91.4% | `mex mex mex solar solar lab` | 11.1% |
+| P4       | front | 19043    | 19003       | 10674  | 7987   | 382    | bot lab        | 61.4% | `mex mex mex solar solar lab` | 20.0% |
+| P5       | front | 19497    | 18977       | 8166   | 10914  | 417    | bot lab        | 79.3% | `mex mex mex solar solar lab` | 31.0% |
+| P6       | front | 19496    | 19004       | 10599  | 8557   | 340    | bot lab        | 70.8% | `mex mex mex solar solar lab` | 27.9% |
+| P7       | front | 19529    | 19103       | 11064  | 8116   | 349    | bot lab        | 72.6% | `mex mex mex solar solar lab` | 31.1% |
+| P8       | front | 19389    | 19068       | 8975   | 9926   | 488    | bot lab        | 74.5% | `mex mex mex solar solar lab` | 31.3% |
+| P9       | front | 19139    | 18937       | 9761   | 9008   | 370    | bot lab        | 66.4% | `mex mex mex solar solar lab` | 21.6% |
+| P10      | air   | 19255    | 19185       | 3013   | 15817  | 425    | aircraft plant | 94.1% | `mex mex mex win win win`     | 17.1% |
+| P11      | tech  | 19200    | 19105       | 15032  | 4016   | 152    | bot lab        | 91.3% | `mex mex mex mex solar solar` | 12.9% |
+| P12      | front | 19015    | 18982       | 10708  | 7905   | 402    | bot lab        | 60.9% | `mex mex mex solar solar lab` | 18.7% |
+| P13      | front | 19597    | 19058       | 8178   | 11001  | 418    | bot lab        | 79.5% | `mex mex mex solar solar lab` | 31.5% |
+| P14      | front | 19646    | 19130       | 10782  | 8539   | 325    | bot lab        | 70.6% | `mex mex mex solar solar lab` | 27.8% |
+| P15      | front | 19547    | 19119       | 11174  | 8043   | 330    | bot lab        | 72.7% | `mex mex mex solar solar lab` | 29.8% |
+| P16      | front | 19292    | 18992       | 8999   | 9861   | 432    | bot lab        | 73.8% | `mex mex mex solar solar lab` | 32.2% |
 
 #### Rosetta 1.4.4
 
@@ -384,51 +383,52 @@ position.
 
 | position | role       | openings | on the spot | Armada | Cortex | Legion | first factory  | share | first 6 orders                  | share |
 | -------- | ---------- | -------- | ----------- | ------ | ------ | ------ | -------------- | ----- | ------------------------------- | ----- |
-| P1       | sea        | 1891     | 1836        | 846    | 1003   | 42     | bot lab        | 89.4% | `mex mex mex win win win`       | 64.7% |
-| P2       | tech       | 1921     | 1908        | 1796   | 102    | 23     | bot lab        | 98.7% | `mex mex mex win win win`       | 74.5% |
-| P3       | air        | 1938     | 1932        | 349    | 1536   | 53     | aircraft plant | 97.0% | `mex mex mex win win win`       | 66.4% |
-| P4       | front      | 1949     | 1890        | 1409   | 484    | 56     | bot lab        | 73.7% | `tide tide tide tide tide tide` | 94.5% |
-| P5       | front      | 1968     | 1886        | 1126   | 807    | 35     | bot lab        | 87.9% | `mex mex mex win win win`       | 1.8%  |
-| P6       | front      | 1959     | 1899        | 1163   | 745    | 51     | bot lab        | 70.1% | `mex mex mex win win win`       | 3.6%  |
-| P7       | front/tech | 1951     | 1921        | 1324   | 576    | 51     | bot lab        | 94.6% | `mex mex mex win win win`       | 30.7% |
-| P8       | sea        | 1920     | 1875        | 817    | 1059   | 44     | shipyard       | 75.9% | `mex mex mex win win win`       | 51.4% |
-| P9       | sea        | 1916     | 1862        | 859    | 1018   | 39     | bot lab        | 89.8% | `mex mex mex win win win`       | 68.0% |
-| P10      | tech       | 1928     | 1917        | 1783   | 127    | 18     | bot lab        | 98.4% | `mex mex mex win win win`       | 75.7% |
-| P11      | air        | 1935     | 1920        | 313    | 1575   | 47     | aircraft plant | 97.2% | `mex mex mex win win win`       | 68.4% |
-| P12      | front      | 1939     | 1856        | 1386   | 507    | 46     | bot lab        | 74.4% | `tide tide tide tide tide tide` | 95.5% |
-| P13      | front      | 1959     | 1882        | 1166   | 761    | 32     | bot lab        | 89.3% | `mex mex mex lab win win`       | 2.0%  |
-| P14      | front      | 1937     | 1891        | 1188   | 698    | 51     | bot lab        | 67.9% | `mex mex mex win win win`       | 3.2%  |
-| P15      | front/tech | 1956     | 1927        | 1372   | 540    | 44     | bot lab        | 94.7% | `mex mex mex win win win`       | 31.0% |
-| P16      | sea        | 1932     | 1893        | 855    | 1038   | 39     | shipyard       | 72.9% | `mex mex mex win win win`       | 51.2% |
+| P1       | sea        | 21184    | 20498       | 9458   | 11211  | 515    | bot lab        | 90.1% | `mex mex mex win win win`       | 65.0% |
+| P2       | tech       | 21407    | 21249       | 19912  | 1264   | 231    | bot lab        | 98.4% | `mex mex mex win win win`       | 74.7% |
+| P3       | air        | 21508    | 21361       | 3652   | 17215  | 641    | aircraft plant | 97.3% | `mex mex mex win win win`       | 67.1% |
+| P4       | front      | 21498    | 20879       | 15161  | 5734   | 603    | bot lab        | 73.4% | `tide tide tide tide tide tide` | 95.0% |
+| P5       | front      | 21945    | 21060       | 12574  | 8849   | 522    | bot lab        | 88.5% | `mex mex mex lab win win`       | 2.0%  |
+| P6       | front      | 21861    | 21134       | 13282  | 8007   | 572    | bot lab        | 68.8% | `mex mex mex win win win`       | 2.9%  |
+| P7       | front/tech | 21504    | 21233       | 14774  | 6196   | 534    | bot lab        | 94.9% | `mex mex mex win win win`       | 29.5% |
+| P8       | sea        | 21323    | 20859       | 9269   | 11592  | 462    | shipyard       | 75.7% | `mex mex mex win win win`       | 50.5% |
+| P9       | sea        | 21237    | 20621       | 9488   | 11272  | 477    | bot lab        | 90.0% | `mex mex mex win win win`       | 65.2% |
+| P10      | tech       | 21459    | 21304       | 19949  | 1299   | 211    | bot lab        | 98.3% | `mex mex mex win win win`       | 74.8% |
+| P11      | air        | 21511    | 21375       | 3691   | 17199  | 621    | aircraft plant | 97.3% | `mex mex mex win win win`       | 67.4% |
+| P12      | front      | 21503    | 20945       | 15153  | 5717   | 633    | bot lab        | 73.4% | `tide tide tide tide tide tide` | 95.2% |
+| P13      | front      | 21864    | 21036       | 12716  | 8630   | 518    | bot lab        | 88.5% | `mex mex mex lab win win`       | 2.1%  |
+| P14      | front      | 21679    | 21145       | 13051  | 8023   | 605    | bot lab        | 68.5% | `mex mex mex win win win`       | 2.9%  |
+| P15      | front/tech | 21568    | 21257       | 14870  | 6141   | 557    | bot lab        | 95.0% | `mex mex mex win win win`       | 29.3% |
+| P16      | sea        | 21435    | 20919       | 9412   | 11540  | 483    | shipyard       | 75.4% | `mex mex mex win win win`       | 50.6% |
 
 ## Findings
 
 - **A third of the first 8 minutes comes after first contact.** Ending
-  openings at first contact keeps 66% of the build orders of the 8-minute
+  openings at first contact keeps 68% of the build orders of the 8-minute
   window: 67% on Glitters, 53% on Rosetta and 70% on Isthmus. The median
-  opening ends after 3:50, 3:00 and 4:55; a tenth end by 3:15, 2:45 and 2:05,
+  opening ends after 3:50, 3:00 and 4:25; a tenth end by 3:15, 2:45 and 2:05,
   and the tech positions keep their 8 minutes.
-- **Half of all orders are drags.** 53% of the rows repeat the unit of the
+- **Half of all orders are drags.** 57% of the rows repeat the unit of the
   order before them in the same frame. An opening has a median of 40 to 71
   orders, but 33 to 39 steps once those repeats are merged (48 to 63 steps in
   the whole 8 minutes). The Isthmus pond positions (`P4`, `P12`) start with a
   dragged line of tidal generators in 95% of openings.
-- **Few orders are queue edits.** 1.9% of the rows take units out of a factory
-  queue, 0.9% are inserted into a queue and 0.1% come from the factory-quota
-  widget; 72% were clicked and 78% were given with shift.
-- **The vocabulary is small in practice.** Each faction ordered 189 to 270
-  different units, but 60 to 64 names cover 99% of the orders.
+- **Few orders are queue edits.** 1.7% of the rows take units out of a factory
+  queue, 0.8% are inserted into a queue and 0.05% come from the factory-quota
+  widget; 73% were clicked and 80% were given with shift.
+- **The vocabulary is small in practice.** Each faction ordered 320 to 393
+  different units, but 60 to 74 names cover 99% of the orders.
 - **The meta is in the first factory.** Tech and air positions agree on their
   first factory in 91 to 99% of openings on Isthmus and Glitters, and the
   exact first six orders are much less settled, as in
   [`maps/`](../research/maps/README.md).
-- **Legion loses fewer openings than with 8 minutes.** 1,041 of 5,176 Legion
-  openings (20%) order the T1.5 metal extractor `legmext15`, which the August
-  2026 patch removed, before their first contact, and are dropped whole; in
-  the whole 8 minutes 1,853 do. Armada and Cortex lose 31 openings between
-  them, to the same unit in games with Legion.
-- **Random is common enough to matter.** 2,058 players (2.6%) picked Random or
-  have no faction in the replay; their faction comes from what they ordered.
+- **Legion loses fewer openings than with 8 minutes.** 2,577 of 19,397 Legion
+  openings (13%) are dropped whole, nearly all for ordering the T1.5 metal
+  extractor `legmext15`, which the August 2026 patch removed, before their
+  first contact; in the whole 8 minutes 4,320 are. Armada and Cortex lose 129
+  openings between them, mostly to the same unit in games with Legion.
+- **Random is common enough to matter.** 10,364 players (1.5%) picked Random
+  or have no faction in the replay; their faction comes from what they
+  ordered.
 - **Every player has a skill and a result.** No opening lacks `skill` or
   `won`.
 
@@ -437,13 +437,12 @@ position.
 - **Orders, not builds.** The dataset says what players asked for. Replaced
   and never-finished orders stay in; finishing needs re-simulated replays
   ([ADR 0010](../decisions/0010-re-simulate-replays-headlessly-for-game-state.md)).
-- **Most ends are estimates.** 1,128 of the 78,464 openings end at a measured
+- **Most ends are estimates.** 1,128 of the 670,814 openings end at a measured
   first contact. The others end at the median of their map and position, which
   is after the player's own contact for about half of them and before it for
   the rest; 8 to 11% of the orders kept that way were given after contact
   ([`first-contact.md`](../research/first-contact.md#cutoffs-for-games-that-were-not-re-simulated)).
-- **A partial slice.** The numbers above come from the first replays parsed,
-  which are not a random sample of the window. The split is fixed per game, so
-  they will change by adding games, not by moving them.
+- **Rosetta is rare.** 1,116 of the 42,095 games are on Rosetta, against about
+  19,000 on each of the other two maps.
 - **Small held-out sets per position.** Rosetta has about 110 games per
   held-out split in the whole slice, so about 110 openings per position.
