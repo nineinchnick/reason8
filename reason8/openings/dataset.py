@@ -82,6 +82,7 @@ from reason8.paths import (
     partition_in_range,
     require_partitioned,
 )
+from reason8.replays import widgets
 from reason8.replays.parse import PARSED_SUFFIX, output_path
 from reason8.replays.replay import GAME_SPEED, Replay, load_replay
 
@@ -215,6 +216,7 @@ def extract_game(
         "default_boxes": setup.default_boxes,
         "parser": (replay.doc.get("source") or {}).get("parser"),
         "contact_measured": cutoff == UNTIL_CONTACT and measured is not None,
+        "unit_control_widgets": widgets.unit_control_allowed(replay.doc.get("modoptions") or {}),
     }
     extract = GameExtract(game)
     if status is not None:
@@ -404,6 +406,7 @@ GAME_SCHEMA = {
     "default_boxes": pl.Boolean,
     "parser": pl.String,
     "contact_measured": pl.Boolean,
+    "unit_control_widgets": pl.Boolean,  # the lobby lets user widgets give orders
     "error": pl.String,
 }
 PLAYER_SCHEMA = {
@@ -471,6 +474,7 @@ def build_dataset(
     position_cutoffs: Mapping[str, Mapping[str, int]] | None = None,
     since: date | None = None,
     until: date | None = None,
+    widgets_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Build the dataset from the parsed replays of `selection` and return its manifest.
 
@@ -481,7 +485,8 @@ def build_dataset(
     is the first contacts of the re-simulated games (`contact.load_measured()`), and
     `position_cutoffs` the cutoffs of the others (`contact.POSITION_CUTOFF_SECONDS`).
     `since` (inclusive) and `until` (exclusive) keep only the games in the date partitions of
-    those days.
+    those days. `widgets_dir` holds the players' user widgets (`reason8.replays.widgets`);
+    without it, or for a replay it has not read, the widget columns are empty.
     """
     if cutoff not in CUTOFFS:
         raise ValueError(f"cutoff must be one of {CUTOFFS}, not {cutoff!r}")
@@ -597,6 +602,9 @@ def build_dataset(
         .join(included.select("match_id", "split"), on="match_id")
         .sort("match_id", "player_slot")
     )
+    player_frame = _with_widgets(
+        player_frame, included.select("match_id", "replay_file_name"), widgets_dir
+    )
 
     kept_players = player_frame.filter(pl.col("status") == INCLUDED)
     rows = pl.scan_parquet(part_files) if part_files else pl.LazyFrame(schema=ORDER_COLUMNS)
@@ -677,6 +685,10 @@ def build_dataset(
             "openings_by_cutoff_source": dict(
                 Counter(kept_players["cutoff_source"].to_list()).most_common()
             ),
+            "openings_with_widget_reports": int(kept_players["widgets_reported"].sum()),
+            "openings_with_automation_widgets": int(
+                (kept_players["automation_widgets"].list.len() > 0).sum()
+            ),
             "games": _counts_by_split(included),
             "openings": _counts_by_split(kept_players),
             "rows": row_counts,
@@ -694,6 +706,47 @@ def build_dataset(
             os.replace(path, target)
     shutil.rmtree(work_dir)
     return manifest
+
+
+def _with_widgets(
+    player_frame: pl.DataFrame, replay_files: pl.DataFrame, widgets_dir: Path | None
+) -> pl.DataFrame:
+    """The openings with the player's user widgets (`reason8.replays.widgets`).
+
+    `widgets_reported` says whether the player sent a widget report: players without user
+    widgets send none. `widgets` are the user widgets that were enabled and
+    `automation_widgets` those of them that give build orders. All three are empty when the
+    replay's widgets were not read.
+    """
+    replays = pl.DataFrame(schema={"replay_file_name": pl.String})
+    per_player = widgets.player_widgets(pl.DataFrame(schema=widgets.REPORT_SCHEMA))
+    if widgets_dir is not None and (widgets_dir / widgets.REPLAYS_FILE).exists():
+        replays = (
+            pl.read_parquet(widgets_dir / widgets.REPLAYS_FILE)
+            .filter(pl.col("error").is_null())
+            .select("replay_file_name")
+        )
+        per_player = widgets.player_widgets(pl.read_parquet(widgets_dir / widgets.REPORTS_FILE))
+    read = replay_files.join(replays, on="replay_file_name", how="semi")
+    return (
+        player_frame.join(replay_files, on="match_id", how="left")
+        .join(
+            per_player.rename({"team_id": "player_slot"}),
+            on=["replay_file_name", "player_slot"],
+            how="left",
+        )
+        .with_columns(
+            pl.col("match_id").is_in(read["match_id"].implode()).alias("_read"),
+        )
+        .with_columns(
+            pl.when("_read").then(pl.col("widgets").is_not_null()).alias("widgets_reported"),
+            *[
+                pl.when("_read").then(pl.col(name).fill_null([])).alias(name)
+                for name in ("widgets", "automation_widgets")
+            ],
+        )
+        .drop("replay_file_name", "_read")
+    )
 
 
 def _counts_by_split(frame: pl.DataFrame) -> dict[str, int]:
@@ -1008,6 +1061,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=date.fromisoformat,
         help="only the games of the date partitions before this date (YYYY-MM-DD, exclusive)",
     )
+    parser.add_argument(
+        "--widgets",
+        type=Path,
+        default=data_dir() / "widgets",
+        help="the players' user widgets (reason8 widgets)",
+    )
     parser.add_argument("--stats", action="store_true", help="print the tables of a built dataset")
 
 
@@ -1030,6 +1089,7 @@ def run(args: argparse.Namespace) -> int:
         measured=contact.load_measured(args.contact),
         since=args.since,
         until=args.until,
+        widgets_dir=args.widgets,
     )
     print(json.dumps(manifest["counts"], indent=2))
     return 0

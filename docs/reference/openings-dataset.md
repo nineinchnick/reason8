@@ -19,6 +19,7 @@ patches) and
 ```sh
 uv run reason8 maps fetch        # once: the pinned map list
 uv run reason8 contact           # re-simulated games -> data/contact/
+uv run reason8 widgets           # players' user widgets -> data/widgets/
 uv run reason8 dataset           # parsed replays -> data/datasets/openings_v2/
 uv run reason8 dataset --stats   # the tables below
 ```
@@ -33,8 +34,9 @@ reads about 35 replays a second.
 
 `--cutoff window` builds the openings as they were before they ended at first
 contact (`openings_v1`: every order of the first 8 minutes),
-`--window-seconds` changes the 8 minutes, and `--contact` names the file with
-the measured first contacts.
+`--window-seconds` changes the 8 minutes, `--contact` names the file with the
+measured first contacts, and `--widgets` the directory `reason8 widgets`
+wrote.
 
 ## What goes in
 
@@ -101,6 +103,12 @@ starts that are not on the spot of their position (`on_spot`), games that did
 not show the recommended positions (`positions_shown`) and games whose start
 boxes are not the map's default (`default_boxes`: false, or empty when it
 cannot be told).
+
+Also kept and flagged
+([ADR 0017](../decisions/0017-keep-openings-with-automation-widgets-flagged.md)):
+openings of players with a user widget that automates build orders
+(`automation_widgets`), see
+[`automation-widgets.md`](../research/automation-widgets.md).
 
 Players who picked Random (or whose faction the replay does not know) get the
 faction whose units they ordered most; `faction_picked` keeps what the lobby
@@ -225,7 +233,26 @@ Order:
 `orders_in_window`, `status` and `removed_units`. `games.parquet` has the game
 columns, `team_count`, `opening_era_name`, `factions` (the unit name prefixes
 of the factions loaded), `positions_source`, `parser`, `contact_measured` (the
-game was re-simulated), `replay_file_name`, `game_duration` and `avg_skill`.
+game was re-simulated), `unit_control_widgets`, `replay_file_name`,
+`game_duration` and `avg_skill`.
+
+The widget columns of `openings.parquet` (`reason8.replays.widgets`) are empty
+when `reason8 widgets` has not read the game's replay:
+
+`widgets_reported`
+: The player sent a list of their user widgets. Players without user widgets
+  send none.
+
+`widgets`
+: The user widgets that were enabled, by name
+
+`automation_widgets`
+: Those of `widgets` that give build orders on their own
+  (`AUTOMATION_WIDGETS`)
+
+`unit_control_widgets` (games)
+: The lobby let user widgets give orders (`allowunitcontrolwidgets`,
+  `allowuserwidgets`, no anonymous colour mode)
 
 ## Statistics
 
