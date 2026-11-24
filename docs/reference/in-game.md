@@ -21,6 +21,11 @@ ships with BAR, and the scripts mentioned here.
   built in 11 games: the commander's part was complete and in order in all 11;
   the factory's part was in order in all 11 and complete in 10 (in one game
   the economy was too weak to finish it in time).
+- **It plays the model's opening of its start position.** `reason8 bot export`
+  writes one opening per map, position and faction from the next-build model,
+  and the AI picks the one whose position is nearest to its commander. In two
+  8v8 games every Reason8 team found its position; see
+  [Learned openings in team games](#learned-openings-in-team-games).
 - **The model does not have to run inside the game yet.** For openings its
   output is known before the game starts, so it is exported to a data file and
   compiled into a script table.
@@ -205,16 +210,20 @@ The AI lives in [`ai/Reason8`](../../ai/Reason8):
   has no scripts for this AI, and the only profile is `hard`.
 
 `openings.json`
-: The openings, as data. For each side: the structures the commander builds
-  and the first units of each factory, by unit name. A separate `tasks` map
-  says which BARb task type builds each structure. This is the file a trained
-  model's export will write. The openings in the repo are deliberately
-  unusual, so that a game shows at once whether they were played.
+: The openings, as data, written by `reason8 bot export` from the next-build
+  model ([`results.md`](../results.md#using-it-in-the-game)). For each side,
+  map and start position: where the position's players start, the structures
+  the commander builds and the first units of its first factory, by unit name.
+  A separate `tasks` map says which BARb task type builds each structure. An
+  opening without a map is played on any map, by side only; the tests use a
+  file of deliberately unusual ones, so that a game shows at once whether they
+  were played.
 
 `script/hard/reason8/opening.as`
-: The logic, about 300 lines of AngelScript. It picks the opening for the AI's
-  side and gives the commander one build task per step and the factory one
-  task per unit, moving on when a task is done and trying again when it fails.
+: The logic, about 330 lines of AngelScript. It picks the opening of the AI's
+  side and map whose start is nearest to the commander, and gives the
+  commander one build task per step and the factory one task per unit, moving
+  on when a task is done and trying again, after a pause, when it fails.
 
 `script/hard/manager/builder.as`, `factory.as`
 : Copies of BARb's two scripts with six added calls into `opening.as`, marked
@@ -228,37 +237,48 @@ The AI lives in [`ai/Reason8`](../../ai/Reason8):
   "tasks": {
     "armlab": "factory",
     "armmex": "mex",
-    "armrad": "radar",
     "armwin": "energy"
   },
   "openings": [
     {
       "side": "armada",
+      "map": "Supreme Isthmus v2.1",
+      "position": "P1",
+      "start": [
+        681,
+        7376
+      ],
+      "candidates": 1977,
+      "log_likelihood": -9.197,
       "commander": [
-        "armwin",
-        "armwin",
         "armmex",
-        "armrad",
+        "armmex",
+        "armmex",
+        "armwin",
+        "armwin",
+        "armwin",
+        "armwin",
         "armlab"
       ],
       "factories": {
         "armlab": [
-          "armrectr",
-          "armjeth",
-          "armjeth",
           "armck",
-          "armham"
+          "armrectr",
+          "armck"
         ]
+      },
+      "dropped": {
+        "after the commander's last structure": 4
       }
     }
   ]
 }
 ```
 
-Stock BARb opens with four extractors, then wind generators, then a factory
-whose first unit is a constructor or a scout. The opening above starts with
-two wind generators, builds a radar in the first minute, and makes a
-resurrection bot and two anti-air bots first.
+(Shortened: the opening has 30 commander steps and six factory units.)
+`candidates` is how many human openings the export scored for the position and
+`log_likelihood` the model's score of the one chosen; `dropped` counts what
+the AI cannot play (see [`results.md`](../results.md#using-it-in-the-game)).
 
 `reason8 bot build` puts the AI folder together from three sources:
 
@@ -303,20 +323,18 @@ Factory
   gives up on can be queued again without changing the order.
 
 Log
-: Every decision is logged with the prefix `Reason8 opening:`.
+: Every decision is logged with the prefix `Reason8 opening: team <id>:`, so
+  the lines of several Reason8 teams in one game can be told apart.
 
 ```
-Reason8 opening: team 0, side 'armada', map 'Supreme Isthmus v2.1': 5 commander steps, 1 factories
-Reason8 opening: step 1 armwin: task queued, frame 25
-Reason8 opening: step 1: finished, frame 265
-Reason8 opening: step 3 armmex: BARb's extractor task, frame 569
-Reason8 opening: lifting BARb's timer on armrad (was 120 s)
-Reason8 opening: step 5: finished, frame 1641
-Reason8 opening: commander steps done at frame 1641, BARb takes over
-Reason8 opening: factory armlab: will make armrectr armjeth armjeth armck armham, frame 1641
-Reason8 opening: factory unit 1 armrectr: task queued, frame 1661
-Reason8 opening: factory unit 1: done, frame 2263
-Reason8 opening: factory units done at frame 4177, BARb takes over
+Reason8 opening: team 0: side 'armada', map 'Supreme Isthmus v2.1', start 711 7215: position P1 (start 681 7376), 30 commander steps, 1 factories
+Reason8 opening: team 0: step 1 armmex: BARb's extractor task, frame 81
+Reason8 opening: team 0: step 1: finished, frame 334
+Reason8 opening: team 0: step 4 armwin: task queued, frame 1017
+Reason8 opening: team 0: step 8: finished, frame 2768
+Reason8 opening: team 0: factory armlab: will make armck armrectr armck armrectr armck armrectr, frame 2768
+Reason8 opening: team 0: factory unit 1 armck: task queued, frame 2789
+Reason8 opening: team 0: factory unit 1: done, frame 3520
 ```
 
 ### What a script can see and do
@@ -339,8 +357,7 @@ Cannot
   spots.
 
 *So the start position needed for per-position openings is available: the map
-name and the commander's position at frame 0. The opening script logs the map
-name already and matches on the side only.*
+name and the commander's position at frame 0. The opening script uses both.*
 
 ## How to run it
 
@@ -349,6 +366,10 @@ content folder made by `reason8 headless setup`
 ([`state-extraction.md`](../research/state-extraction.md)).
 
 ```sh
+# 0. the openings, from the saved model (written to ai/Reason8/openings.json)
+uv run reason8 bot export --data-dir data/bar \
+    --game "Beyond All Reason test-32018-ad135b9"
+
 # 1. build the AI into the folder the game will run in
 uv run reason8 bot build --data-dir data/bar \
     --game "Beyond All Reason test-32018-ad135b9" \
@@ -375,6 +396,20 @@ uv run reason8 bot check data/runs/reason8/demos/*.sdfz \
     --state data/runs/reason8.state.jsonl
 ```
 
+For a team game on the map's recommended positions, `reason8 bot game` writes
+the start script in place of step 2's `ai_vs_ai.txt`: eight Reason8 teams of
+one side against eight stock BARb teams of the other.
+
+```sh
+uv run reason8 bot game --map "Supreme Isthmus v2.1" \
+    --game "Beyond All Reason test-32018-ad135b9" --minutes 6 \
+    --out data/runs/team-isthmus/script.txt
+uv run reason8 headless run --data-dir data/bar --threads 2 \
+    --engine-dir data/bar/engine-variants/reason8 \
+    --run-dir data/runs/team-isthmus --timeout 1500 \
+    data/runs/team-isthmus/script.txt
+```
+
 Step 1 can instead make a copy of the engine with the AI inside
 (`--engine-copy data/bar/engine-variants/reason8`, then
 `--engine-dir data/bar/engine-variants/reason8` in step 2). The shared engine
@@ -382,6 +417,10 @@ folder is never changed.
 
 `AI0` and `AI1` hold everything that identifies an AI in the start script.
 Leaving `Version` out is what a lobby does.
+
+With `--infolog`, `reason8 bot check` also counts each team's opening log
+lines (`opening_by_team`): its position, the steps finished and skipped, and
+the factory units made.
 
 `reason8 bot check` exits non-zero unless the AI loaded without errors and
 every team it played followed its opening. Its output has three parts per
@@ -424,11 +463,12 @@ Default options
 
 ### Does it play the opening?
 
-Eleven games of Reason8 against stock BARb: ten of 5 minutes and one of 15
-(seed 21). Odd seeds have Reason8 as Armada, even seeds as Cortex. Each
-recorded game was played again with state export up to frame 7,500 (250 s),
-and `reason8 bot check` compared what was built with the opening. "Done" is
-the second the last listed structure or unit was finished.
+Eleven games of Reason8, with the deliberately unusual openings of the tests,
+against stock BARb: ten of 5 minutes and one of 15 (seed 21). Odd seeds have
+Reason8 as Armada, even seeds as Cortex. Each recorded game was played again
+with state export up to frame 7,500 (250 s), and `reason8 bot check` compared
+what was built with the opening. "Done" is the second the last listed
+structure or unit was finished.
 
 | Seed | Side   | Commander steps built | Done (s) | Factory units built | Done (s) | Orders as listed |
 | ---- | ------ | --------------------- | -------- | ------------------- | -------- | ---------------- |
@@ -473,6 +513,55 @@ The current version queues one unit at a time and queues a failed task again.
 It lost no unit in 11 games, with orders sent twice in 3 of them, and the
 retry was never needed. *Eleven games are too few to say the change is what
 fixed it; the loss may simply not have come up.*
+
+### Learned openings in team games
+
+Two 8v8 games of 6 minutes, eight Reason8 teams against eight stock BARb
+teams, each team on its recommended position (`reason8 bot game`), with the
+openings of `reason8 bot export`: Reason8 as Armada on Supreme Isthmus with
+seed 1, and as Cortex on All That Glitters with seed 2. Counted from each
+team's log lines (`reason8 bot check --infolog`, `opening_by_team`). "Built"
+is the commander steps finished; a skipped step was given up after five tries.
+
+| Map             | Position | Steps | Built | Skipped | Factory units made |
+| --------------- | -------- | ----- | ----- | ------- | ------------------ |
+| Supreme Isthmus | P1       | 30    | 28    | 0       | 6                  |
+| Supreme Isthmus | P2       | 30    | 17    | 0       | 0                  |
+| Supreme Isthmus | P3       | 30    | 25    | 2       | 7                  |
+| Supreme Isthmus | P4       | 30    | 24    | 3       | 0                  |
+| Supreme Isthmus | P5       | 6     | 3     | 3       | 25                 |
+| Supreme Isthmus | P6       | 8     | 6     | 2       | 19                 |
+| Supreme Isthmus | P7       | 30    | 14    | 3       | 10                 |
+| Supreme Isthmus | P8       | 30    | 18    | 6       | 14                 |
+| Glitters        | P1       | 30    | 27    | 3       | 18                 |
+| Glitters        | P2       | 30    | 28    | 1       | 8                  |
+| Glitters        | P3       | 30    | 28    | 0       | 9                  |
+| Glitters        | P4       | 29    | 24    | 5       | 0                  |
+| Glitters        | P5       | 30    | 26    | 4       | 9                  |
+| Glitters        | P6       | 30    | 24    | 4       | 20                 |
+| Glitters        | P7       | 30    | 22    | 6       | 18                 |
+| Glitters        | P8       | 30    | 18    | 7       | 16                 |
+
+- **Every team found its position.** Each of the 16 Reason8 teams chose the
+  opening of the position it started on. Fifteen started within 170 map units
+  of the median start of that position's human players. Isthmus `P4`, the
+  pond, started 800 units from it, because the map list's spot is that far
+  from where its human players stand; it was still nearest to its own.
+- **No script errors and no desyncs.** The Isthmus game took 114 s of wall
+  time (9.5 times real time), the Glitters game 45 s.
+- **Most skipped steps are extractors** (46 of 49): BARb offered another task
+  five times in a row, usually when no free metal spot was near. One was a
+  geothermal plant and two a second bot lab that BARb's limit held back.
+- **Six minutes are not enough for the long openings.** The commander works
+  through 30 structures one at a time, where a human shares them with the
+  first constructors. Isthmus `P2` ordered its bot lab as the 18th structure,
+  and its wind economy had not paid for it when the game ended; Glitters `P4`
+  is the one opening with no factory before first contact.
+- **A task that fails at once needs a pause.** In a first run the tidal
+  generators of Isthmus `P4` failed the moment they were queued and used up
+  their five tries in a second each, and 28 of its 30 steps were skipped. The
+  script now waits 2 s times the number of tries before trying a failed step
+  again.
 
 ### What failure looks like
 
@@ -577,9 +666,8 @@ Not tried: we have no graphical BAR install here. What we know:
 
 ## Not covered
 
-- A real lobby, a team game, more than one Reason8 on a team, Legion.
-- Openings chosen by map and start position (the script matches the side
-  only).
+- A real lobby, Legion, Rosetta (only Supreme Isthmus and All That Glitters
+  were played), and Reason8 next to human players.
 - A model that runs during the game. The script-to-widget call was shown once
   and one run hung; a C++ build was not tried.
 - Whether queueing one unit at a time really prevents the lost unit; more
