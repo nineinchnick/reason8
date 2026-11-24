@@ -63,7 +63,7 @@ def team_game_script(
                 f"StartPosZ={round(spawn_point.z)}; }}"
             )
             ai_sections.append(
-                f"\t[AI{team_id}] {{ Host=0; IsFromDemo=0; Name={ais[ally_team]}{team_id}; "
+                f"\t[AI{team_id}] {{ Host=0; IsFromDemo=0; Name={ais[ally_team]}-{spawn_point.id}; "
                 f"{ai_fields(ais[ally_team])} Team={team_id}; }}"
             )
             team_id += 1
