@@ -7,7 +7,7 @@ import sys
 from types import ModuleType
 
 from reason8.analysis import apm, map_meta, opening_shift
-from reason8.bot import build, check
+from reason8.bot import build, check, game
 from reason8.data import download, migrate, sync
 from reason8.game import maps, positions
 from reason8.headless import batch, run, setup, state
@@ -57,6 +57,7 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
         "the Reason8 AI, a BARb variant",
         [
             ("build", build, "build the AI folder from BARb and ai/Reason8"),
+            ("game", game, "write the start script of an 8v8 AI game"),
             ("check", check, "check from a replay that the AI played its opening"),
         ],
     ),
