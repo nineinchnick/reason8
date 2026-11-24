@@ -33,6 +33,15 @@ def ai_fields(short_name: str) -> str:
     return f"ShortName={short_name};" + (" Version=stable;" if short_name == "BARb" else "")
 
 
+def team_positions(layout: Layout) -> list[tuple[int, str]]:
+    """(ally team, position) of each team id of `team_game_script()`, in team order."""
+    return [
+        (ally_team, spawn_point.id)
+        for ally_team, spawn_points in enumerate(layout.sides)
+        for spawn_point in spawn_points
+    ]
+
+
 def team_game_script(
     *,
     map_name: str,
@@ -102,13 +111,19 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--out", type=Path, required=True, help="where to write the script")
 
 
-def run(args: argparse.Namespace) -> int:
-    metadata = load_map_list().get(args.map)
+def team_game_layout(map_name: str, players: int = 8) -> Layout:
+    """The recommended positions of a game of two teams of `players` on the map."""
+    metadata = load_map_list().get(map_name)
     if metadata is None or metadata.start_positions is None:
-        raise SystemExit(f"no recommended positions for {args.map!r} (reason8 maps fetch)")
-    layout = metadata.start_positions.layout_for(2, args.players)
+        raise SystemExit(f"no recommended positions for {map_name!r} (reason8 maps fetch)")
+    layout = metadata.start_positions.layout_for(2, players)
     if layout is None:
-        raise SystemExit(f"{args.map!r} has no positions for two teams of {args.players}")
+        raise SystemExit(f"{map_name!r} has no positions for two teams of {players}")
+    return layout
+
+
+def run(args: argparse.Namespace) -> int:
+    layout = team_game_layout(args.map, args.players)
     script = team_game_script(
         map_name=args.map,
         game=args.game,
