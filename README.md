@@ -275,6 +275,15 @@ opening ends and how games are split. Counting baselines that predict the next
 build set the bar for every later model: [`results.md`](docs/results.md),
 measured as in [ADR 0013](docs/decisions/0013-evaluate-on-held-out-games.md).
 
+### Actions per minute
+
+The bot acts no faster than people of the skill it plays at. Counted the way
+BAR counts APM, a typical player clicks 13 actions a minute, 36 with the
+commands their widgets send; skill doubles that, while short bursts hardly
+change with it. See [`apm.md`](docs/research/apm.md) for the measurements and
+[ADR 0008](docs/decisions/0008-play-under-human-like-limits.md) for the limits
+per skill band.
+
 ## Compute
 
 Training and headless simulation run **locally first**. Bulk jobs (re-running
