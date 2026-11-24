@@ -156,23 +156,46 @@ def check_built(records: list[dict], team: int, opening: dict, tasks: dict) -> d
     }
 
 
+def choose_opening(
+    openings: list[dict], side: str, map_name: str | None, start: tuple[float, float] | None
+) -> dict | None:
+    """The opening the AI plays, chosen as ``opening.as`` does: of the openings for the side
+    and map, the one whose start is nearest to the team's; without one for the map, the
+    first for the side and any map."""
+    for_map = [o for o in openings if o["side"] == side and o.get("map", "") == map_name]
+    if for_map and start is not None:
+        return min(
+            for_map,
+            key=lambda o: (o["start"][0] - start[0]) ** 2 + (o["start"][1] - start[1]) ** 2,
+        )
+    if for_map:
+        return for_map[0]
+    return next((o for o in openings if o["side"] == side and not o.get("map")), None)
+
+
 def check_replay(
     replay: Replay, openings: dict, ai_short_name: str, state_records: list[dict] | None = None
 ) -> list[dict]:
     """One result per team that the AI played."""
-    by_side = {opening["side"]: opening for opening in openings.get("openings", [])}
     tasks = openings.get("tasks", {})
+    teams = replay.teams()
+    map_name = replay.meta.get("map")
     results = []
     for ai in sorted(replay.ais, key=lambda ai: ai["teamId"]):
         if ai.get("shortName") != ai_short_name:
             continue
         side = (ai.get("faction") or "").lower()
         result = {"team": ai["teamId"], "side": side, "version_in_replay": ai.get("version")}
-        if side not in by_side:
+        team = teams.get(ai["teamId"])
+        opening = choose_opening(
+            openings.get("openings", []), side, map_name, team.start_pos if team else None
+        )
+        if opening is None:
             result.update({"matches": False, "error": f"no opening for side {side!r}"})
             results.append(result)
             continue
-        opening = by_side[side]
+        if opening.get("position"):
+            result["position"] = opening["position"]
         expected_commander, factory_name, expected_factory = expected_builds(opening, tasks)
         result["expected"] = {
             "commander": expected_commander,
@@ -189,6 +212,39 @@ def check_replay(
     return results
 
 
+OPENING_LINE = re.compile(r"team (\d+): (.*)")
+CHOSEN = re.compile(r"position (\S+) .*?, (\d+) commander steps")
+
+
+def count_opening_line(teams: dict[int, dict], message: str) -> None:
+    """Add one ``Reason8 opening: team N: ...`` log line to its team's counts."""
+    match = OPENING_LINE.match(message)
+    if not match:
+        return
+    team = teams.setdefault(
+        int(match.group(1)),
+        {
+            "position": None,
+            "commander_steps": None,
+            "steps_finished": 0,
+            "steps_skipped": 0,
+            "factory_units_done": 0,
+            "factory_units_skipped": 0,
+        },
+    )
+    text = match.group(2)
+    if chosen := CHOSEN.search(text):
+        team["position"], team["commander_steps"] = chosen.group(1), int(chosen.group(2))
+    elif text.startswith("step ") and ": finished," in text:
+        team["steps_finished"] += 1
+    elif text.startswith("step ") and text.endswith(": skipped"):
+        team["steps_skipped"] += 1
+    elif text.startswith("factory unit ") and ": done," in text:
+        team["factory_units_done"] += 1
+    elif text.startswith("factory unit ") and text.endswith(": skipped"):
+        team["factory_units_skipped"] += 1
+
+
 def check_infolog(infolog: Path, ai_short_name: str) -> dict:
     """Loaded version and scripts of the AI, and its errors, from the engine log."""
     prefix = re.compile(rf"Skirmish AI <{re.escape(ai_short_name)}-([^>]*)>: (.*)")
@@ -196,6 +252,7 @@ def check_infolog(infolog: Path, ai_short_name: str) -> dict:
     scripts: list[str] = []
     errors: list[str] = []
     opening_lines = 0
+    teams: dict[int, dict] = {}
     with infolog.open(encoding="utf-8", errors="replace") as file:
         for line in file:
             if any(needle in line for needle in ENGINE_ERRORS):
@@ -209,6 +266,7 @@ def check_infolog(infolog: Path, ai_short_name: str) -> dict:
                 scripts.append(message.removeprefix("Load script: "))
             if message.startswith("Reason8 opening:"):
                 opening_lines += 1
+                count_opening_line(teams, message.removeprefix("Reason8 opening: "))
             if any(needle in message for needle in SCRIPT_ERRORS):
                 errors.append(message[:300])
     if not scripts:
@@ -217,6 +275,7 @@ def check_infolog(infolog: Path, ai_short_name: str) -> dict:
         "versions_loaded": sorted(versions),
         "scripts_loaded": sorted(set(scripts)),
         "opening_log_lines": opening_lines,
+        "opening_by_team": dict(sorted(teams.items())),
         "errors": errors,
     }
 

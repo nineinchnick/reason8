@@ -134,7 +134,8 @@ def test_check_infolog_clean(tmp_path):
         [
             "Skirmish AI <Reason8-0.1>: Load script: /engine/Reason8/0.1/script/hard/main.as",
             "Skirmish AI <Reason8-0.1>: Script: 'void AiLuaMessage(const string& in)' not found!",
-            "Skirmish AI <Reason8-0.1>: Reason8 opening: step 1 armwin: task queued, frame 25",
+            "Skirmish AI <Reason8-0.1>: Reason8 opening: team 0: step 1 armwin: task queued, "
+            "frame 25",
             "Skirmish AI <BARbarIAn-stable>: /x/main.as (1, 1) : ERR  : not ours",
         ],
     )
@@ -143,6 +144,32 @@ def test_check_infolog_clean(tmp_path):
     assert result["scripts_loaded"] == ["/engine/Reason8/0.1/script/hard/main.as"]
     assert result["opening_log_lines"] == 1
     assert result["errors"] == []
+
+
+def test_check_infolog_counts_per_team(tmp_path):
+    lines = [
+        "team 3: side 'armada', map 'M', start 1 2: position P4 (start 1 2), 3 commander steps, "
+        "1 factories",
+        "team 3: step 1 armmex: BARb's extractor task, frame 30",
+        "team 3: step 1: finished, frame 300",
+        "team 3: step 2 armmex: skipped",
+        "team 3: step 3: task failed, frame 400",
+        "team 3: step 3: finished, frame 500",
+        "team 3: factory unit 1: done, frame 900",
+        "team 3: factory unit 2 armpw: skipped",
+        "team 5: side 'armada', map 'M', start 9 9: no opening, BARb plays its own",
+    ]
+    log = write_log(tmp_path, [f"Skirmish AI <Reason8-0.1>: Reason8 opening: {x}" for x in lines])
+    teams = check.check_infolog(log, "Reason8")["opening_by_team"]
+    assert teams[3] == {
+        "position": "P4",
+        "commander_steps": 3,
+        "steps_finished": 2,
+        "steps_skipped": 1,
+        "factory_units_done": 1,
+        "factory_units_skipped": 1,
+    }
+    assert teams[5]["position"] is None
 
 
 def test_check_infolog_compile_error(tmp_path):

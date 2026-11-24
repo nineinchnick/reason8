@@ -1,10 +1,12 @@
 /*
  * Reason8 opening: play a given build order, then hand back to BARb.
  *
- * An opening lists, for one side:
+ * An opening lists, for one side, map and start position:
  *   - the structures the commander builds, in order, by unit name;
  *   - for each factory, the first units it makes, in order, by unit name.
- * The first factory that the opening has units for makes them.
+ * The first factory that the opening has units for makes them. The AI plays
+ * the opening of its side and map whose start is nearest to its commander;
+ * an opening without a map is for any map, when none is for this one.
  * The openings are data in opening_table.as, which reason8/bot/build.py
  * generates from ai/Reason8/openings.json.
  *
@@ -44,15 +46,24 @@ class SFactoryOpening {  // the first units of one factory
 }
 
 class SOpening {
-	SOpening(const string& in sideName, array<SStep>& in commanderSteps,
+	SOpening(const string& in sideName, const string& in mapName, const string& in positionName,
+			float x, float z, array<SStep>& in commanderSteps,
 			array<SFactoryOpening>& in factoryOpenings)
 	{
 		side = sideName;
+		map = mapName;
+		position = positionName;
+		startX = x;
+		startZ = z;
 		commander = commanderSteps;
 		factories = factoryOpenings;
 	}
 	SOpening() {}
 	string side;
+	string map;  // empty: any map
+	string position;
+	float startX;
+	float startZ;
 	array<SStep> commander;
 	array<SFactoryOpening> factories;
 }
@@ -64,6 +75,7 @@ bool isOpeningChosen = false;
 SOpening@ opening = null;
 uint commanderStep = 0;
 int tries = 0;
+int retryFrame = 0;  // a failed step is tried again from this frame on
 IUnitTask@ commanderTask = null;  // the task of the current commander step
 CCircuitUnit@ openingFactory = null;  // the factory that makes the opening's units
 array<string> factoryUnits;
@@ -73,26 +85,46 @@ IUnitTask@ factoryTask = null;  // the task of the current factory unit
 
 void Log(const string& in message)
 {
-	AiLog("Reason8 opening: " + message);
+	AiLog("Reason8 opening: team " + ai.teamId + ": " + message);
 }
 
-SOpening@ GetOpening()
+/*
+ * The opening to play, chosen once: of the openings for the AI's side and map,
+ * the one whose start is nearest to `position` (the commander's place at the
+ * start); without one for the map, the first for the side and any map.
+ */
+SOpening@ GetOpening(const AIFloat3& in position)
 {
 	if (isOpeningChosen)
 		return opening;
 	isOpeningChosen = true;
 
 	const string side = ai.GetSideName();
+	const string mapName = ai.GetMapName();
 	array<SOpening> openings = MakeOpenings();
+	float nearest = -1.f;
 	for (uint i = 0; i < openings.length(); ++i) {
-		if (openings[i].side == side) {
+		if (openings[i].side != side || openings[i].map != mapName)
+			continue;
+		const float dx = openings[i].startX - position.x;
+		const float dz = openings[i].startZ - position.z;
+		const float distance = dx * dx + dz * dz;  // squared
+		if (nearest < 0.f || distance < nearest) {
+			nearest = distance;
 			@opening = openings[i];
-			break;
 		}
 	}
-	Log("team " + ai.teamId + ", side '" + side + "', map '" + ai.GetMapName() + "': "
+	for (uint i = 0; opening is null && i < openings.length(); ++i) {
+		if (openings[i].side == side && openings[i].map.length() == 0)
+			@opening = openings[i];
+	}
+	Log("side '" + side + "', map '" + mapName + "', start "
+		+ int(position.x) + " " + int(position.z) + ": "
 		+ (opening is null ? "no opening, BARb plays its own"
-			: "" + opening.commander.length() + " commander steps, "
+			: (opening.map.length() == 0 ? "the opening for any map"
+				: "position " + opening.position + " (start " + int(opening.startX) + " "
+					+ int(opening.startZ) + ")")
+				+ ", " + opening.commander.length() + " commander steps, "
 				+ opening.factories.length() + " factories"));
 	return opening;
 }
@@ -137,11 +169,13 @@ IUnitTask@ MakeCommanderTask(CCircuitUnit@ unit)
 {
 	if (!unit.circuitDef.IsRoleAny(Unit::Role::COMM.mask))
 		return null;
-	SOpening@ plan = GetOpening();
+	SOpening@ plan = GetOpening(unit.GetPos(ai.frame));
 	if (plan is null)
 		return null;
 	if (commanderTask !is null)
 		return commanderTask;  // the commander dropped the current step and is idle again
+	if (ai.frame < retryFrame)
+		return aiBuilderMgr.Enqueue(TaskB::Wait(retryFrame - ai.frame));
 
 	while (commanderStep < plan.commander.length()) {
 		const string unitName = plan.commander[commanderStep].unit;
@@ -201,6 +235,9 @@ void CommanderTaskRemoved(IUnitTask@ task, bool done)
 	} else {
 		Log("step " + (commanderStep + 1) + ": task failed, frame " + ai.frame);
 		@commanderTask = null;
+		// a task that fails at once (no place to build it) would use up its tries in a
+		// second; wait longer after each failure
+		retryFrame = ai.frame + 2 * SECOND * tries;
 	}
 }
 
@@ -211,7 +248,7 @@ void CommanderTaskRemoved(IUnitTask@ task, bool done)
  */
 bool StartFactoryOpening(CCircuitUnit@ factory)
 {
-	SOpening@ plan = GetOpening();
+	SOpening@ plan = GetOpening(factory.GetPos(ai.frame));
 	if (plan is null || openingFactory !is null || factoryStep > 0)
 		return false;
 
