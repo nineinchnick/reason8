@@ -29,6 +29,7 @@ from reason8.openings.dataset import (
     stats,
 )
 from reason8.openings.extract import opening_orders
+from reason8.replays import widgets
 from reason8.replays.parse import output_path
 from reason8.replays.replay import Replay, load_replay
 from tests import synthetic
@@ -218,6 +219,46 @@ def test_build_dataset(tmp_path):
         "measured": {"game2": {0: 3000, 7: None}, "game11": {0: 1}},
         "position_cutoffs": {document["meta"]["map"]: {position_of[8]: 100}},
     }
+    # widget reports: game2 was read, player 3 had an automation widget and player 5 only
+    # a disabled one; game3 could not be read; the other games were not read at all
+    widgets_dir = tmp_path / "widgets"
+    widgets_dir.mkdir()
+    pl.from_dicts(
+        [
+            {"replay_file_name": "game2.sdfz", "reports": 2},
+            {"replay_file_name": "game3.sdfz", "reports": 0, "error": "EOFError"},
+        ],
+        schema=widgets.REPLAY_SCHEMA,
+    ).write_parquet(widgets_dir / widgets.REPLAYS_FILE)
+    automation_widget = sorted(widgets.AUTOMATION_WIDGETS)[0]
+
+    def widget(name, state):
+        return {"name": name, "author": "a", "hash": "h", "state": state, "description": "d"}
+
+    pl.from_dicts(
+        [
+            {
+                "replay_file_name": "game2.sdfz",
+                "player_id": 30,
+                "team_id": 3,
+                "frame": 31,
+                "widget_count": 2,
+                "truncated": False,
+                "widgets": [widget(automation_widget, 1), widget("Some Display", 1)],
+            },
+            {
+                "replay_file_name": "game2.sdfz",
+                "player_id": 50,
+                "team_id": 5,
+                "frame": 31,
+                "widget_count": 1,
+                "truncated": False,
+                "widgets": [widget(automation_widget, 0)],
+            },
+        ],
+        schema=widgets.REPORT_SCHEMA,
+    ).write_parquet(widgets_dir / widgets.REPORTS_FILE)
+    settings["widgets_dir"] = widgets_dir
     manifest = build_dataset(parsed, out, selection, match_players, jobs=2, **settings)
 
     assert manifest["selection"] == {
@@ -261,6 +302,21 @@ def test_build_dataset(tmp_path):
         ["armgone"]
     ]
     measured_game = openings_frame.filter(pl.col("match_id") == 1002)
+    widget_columns = ["widgets_reported", "widgets", "automation_widgets"]
+    by_slot = {row["player_slot"]: row for row in measured_game.iter_rows(named=True)}
+    assert [by_slot[3][name] for name in widget_columns] == [
+        True,
+        sorted([automation_widget, "Some Display"]),
+        [automation_widget],
+    ]
+    assert [by_slot[5][name] for name in widget_columns] == [True, [], []]
+    assert [by_slot[0][name] for name in widget_columns] == [False, [], []]
+    not_read = openings_frame.filter(pl.col("match_id") != 1002)
+    assert not_read.select(widget_columns).null_count().row(0) == (not_read.height,) * 3
+    assert manifest["counts"]["openings_with_widget_reports"] == 2
+    assert manifest["counts"]["openings_with_automation_widgets"] == 1
+    # the fixture game was played with unit control widgets off
+    assert not games_frame["unit_control_widgets"].any()
     assert Counter(measured_game["cutoff_source"]) == {MEASURED: 2, BY_POSITION: 1, WINDOW: 13}
     assert measured_game.filter(pl.col("player_slot") == 0)["cutoff_frame"].item() == 3000
     assert 0 < measured_game.filter(pl.col("player_slot") == 0)["orders"].item() < 47

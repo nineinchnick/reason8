@@ -105,6 +105,11 @@ parser's `chatlog` (the same as the `chat` events), Lua messages (FPS, mouse
 positions, selected units and similar), system and log messages, and sync and
 frame packets.
 
+One Lua message is read separately: the list of user widgets each player had
+installed, which BAR sends one second into the game. `reason8 widgets` reads
+it straight from the `.sdfz` files into `data/widgets/`
+([`automation-widgets.md`](../research/automation-widgets.md)).
+
 ## Time
 
 Every event has `frame`, the simulation frame relative to game start (30
