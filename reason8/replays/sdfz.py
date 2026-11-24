@@ -23,6 +23,7 @@ import gzip
 import json
 import re
 import struct
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -171,19 +172,27 @@ def _parse_command_packet(packet: memoryview) -> RawCommandPacket:
     return RawCommandPacket(packet_id, commands)
 
 
-def read_command_packets(data: bytes) -> list[RawCommandPacket]:
-    """Return every COMMAND/AICOMMAND/AICOMMANDS packet of an uncompressed demo, in order."""
+def iter_packets(data: bytes) -> Iterator[tuple[float, memoryview]]:
+    """Every packet of an uncompressed demo, in order: its game time (seconds since the
+    demo started) and its bytes, which start with the packet id."""
     stream = _demo_stream(data)
-    packets: list[RawCommandPacket] = []
     offset = 0
     end = len(stream)
     while offset + 8 <= end:
-        (length,) = struct.unpack_from("<I", stream, offset + 4)
+        game_time, length = struct.unpack_from("<fI", stream, offset)
         packet = stream[offset + 8 : offset + 8 + length]
         offset += 8 + length
-        if length and packet[0] in COMMAND_PACKETS:
-            packets.append(_parse_command_packet(packet))
-    return packets
+        if length:
+            yield game_time, packet
+
+
+def read_command_packets(data: bytes) -> list[RawCommandPacket]:
+    """Return every COMMAND/AICOMMAND/AICOMMANDS packet of an uncompressed demo, in order."""
+    return [
+        _parse_command_packet(packet)
+        for _, packet in iter_packets(data)
+        if packet[0] in COMMAND_PACKETS
+    ]
 
 
 def read_command_packets_file(path: str | Path) -> list[RawCommandPacket]:
