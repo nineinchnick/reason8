@@ -285,39 +285,36 @@ and refuses when the model can order a unit the game does not have.
 
 ## Using it in the game
 
-The in-game side plays `ai/Reason8/openings.json`
-([`in-game.md`](reference/in-game.md)). Exporting this model there is not a
-format change alone:
+`reason8 bot export` turns the saved model into the in-game AI's openings,
+`ai/Reason8/openings.json` ([`in-game.md`](reference/in-game.md)): one per
+map, start position and faction (Armada and Cortex), 96 in all.
 
-Key
-: `openings.json` has one opening per side (Armada, Cortex), and `opening.as`
-  picks it by the AI's side. A per-position model needs openings keyed by map
-  and spawn point, and the AI has to find its own spawn point in the game:
-  from its start point and the recommended positions the lobby sends
-  (`mapmetadata_startpos`), which the scripts may not be able to read.
+Which opening
+: Taking the most likely next step again and again does not give an opening:
+  after a few wind generators another one is always the most likely step, so
+  the decoded opening never ends. Instead the export scores up to 2,000 human
+  openings of each map, position and faction from the training split by how
+  likely the model finds their first 15 steps, and the AI plays the most
+  likely one: the model's most typical opening of the position. It is a real
+  opening, so it ends at its player's first contact, and its drags and factory
+  queues have real lengths.
 
-A sequence, not a distribution
-: The file holds one fixed list of steps. The model gives the next step's
-  probabilities; a list has to be decoded from it. Taking the most likely step
-  each time loops (an extractor after two extractors is again most likely), so
-  the export needs a decoding rule, for example the most common opening of the
-  position up to its first factory, or a beam search with a length limit.
+Which position
+: Each opening carries the median start point of its position. The AI plays
+  the opening of its side and map whose start point is nearest to its
+  commander.
 
 Drags
-: A merged step says "wind turbines", not how many. The export needs the
-  count, from the dataset's repeats.
+: A step of five extractors is five structures for the commander, a factory
+  order with shift five units.
 
 Builders
-: The file splits an opening into the commander's structures and each
-  factory's units. The dataset tells structures from factory units (`kind`)
-  but not which builder took a structure; after the first two or three minutes
-  constructors build too, and the file has no place for them.
+: The commander builds the structures, at most 30, its first factory among
+  them: a human shares a long opening with the first constructors, and the
+  AI's constructors are BARb's. The first factory makes the opening's units;
+  units of a second factory or of another kind are dropped.
 
 Task types
-: Every structure needs a BARb task type in `tasks` (extractor, energy,
-  factory, defence, radar, ...). Making that table for the 70 or so units that
-  cover 99% of the orders of a faction is a small, separate job.
-
-The first three need a change to `opening.as` and the export; until then a
-single opening per side can be exported by hand from the per-position tables
-of [`openings-dataset.md`](reference/openings-dataset.md).
+: Each structure gets its BARb task type from the game's unit files
+  (`reason8.game.unitdefs`); structures no script task builds, such as walls,
+  are dropped.
