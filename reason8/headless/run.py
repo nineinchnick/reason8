@@ -158,6 +158,12 @@ def play(args: argparse.Namespace) -> dict:
             script = with_speed(script, args.speed)
         launch = run_dir / "script.txt"
         launch.write_text(script, encoding="utf-8")
+        if args.snapshots:
+            # the host spectates; the widget records the game as it is played, and the
+            # script's own mod options end it and set its speed
+            widgets.append(STATE_WIDGET)
+            settings["Reason8SnapshotFrames"] = int(args.snapshot_seconds * 30)
+            settings["Reason8Events"] = 1
     if args.threads:
         settings["WorkerThreadCount"] = args.threads
     for item in args.set:
@@ -344,12 +350,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--var", action="append", default=[], metavar="NAME=VALUE", help="script: $NAME"
     )
-    parser.add_argument("--snapshots", action="store_true", help="replay: write state snapshots")
+    parser.add_argument("--snapshots", action="store_true", help="write state snapshots")
     parser.add_argument(
         "--snapshot-seconds", type=float, default=5, help="game seconds per snapshot"
     )
     parser.add_argument("--max-frame", type=int, default=0, help="replay: stop at this frame")
-    parser.add_argument("--out", help="replay: copy the state file here")
+    parser.add_argument("--out", help="copy the state file here")
 
 
 def run(args: argparse.Namespace) -> int:
