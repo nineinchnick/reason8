@@ -289,6 +289,36 @@ By position, in order:
   10 steps, only as far as BARb's timing varies them. Thirty human openings at
   a position are 29 or 30 different ones.
 
+## Five openings per position
+
+The bot played the same opening at a position in every game. With five per
+position, the most likely one and four drawn from the more likely half, and
+one picked at random per game (`reason8 bot export`,
+[`in-game.md`](in-game.md#what-we-built)), the same 30 seeds again:
+
+| measure       | at first contact       | at 4:00                |
+| ------------- | ---------------------- | ---------------------- |
+| metal income  | 110.3% (106.6%–114.1%) | 94.7% (91.8%–98.0%)    |
+| energy income | 130.9% (125.8%–135.6%) | 108.7% (104.9%–112.2%) |
+| built metal   | 104.1% (101.1%–107.0%) | 96.6% (96.0%–97.3%)    |
+| built energy  | 102.8% (99.8%–106.2%)  | 95.6% (94.4%–96.6%)    |
+| units         | 117.2% (111.2%–123.3%) | 94.7% (93.0%–96.3%)    |
+
+| openings compared                                 | classified right    |
+| ------------------------------------------------- | ------------------- |
+| bot and human, in order                           | 96.7% (95.4%–97.8%) |
+| bot and human, structures and factory units apart | 90.8% (88.9%–92.7%) |
+
+- **The economy is closer to BARb's.** At 4:00 Reason8 has built 96.6% of
+  BARb's metal value, against 92.9% with one opening per position, and its
+  metal income is 95% instead of 83%: the most typical openings were not the
+  best ones.
+- **The openings are still easy to tell apart.** The classifier is right 97%
+  of the time instead of 98%. Each position now shows 9 to 22 different
+  openings over 30 seeds, but the rest of what gives the bot away is
+  unchanged: half as many orders before contact, BARb's own orders mixed in,
+  and one factory unit queued at a time.
+
 ## What the games cost
 
 Measured on the A/A run: 32 hardware threads, 56 GB of RAM for WSL, 7 games at

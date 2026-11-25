@@ -212,18 +212,20 @@ The AI lives in [`ai/Reason8`](../../ai/Reason8):
 `openings.json`
 : The openings, as data, written by `reason8 bot export` from the next-build
   model ([`results.md`](../results.md#using-it-in-the-game)). For each side,
-  map and start position: where the position's players start, the structures
-  the commander builds and the first units of its first factory, by unit name.
-  A separate `tasks` map says which BARb task type builds each structure. An
-  opening without a map is played on any map, by side only; the tests use a
-  file of deliberately unusual ones, so that a game shows at once whether they
-  were played.
+  map and start position, five openings (`variant` 0 to 4, the one the model
+  finds most likely first): where the position's players start, the structures
+  the commander builds with where the human placed each (`places`), and the
+  first units of its first factory, by unit name. A separate `tasks` map says
+  which BARb task type builds each structure. An opening without a map is
+  played on any map, by side only; the tests use a file of deliberately
+  unusual ones, so that a game shows at once whether they were played.
 
 `script/hard/reason8/opening.as`
-: The logic, about 330 lines of AngelScript. It picks the opening of the AI's
-  side and map whose start is nearest to the commander, and gives the
-  commander one build task per step and the factory one task per unit, moving
-  on when a task is done and trying again, after a pause, when it fails.
+: The logic, about 400 lines of AngelScript. It finds the position of the AI's
+  side and map whose start is nearest to the commander, picks one of its
+  openings at random, and gives the commander one build task per step and the
+  factory one task per unit, moving on when a task is done and trying again,
+  after a pause, when it fails.
 
 `script/hard/manager/builder.as`, `factory.as`
 : Copies of BARb's two scripts with six added calls into `opening.as`, marked
@@ -286,7 +288,10 @@ the AI cannot play (see [`results.md`](../results.md#using-it-in-the-game)).
 2. the installed game's `luarules/configs/BARb/stable/`: BARb's scripts and
    configs for the `hard` profile, read from the game package;
 3. `ai/Reason8`, on top, with `openings.json` turned into
-   `script/hard/reason8/opening_table.as`.
+   `script/hard/reason8/opening_table.as`. Each opening's steps and factory
+   units are one string there, decoded only for the opening played: 480
+   openings as nested script arrays made each Reason8 AI take minutes to
+   compile.
 
 It stops when a stock script that we replace no longer has the recorded hash,
 because our copy would silently drop the game's change.
@@ -336,7 +341,7 @@ Log
   the lines of several Reason8 teams in one game can be told apart.
 
 ```
-Reason8 opening: team 0: side 'armada', map 'Supreme Isthmus v2.1', start 711 7215: position P1 (start 681 7376), 30 commander steps, 1 factories
+Reason8 opening: team 0: side 'armada', map 'Supreme Isthmus v2.1', start 711 7215: position P1 (start 681 7376), opening 2 of 5, 30 commander steps, 1 factories
 Reason8 opening: team 0: step 1 armmex: BARb's extractor task, frame 81
 Reason8 opening: team 0: step 1: finished, frame 334
 Reason8 opening: team 0: step 4 armwin: task queued, frame 1017
