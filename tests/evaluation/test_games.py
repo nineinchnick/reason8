@@ -121,3 +121,15 @@ def test_seeds_for_grows_with_the_spread():
     narrow_pairs = pairs(pl.DataFrame(sum(narrow, []), schema=TEAM_SCHEMA))
     wide_pairs = pairs(pl.DataFrame(sum(wide, []), schema=TEAM_SCHEMA))
     assert seeds_for(narrow_pairs, "built_metal") < seeds_for(wide_pairs, "built_metal")
+
+
+def test_team_measures_at_a_fixed_frame(tmp_path):
+    lines = state_lines([hit(3000, 0, "armcom", 2, "corak")])
+    lines[1:2] = [
+        snapshot(2850, [resources(0, 3.0, 30.0), resources(2, 4.0, 40.0)], []),
+        snapshot(3150, [resources(0, 9.0, 90.0), resources(2, 8.0, 80.0)], []),
+    ]
+    measures = team_measures(write_state(tmp_path / "s.jsonl.gz", lines), UNIT_DEFS, at_frame=3200)
+    # every team at the same frame, whatever its contact
+    assert measures[0]["measured_frame"] == measures[2]["measured_frame"] == 3150
+    assert measures[0]["contact_frame"] == 3000 and measures[0]["metal_income"] == 9.0
