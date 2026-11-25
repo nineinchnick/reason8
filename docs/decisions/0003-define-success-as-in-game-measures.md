@@ -36,8 +36,9 @@ The first milestone succeeds when, on Supreme Isthmus 8v8:
    (metal and energy income, and the value of what it has built) is at least
    that of stock BARb at the same position. It is measured over N headless
    games, each played twice with the sides swapped, on the same seeds; N is
-   set by an A/A test of stock BARb against itself, and is expected to be
-   about 30 pairs.
+   set by an A/A test of stock BARb against itself. That test found 3 to 11
+   seeds enough to see a 10% difference, so N is 30 seeds, 60 games
+   ([`evaluation.md`](../reference/evaluation.md#the-aa-test)).
 
 Prediction accuracy on held-out replays is a development metric: it compares
 models quickly and picks which ones are worth playing, but it is not the goal.
