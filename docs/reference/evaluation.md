@@ -178,6 +178,58 @@ seeds, 60 games, all played to the end.
   3:21. The measures come from each team's own contact, so Reason8's are taken
   later, which favours it; a comparison at a fixed minute would tell how much.
 
+## At fixed minutes
+
+Each team measured at its own first contact is what ADR 0003 asks for, but a
+team that meets the enemy later is measured later.
+`reason8 eval report --at-seconds` measures every team at the same game time
+from the kept state files. The same 60 games with extractors on the human's
+spots:
+
+| at   | metal income         | energy income          | built metal         | built energy        | units               |
+| ---- | -------------------- | ---------------------- | ------------------- | ------------------- | ------------------- |
+| 3:00 | 94.0% (92.0%–96.1%)  | 122.2% (119.7%–124.7%) | 92.6% (91.9%–93.2%) | 93.0% (92.5%–93.6%) | 94.8% (93.9%–95.7%) |
+| 4:00 | 83.1% (81.4%–84.6%)  | 116.5% (114.3%–118.9%) | 92.9% (92.1%–93.7%) | 90.8% (90.1%–91.5%) | 91.4% (90.4%–92.4%) |
+| 5:00 | 83.2% (82.1%–84.3%)  | 119.9% (117.4%–122.7%) | 92.3% (91.4%–93.1%) | 89.0% (88.2%–89.9%) | 92.2% (90.8%–93.6%) |
+| 7:00 | 98.0% (94.8%–101.2%) | 105.9% (103.0%–109.3%) | 92.3% (91.2%–93.4%) | 87.7% (86.7%–88.6%) | 95.1% (93.1%–96.9%) |
+
+The A/A games at 4:00 give 100.2% (99.8%–100.7%) for built metal, so the
+measure itself is fair.
+
+Built metal at 4:00 by position:
+
+| faction | position | Reason8 | BARb | share                  |
+| ------- | -------- | ------- | ---- | ---------------------- |
+| Armada  | P1       | 5448    | 4921 | 110.7% (108.2%–113.3%) |
+| Armada  | P2       | 4124    | 4967 | 83.0% (80.6%–85.4%)    |
+| Armada  | P3       | 3115    | 4710 | 66.1% (65.5%–66.8%)    |
+| Armada  | P4       | 4242    | 5039 | 84.2% (81.3%–86.4%)    |
+| Armada  | P5       | 4562    | 4942 | 92.3% (90.3%–94.4%)    |
+| Armada  | P6       | 5235    | 4459 | 117.4% (114.9%–120.1%) |
+| Armada  | P7       | 4429    | 5057 | 87.6% (86.2%–89.1%)    |
+| Armada  | P8       | 5336    | 4821 | 110.7% (108.1%–113.4%) |
+| Cortex  | P9       | 3913    | 4898 | 79.9% (77.3%–82.6%)    |
+| Cortex  | P10      | 3668    | 4886 | 75.1% (73.5%–76.6%)    |
+| Cortex  | P11      | 4102    | 4792 | 85.6% (83.6%–87.4%)    |
+| Cortex  | P12      | 4122    | 5051 | 81.6% (78.8%–84.0%)    |
+| Cortex  | P13      | 5114    | 4638 | 110.3% (108.1%–112.6%) |
+| Cortex  | P14      | 5712    | 4271 | 133.7% (127.9%–140.7%) |
+| Cortex  | P15      | 5022    | 4958 | 101.3% (99.3%–103.5%)  |
+| Cortex  | P16      | 3686    | 4910 | 75.1% (73.4%–76.7%)    |
+
+- **At the same minute Reason8 is behind.** From 3 to 7 minutes it has built
+  about 92% of BARb's metal value and 88–93% of its energy value, with tight
+  intervals. Its 103% at first contact comes from meeting the enemy almost a
+  minute later.
+- **More energy, less metal, still.** Energy income is 106–122% of BARb's and
+  metal income 83–98%: the human openings put more into energy early.
+- **The positions differ a lot.** Five are ahead (Armada `P1`, `P6`, `P8`,
+  Cortex `P13`, `P14` by 10–34%); the tech positions (Armada `P3`, 66%) and
+  Cortex `P9`, `P10`, `P16` (75–80%) are furthest behind.
+- **First contact alone can be gamed.** An AI that is slower to meet the enemy
+  gets measured later. A comparison should report both: at first contact, as
+  ADR 0003 says, and at a fixed minute.
+
 ## What the games cost
 
 Measured on the A/A run: 32 hardware threads, 56 GB of RAM for WSL, 7 games at
