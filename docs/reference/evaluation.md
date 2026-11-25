@@ -131,6 +131,16 @@ Built metal by position, Reason8's share of BARb's:
   builds them alone (at most 30 structures, see
   [`in-game.md`](in-game.md#learned-openings-in-team-games)); BARb spreads the
   work over its constructors and builds extractors first.
+- **Most extractors after the third are never built.** Scripts cannot see
+  metal spots, so an extractor step takes BARb's own next task when that is an
+  extractor ([`in-game.md`](in-game.md#how-the-hooks-work)), and after the
+  first three BARb rarely offers one. Of the extractor steps in these games,
+  all 1,050 of steps 1 to 3 were built, 157 of 347 of steps 4 to 8, and 108 of
+  691 of steps 9 to 30; the rest were given up. That is most of the metal gap.
+- **Sharing the structures with constructors does not help.** A version in
+  which the first two constructors took structures from the commander's list
+  (30 seeds, not merged) built 96.2% (94.3%–98.1%) of BARb's metal value: the
+  same. The constructors meet the same refusal for extractors.
 - **It depends on the position.** Reason8 is ahead at Armada `P3` (+31%), `P6`
   (+18%) and Cortex `P12`, `P14`, and behind at the pond (Armada `P4`, 71%:
   the 30 tidal generators come before the factory) and at Cortex `P10` and
