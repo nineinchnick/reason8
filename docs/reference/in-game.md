@@ -302,10 +302,19 @@ Commander
   returns nothing and BARb's default takes over.
 
 Extractors
-: A script cannot create an extractor task, because that needs a metal spot
-  and scripts cannot see metal spots. For a `mex` step the script asks BARb
-  for its default task and accepts it only if it is an extractor of the
-  ordered type. In every game BARb offered one at the first try.
+: An extractor task needs one of BARb's metal spots. BAR publishes the map's
+  spots as game rules (`mex_count`, `mex_x1`, `mex_z1`, ...), BARb reads them
+  in that order, and scripts can read game rules, so spot `i` of the game is
+  BARb's spot `i - 1`. For a `mex` step the script takes the free spot nearest
+  to where the human player built that extractor and creates the task on it
+  (`TaskB::Spot`). Without a known place, or without the game's spots, it asks
+  BARb for its default task and accepts it only if it is an extractor of the
+  ordered type; after the first three extractors BARb rarely offers one.
+
+Placement
+: Every step carries where the human player placed it (`places` in
+  `openings.json`). The first try builds there, BARb choosing the exact site
+  around it; when that fails, the next tries build next to the builder.
 
 Hidden timers
 : BARb's configs hold some units back (`since` in `behaviour.json`): the radar
