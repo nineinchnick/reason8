@@ -25,14 +25,19 @@
 
 namespace Reason8 {
 
-class SStep {  // one structure for the commander, and the BARb task type that builds it
-	SStep(const string& in unitName, Task::BuildType taskType) {
+class SStep {  // one structure for the commander, the BARb task type that builds it,
+              // and where the human player placed it (x < 0: not known)
+	SStep(const string& in unitName, Task::BuildType taskType, float placeX, float placeZ) {
 		unit = unitName;
 		type = taskType;
+		x = placeX;
+		z = placeZ;
 	}
 	SStep() {}
 	string unit;
 	Task::BuildType type;
+	float x;
+	float z;
 }
 
 class SFactoryOpening {  // the first units of one factory
@@ -152,6 +157,33 @@ CCircuitDef@ GetOrderedDef(const string& in unitName)
 	return buildDef;
 }
 
+array<int> takenSpots;  // metal spots the opening has asked for
+
+/*
+ * The game's metal spot nearest to (x, z) that the opening has not asked for yet,
+ * or -1. BAR publishes its spots as game rules (mex_count, mex_x1, mex_z1, ...),
+ * and BARb reads them in that order, so spot i of the game is BARb's spot i - 1.
+ */
+int NearestSpot(float x, float z, AIFloat3& out position)
+{
+	const int count = int(ai.GetGameRulesParam("mex_count", -1.f));
+	int best = -1;
+	float bestDistance = 0.f;
+	for (int i = 1; i <= count; ++i) {
+		if (takenSpots.find(i - 1) >= 0)
+			continue;
+		const float spotX = ai.GetGameRulesParam("mex_x" + i, 0.f);
+		const float spotZ = ai.GetGameRulesParam("mex_z" + i, 0.f);
+		const float distance = (spotX - x) * (spotX - x) + (spotZ - z) * (spotZ - z);
+		if (best < 0 || distance < bestDistance) {
+			best = i - 1;
+			bestDistance = distance;
+			position = AIFloat3(spotX, ai.GetGameRulesParam("mex_y" + i, 0.f), spotZ);
+		}
+	}
+	return best;
+}
+
 void NextCommanderStep()
 {
 	++commanderStep;
@@ -187,8 +219,23 @@ IUnitTask@ MakeCommanderTask(CCircuitUnit@ unit)
 			continue;
 		}
 
+		const SStep@ planned = plan.commander[commanderStep];
+		if (type == Task::BuildType::MEX && planned.x >= 0.f) {
+			// the free metal spot nearest to where the human built this extractor
+			AIFloat3 spotPosition;
+			const int spot = NearestSpot(planned.x, planned.z, spotPosition);
+			if (spot >= 0) {
+				takenSpots.insertLast(spot);
+				@commanderTask = aiBuilderMgr.Enqueue(
+					TaskB::Spot(type, Task::Priority::NOW, buildDef, spotPosition, spot));
+				++tries;
+				Log("step " + (commanderStep + 1) + " " + unitName + ": spot " + spot + " at "
+					+ int(spotPosition.x) + " " + int(spotPosition.z) + ", frame " + ai.frame);
+				return commanderTask;
+			}
+		}
 		if (type == Task::BuildType::MEX) {
-			// Scripts cannot see metal spots, so BARb picks the task; it is taken
+			// without a place or the game's spots, BARb picks the task; it is taken
 			// only when it is an extractor of the ordered type.
 			IUnitTask@ offer = aiBuilderMgr.DefaultMakeTask(unit);
 			if (offer is null || offer.GetType() != Task::Type::BUILDER)
@@ -206,7 +253,10 @@ IUnitTask@ MakeCommanderTask(CCircuitUnit@ unit)
 			return aiBuilderMgr.Enqueue(TaskB::Wait(SECOND));
 		}
 
-		const AIFloat3 position = unit.GetPos(ai.frame);
+		// where the human placed it; after a failure (BARb found no site there), or
+		// when the place is not known, next to the builder
+		const AIFloat3 position = (planned.x >= 0.f && tries == 0)
+			? AIFloat3(planned.x, 0.f, planned.z) : unit.GetPos(ai.frame);
 		if (type == Task::BuildType::FACTORY) {
 			@commanderTask = aiBuilderMgr.Enqueue(
 				TaskB::Factory(Task::Priority::NOW, buildDef, position, null));

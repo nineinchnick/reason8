@@ -114,14 +114,19 @@ def opening_table(openings: dict) -> str:
         if not isinstance(side, str) or not UNIT_NAME.match(side):
             raise SystemExit(f"{OPENINGS_NAME}: bad side {side!r}")
         steps = []
-        for unit in opening.get("commander", []):
+        places = opening.get("places") or []
+        for index, unit in enumerate(opening.get("commander", [])):
             task = tasks.get(check_unit(unit))
             if task not in TASK_TYPES:
                 known = ", ".join(sorted(TASK_TYPES))
                 raise SystemExit(
                     f'{OPENINGS_NAME}: "tasks" has {task!r} for {unit} (known: {known})'
                 )
-            steps.append(f'SStep("{unit}", Task::BuildType::{TASK_TYPES[task]})')
+            place = places[index] if index < len(places) and places[index] else (-1, -1)
+            steps.append(
+                f'SStep("{unit}", Task::BuildType::{TASK_TYPES[task]}, '
+                f"{float(place[0])}f, {float(place[1])}f)"
+            )
         factories = []
         for factory, units in opening.get("factories", {}).items():
             names = ", ".join(f'"{check_unit(unit)}"' for unit in units)

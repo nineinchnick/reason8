@@ -39,7 +39,7 @@ def test_opening_table_of_our_openings():
     table = build.opening_table(OPENINGS)
     assert "array<SOpening> MakeOpenings()" in table
     assert 'SOpening("armada", "", "", 0.0f, 0.0f, array<SStep> = {' in table
-    assert 'SStep("armmex", Task::BuildType::MEX)' in table
+    assert 'SStep("armmex", Task::BuildType::MEX, -1.0f, -1.0f)' in table
     assert 'SFactoryOpening("armlab", array<string> = {"armrectr", "armjeth", "armjeth"' in table
     assert table.count("{") == table.count("}")
 
