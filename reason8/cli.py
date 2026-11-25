@@ -10,6 +10,7 @@ from reason8.analysis import apm, map_meta, opening_shift
 from reason8.bot import build, check, export, game
 from reason8.data import download, migrate, sync
 from reason8.evaluation import games as evaluation_games
+from reason8.evaluation import openings as evaluation_openings
 from reason8.evaluation import report as evaluation_report
 from reason8.game import maps, positions
 from reason8.headless import batch, run, setup, state
@@ -70,6 +71,7 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
         [
             ("games", evaluation_games, "play paired 8v8 games and measure each team"),
             ("report", evaluation_report, "compare the evaluated AI with its opponent"),
+            ("openings", evaluation_openings, "tell the bot's openings from human ones"),
         ],
     ),
     (
