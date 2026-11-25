@@ -70,6 +70,8 @@ class Step:
     unit: str
     kind: str
     amount: int
+    # where each building of a structure step was placed, in map units
+    places: tuple[tuple[float, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -115,18 +117,27 @@ def _steps_of(numbered: pl.DataFrame | pl.LazyFrame) -> pl.DataFrame:
         numbered.lazy()
         .with_columns(added=added)
         .group_by("match_id", "player_slot", "step", maintain_order=True)
-        .agg(pl.col("unit", "kind").first(), pl.col("added").sum())
+        .agg(pl.col("unit", "kind").first(), pl.col("added").sum(), pl.col("x", "z"))
         .group_by("match_id", "player_slot", maintain_order=True)
-        .agg(pl.col("unit"), pl.col("kind"), pl.col("added"))
+        .agg(pl.col("unit"), pl.col("kind"), pl.col("added"), pl.col("x"), pl.col("z"))
         .collect()
     )
+
+    def places(xs: list | None, zs: list | None) -> tuple[tuple[float, float], ...]:
+        return tuple(
+            (float(x), float(z)) for x, z in zip(xs or [], zs or [], strict=True) if x is not None
+        )
+
     steps = [
         [
-            Step(unit, kind, int(amount))
-            for unit, kind, amount in zip(units, kinds, amounts, strict=True)
+            Step(unit, kind, int(amount), places(step_xs, step_zs) if kind != "factory" else ())
+            for unit, kind, amount, step_xs, step_zs in zip(
+                units, kinds, amounts, xs, zs, strict=True
+            )
         ]
-        for units, kinds, amounts in zip(
-            grouped["unit"], grouped["kind"], grouped["added"], strict=True
+        for units, kinds, amounts, xs, zs in zip(
+            *(grouped[column].to_list() for column in ("unit", "kind", "added", "x", "z")),
+            strict=True,
         )
     ]
     return grouped.select("match_id", "player_slot").with_columns(
@@ -167,7 +178,7 @@ def load_candidates(
     )
     rows = (
         pl.scan_parquet(dataset / "train.parquet")
-        .select("match_id", "player_slot", "seq_idx", "unit", "kind", "count", "repeat")
+        .select("match_id", "player_slot", "seq_idx", "unit", "kind", "count", "repeat", "x", "z")
         .filter(pl.col("seq_idx").is_not_null())
         .join(chosen.lazy().select("match_id", "player_slot"), on=("match_id", "player_slot"))
     )
@@ -217,6 +228,7 @@ def ai_opening(steps: Sequence[Step], unit_defs: Mapping[str, UnitDef]) -> dict:
     """What the AI plays for one opening: the commander's structures, the first factory's
     units, the task type of each structure and what was dropped."""
     commander: list[str] = []
+    places: list[list[int] | None] = []
     tasks: dict[str, str] = {}
     first_factory: str | None = None
     factory_units: list[str] = []
@@ -251,10 +263,15 @@ def ai_opening(steps: Sequence[Step], unit_defs: Mapping[str, UnitDef]) -> dict:
             dropped["after the commander's last structure"] += step.amount
             continue
         tasks[step.unit] = task
-        commander += [step.unit] * min(step.amount, room)
+        taken = min(step.amount, room)
+        commander += [step.unit] * taken
+        places += [[round(x), round(z)] for x, z in step.places[:taken]] + [None] * (
+            taken - len(step.places[:taken])
+        )
         dropped["after the commander's last structure"] += max(step.amount - room, 0)
     return {
         "commander": commander,
+        "places": places,
         "factories": {first_factory: factory_units} if first_factory else {},
         "tasks": tasks,
         "dropped": {reason: count for reason, count in dropped.items() if count},

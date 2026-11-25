@@ -25,22 +25,24 @@ def test_opening_steps_merges_drags_and_counts_factory_units():
             "kind": ["structure"] * 4 + ["factory"] + ["structure"] * 2,
             "count": [1, 1, 1, 1, 5, 1, 1],
             "repeat": [False, True, True, False, False, False, False],
+            "x": [10.0, 20.0, 30.0, 40.0, 40.0, 50.0, 60.0],
+            "z": [1.0, 2.0, 3.0, 4.0, 4.0, 5.0, 6.0],
         }
     )
     assert opening_steps(rows) == (
-        Step("armmex", "structure", 3),
-        Step("armlab", "structure", 1),
+        Step("armmex", "structure", 3, ((10.0, 1.0), (20.0, 2.0), (30.0, 3.0))),
+        Step("armlab", "structure", 1, ((40.0, 4.0),)),
         Step("armpw", "factory", 5),
-        Step("armwin", "structure", 1),
-        Step("armwin", "structure", 1),
+        Step("armwin", "structure", 1, ((50.0, 5.0),)),
+        Step("armwin", "structure", 1, ((60.0, 6.0),)),
     )
 
 
 def test_ai_opening():
     steps = [
-        Step("armmex", "structure", 3),
+        Step("armmex", "structure", 3, ((1.0, 2.0), (3.0, 4.0), (5.0, 6.0))),
         Step("armck", "factory", 1),  # before any factory
-        Step("armlab", "structure", 1),
+        Step("armlab", "structure", 1),  # no place known
         Step("armdrag", "structure", 4),
         Step("armpw", "factory", 2),
         Step("armap", "structure", 1),
@@ -49,6 +51,7 @@ def test_ai_opening():
     ]
     played = ai_opening(steps, UNIT_DEFS)
     assert played["commander"] == ["armmex", "armmex", "armmex", "armlab", "armap"]
+    assert played["places"] == [[1, 2], [3, 4], [5, 6], None, None]
     assert played["factories"] == {"armlab": ["armpw", "armpw"]}
     assert played["tasks"] == {"armmex": "mex", "armlab": "factory", "armap": "factory"}
     assert played["dropped"] == {"no task": 4, "not in the first factory": 2, "unknown unit": 1}
