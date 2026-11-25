@@ -230,6 +230,65 @@ Built metal at 4:00 by position:
   gets measured later. A comparison should report both: at first contact, as
   ADR 0003 says, and at a fixed minute.
 
+## Do the openings look human?
+
+ADR 0003's first measure: a classifier is trained on the bot's openings and on
+human openings at the same positions, and tested on games it has not seen
+(`reason8 eval openings`). The bot's openings are each Reason8 team's build
+orders up to its first contact, read from the replays of the 60 games with
+extractors on the human's spots; the human ones are the dataset's test-split
+openings on Supreme Isthmus at the same positions and factions, as many as the
+bot's per position. A run of the same unit counts once (a human drags a line
+of buildings in one order, an AI orders them one at a time), the features are
+the units and pairs of consecutive units of the first 20 steps and the
+position, and the classifier is a logistic regression in 5 folds that keep
+each game together.
+
+| openings compared                                 | classified right    |
+| ------------------------------------------------- | ------------------- |
+| bot and human, in order                           | 98.3% (97.4%–99.1%) |
+| bot and human, structures and factory units apart | 95.0% (93.5%–96.4%) |
+| two random halves of the human openings (a check) | 47.2% (44.1%–50.2%) |
+
+By position, in order:
+
+| faction | position | openings | classified right       |
+| ------- | -------- | -------- | ---------------------- |
+| Armada  | P1       | 60       | 100.0% (100.0%–100.0%) |
+| Armada  | P2       | 60       | 100.0% (100.0%–100.0%) |
+| Armada  | P3       | 60       | 100.0% (100.0%–100.0%) |
+| Armada  | P4       | 60       | 98.3% (95.0%–100.0%)   |
+| Armada  | P5       | 60       | 100.0% (100.0%–100.0%) |
+| Armada  | P6       | 60       | 96.7% (91.7%–100.0%)   |
+| Armada  | P7       | 60       | 100.0% (100.0%–100.0%) |
+| Armada  | P8       | 60       | 98.3% (95.0%–100.0%)   |
+| Cortex  | P9       | 60       | 95.0% (88.3%–100.0%)   |
+| Cortex  | P10      | 60       | 100.0% (100.0%–100.0%) |
+| Cortex  | P11      | 60       | 100.0% (100.0%–100.0%) |
+| Cortex  | P12      | 60       | 95.0% (88.3%–100.0%)   |
+| Cortex  | P13      | 60       | 98.3% (94.9%–100.0%)   |
+| Cortex  | P14      | 60       | 95.0% (88.3%–100.0%)   |
+| Cortex  | P15      | 60       | 98.3% (95.0%–100.0%)   |
+| Cortex  | P16      | 60       | 98.3% (95.0%–100.0%)   |
+
+- **The bot's openings are easy to tell from human ones.** Chance is 50%, and
+  the check on human openings alone lands there; the bot's are told apart 98%
+  of the time. The first measure of ADR 0003 is far from met.
+- **Part of it is how orders are given.** The script queues one factory unit
+  at a time, so structures and units alternate in its orders where a human
+  queues several units at once. Taking structures and units apart still leaves
+  95%.
+- **Most of it is what is ordered.** Before contact the bot gives a median of
+  31 orders to a human's 65 (13 and 19.5 steps once runs are counted once),
+  and humans go on to tech 2 (advanced labs, moho extractors) in that time.
+  The units of BARb's own constructors and factories are in the bot's orders
+  too. The pairs that give the bot away most are a factory unit followed by an
+  extractor (`armrectr` then `armmex`, `cormex` then `corck`).
+- **The same opening every game.** The export gives each position one opening,
+  so across 30 seeds a position shows 2 to 20 different openings in its first
+  10 steps, only as far as BARb's timing varies them. Thirty human openings at
+  a position are 29 or 30 different ones.
+
 ## What the games cost
 
 Measured on the A/A run: 32 hardware threads, 56 GB of RAM for WSL, 7 games at
