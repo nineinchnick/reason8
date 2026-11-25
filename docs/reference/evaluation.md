@@ -150,6 +150,34 @@ Built metal by position, Reason8's share of BARb's:
   measures come from later in the game, which favours it; the gap would be
   larger at a fixed minute.
 
+## Extractors on the human's spots
+
+The same comparison after extractors were given their own metal spot, the one
+nearest to where the human built them, and structures were first placed where
+the human placed them ([`in-game.md`](in-game.md#how-the-hooks-work)): 30
+seeds, 60 games, all played to the end.
+
+| measure       | Reason8 | BARb    | share                  |
+| ------------- | ------- | ------- | ---------------------- |
+| metal income  | 11.0    | 10.7    | 102.8% (99.6%–106.2%)  |
+| energy income | 254.7   | 156.8   | 162.5% (155.3%–170.0%) |
+| built metal   | 5020.7  | 4857.7  | 103.4% (101.0%–105.8%) |
+| built energy  | 43669.8 | 43576.7 | 100.2% (97.9%–102.6%)  |
+| units         | 27.8    | 22.6    | 122.9% (118.1%–127.5%) |
+
+- **At first contact Reason8's economy is now at least BARb's.** Built metal
+  is 103% of BARb's with the interval above 100%, built energy is equal, and
+  metal income went from 81% to 103%: the second measure of ADR 0003 is met.
+- **Steps are no longer given up.** 157 steps were skipped in the 60 games, 63
+  of them extractors, against 865 and 773 before; 2,438 extractors were built
+  on the spot chosen for them.
+- **Two positions still lag:** Cortex `P11` at 70% (69.5%, 65.3%–73.9%) and
+  Armada `P5` at 88% (82.1%–94.8%). The others are at or above BARb.
+- **Contact still comes later.** 78% of Reason8's teams met the enemy before
+  the end of the game, against 99.8% of BARb's, at a median of 4:13 against
+  3:21. The measures come from each team's own contact, so Reason8's are taken
+  later, which favours it; a comparison at a fixed minute would tell how much.
+
 ## What the games cost
 
 Measured on the A/A run: 32 hardware threads, 56 GB of RAM for WSL, 7 games at
