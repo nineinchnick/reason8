@@ -107,9 +107,10 @@ def team_measures(
     state_path: Path,
     unit_defs: Mapping[str, UnitDef],
     window_frames: int = WINDOW_FRAMES,
+    at_frame: int | None = None,
 ) -> dict[int, dict]:
     """Per team: its first contact and its economy at the last snapshot before its opening
-    ends (first contact, or the opening window)."""
+    ends (first contact, or the opening window), or before `at_frame` for every team."""
     contact = first_contact(read_fights(state_path))
     names: dict[str, str] = {}
     snapshots: list[dict] = []
@@ -120,7 +121,12 @@ def team_measures(
             snapshots.append(record)
     measures = {}
     for team, contact_frame in contact.items():
-        end = min(contact_frame, window_frames) if contact_frame is not None else window_frames
+        if at_frame is not None:
+            end = at_frame
+        elif contact_frame is not None:
+            end = min(contact_frame, window_frames)
+        else:
+            end = window_frames
         before = [snapshot for snapshot in snapshots if snapshot["f"] <= end]
         if not before:
             continue
@@ -230,6 +236,21 @@ def play_game(
     result["ok"] = ok and bool(result.get("teams"))
     result_path.write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
     return result
+
+
+def measure_again(out_dir: Path, unit_defs: Mapping[str, UnitDef], at_frame: int) -> pl.DataFrame:
+    """The team rows of every game played into `out_dir`, measured again from the kept state
+    files at the same frame for every team."""
+    rows = []
+    for result_path in sorted(out_dir.glob(f"*/{RESULT_NAME}")):
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        if not result.get("ok"):
+            continue
+        measures = team_measures(result_path.parent / STATE_NAME, unit_defs, at_frame=at_frame)
+        for team in result["teams"]:
+            if team["team"] in measures:
+                rows.append({**team, **measures[team["team"]]})
+    return pl.DataFrame(rows, schema=TEAM_SCHEMA)
 
 
 def collect(out_dir: Path) -> pl.DataFrame:

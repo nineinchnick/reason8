@@ -3,6 +3,8 @@
 Usage::
 
     uv run reason8 eval report data/eval/reason8-vs-barb
+    uv run reason8 eval report data/eval/reason8-vs-barb --at-seconds 240 \\
+        --data-dir data/bar --game "Beyond All Reason test-32018-ad135b9"   # all at 4:00
     uv run reason8 eval report data/eval/barb-vs-barb    # the A/A test
 
 In the two games of a seed each AI plays every position once with the same faction
@@ -30,8 +32,9 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-from reason8.evaluation.games import TEAMS_NAME
+from reason8.evaluation.games import TEAMS_NAME, measure_again
 from reason8.game.positions import position_order
+from reason8.game.unitdefs import game_unit_defs
 from reason8.markdown import table
 
 MEASURES = ("metal_income", "energy_income", "built_metal", "built_energy", "units")
@@ -86,7 +89,7 @@ def _percent(value: float) -> str:
     return f"{100 * value:.1f}%"
 
 
-def report(teams: pl.DataFrame) -> str:
+def report(teams: pl.DataFrame, when: str = "at first contact") -> str:
     paired = pairs(teams)
     if paired.is_empty():
         return "No pairs: play both games of a seed first."
@@ -97,7 +100,7 @@ def report(teams: pl.DataFrame) -> str:
         f"{ai} (evaluated) against {opponent}: {seeds} seeds, {paired.height} pairs of teams "
         "on the same position with the same faction.",
         "",
-        "## Economy at first contact",
+        f"## Economy {when}",
         "",
     ]
     rows = []
@@ -153,8 +156,24 @@ def report(teams: pl.DataFrame) -> str:
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("games", type=Path, help="folder of `reason8 eval games`")
+    parser.add_argument(
+        "--at-seconds",
+        type=int,
+        help="measure every team at this game time instead of at its first contact, "
+        "from the kept state files (needs --data-dir and --game)",
+    )
+    parser.add_argument("--data-dir", help="content dir with the game, for --at-seconds")
+    parser.add_argument("--game", help="the game version the games were played with")
 
 
 def run(args: argparse.Namespace) -> int:
-    print(report(pl.read_parquet(args.games / TEAMS_NAME)))
+    if args.at_seconds is None:
+        print(report(pl.read_parquet(args.games / TEAMS_NAME)))
+        return 0
+    if not (args.data_dir and args.game):
+        raise SystemExit("--at-seconds needs --data-dir and --game")
+    unit_defs = game_unit_defs(Path(args.data_dir).resolve(), args.game)
+    teams = measure_again(args.games, unit_defs, args.at_seconds * 30)
+    minutes, seconds = divmod(args.at_seconds, 60)
+    print(report(teams, when=f"at {minutes}:{seconds:02d}"))
     return 0
