@@ -68,6 +68,10 @@ def test_choose_opening():
     assert choose_opening(openings, "cortex", "Isthmus", (850, 150))["position"] == "P1"
     assert choose_opening(openings, "armada", "Glitters", (850, 150)) is openings[3]
     assert choose_opening(openings, "cortex", "Glitters", None) is None
+    # several openings per position: the variant the AI chose
+    variants = [{**openings[0], "variant": index} for index in range(3)]
+    assert choose_opening(variants, "armada", "Isthmus", (90, 90), variant=2)["variant"] == 2
+    assert choose_opening(variants, "armada", "Isthmus", (90, 90), variant=7)["variant"] == 0
 
 
 def test_ai_opening_keeps_the_first_factory_past_the_cap():
@@ -76,3 +80,25 @@ def test_ai_opening_keeps_the_first_factory_past_the_cap():
     played = ai_opening(steps, UNIT_DEFS)
     assert played["commander"] == ["armwin"] * 29 + ["armlab"]
     assert played["dropped"] == {"after the commander's last structure": 11 + 3}
+
+
+def test_typical_openings_keeps_the_most_likely_and_draws_the_rest():
+    from reason8.bot.export import Candidate, typical_openings
+    from reason8.models.ngram import NgramModel, OpeningSteps, chain
+
+    key = ("Isthmus", "P1", "Armada")
+    common = ["armmex"] * 3 + ["armwin"] * 12
+    training = [
+        OpeningSteps(index, "Armada", *key[:2], None, None, None, tuple(common))
+        for index in range(20)
+    ]
+    model = NgramModel("bigram", chain(2)).fit(training)
+    candidates = [
+        Candidate(index, 0, tuple(Step(unit, "structure", 1) for unit in common[:-1] + [unit]))
+        for index, unit in enumerate(["armwin", "armmex", "armsolar", "armlab", "armrad", "armllt"])
+    ]
+    chosen, scored = typical_openings(model, key, candidates, count=3)
+    assert scored == 6 and len(chosen) == 3
+    assert chosen[0][0].match_id == 0  # the one the model finds most likely comes first
+    assert chosen[0][1] >= max(score for _, score in chosen[1:])
+    assert typical_openings(model, key, candidates, count=3)[0] == chosen  # reproducible

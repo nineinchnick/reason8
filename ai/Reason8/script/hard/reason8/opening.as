@@ -50,18 +50,54 @@ class SFactoryOpening {  // the first units of one factory
 	array<string> units;
 }
 
+// The parts of `text` between the separators.
+array<string> Split(const string& in text, const string& in separator)
+{
+	array<string> parts;
+	if (text.length() == 0)
+		return parts;
+	uint start = 0;
+	while (true) {
+		const int found = text.findFirst(separator, start);
+		if (found < 0) {
+			parts.insertLast(text.substr(start));
+			return parts;
+		}
+		parts.insertLast(text.substr(start, uint(found) - start));
+		start = uint(found) + separator.length();
+	}
+	return parts;
+}
+
+Task::BuildType TaskType(const string& in name)
+{
+	if (name == "MEX") return Task::BuildType::MEX;
+	if (name == "FACTORY") return Task::BuildType::FACTORY;
+	if (name == "NANO") return Task::BuildType::NANO;
+	if (name == "STORE") return Task::BuildType::STORE;
+	if (name == "DEFENCE") return Task::BuildType::DEFENCE;
+	if (name == "RADAR") return Task::BuildType::RADAR;
+	if (name == "SONAR") return Task::BuildType::SONAR;
+	if (name == "CONVERT") return Task::BuildType::CONVERT;
+	return Task::BuildType::ENERGY;
+}
+
+/*
+ * An opening as reason8/bot/build.py writes it: the steps and factories are strings
+ * ("unit TYPE x z;..." and "factory:unit,unit;..."), turned into arrays by Decode() for
+ * the opening that is played only.
+ */
 class SOpening {
 	SOpening(const string& in sideName, const string& in mapName, const string& in positionName,
-			float x, float z, array<SStep>& in commanderSteps,
-			array<SFactoryOpening>& in factoryOpenings)
+			float x, float z, const string& in encodedSteps, const string& in encodedFactories)
 	{
 		side = sideName;
 		map = mapName;
 		position = positionName;
 		startX = x;
 		startZ = z;
-		commander = commanderSteps;
-		factories = factoryOpenings;
+		steps = encodedSteps;
+		factoryText = encodedFactories;
 	}
 	SOpening() {}
 	string side;
@@ -69,8 +105,27 @@ class SOpening {
 	string position;
 	float startX;
 	float startZ;
+	string steps;
+	string factoryText;
 	array<SStep> commander;
 	array<SFactoryOpening> factories;
+
+	void Decode()
+	{
+		array<string> encoded = Split(steps, ";");
+		for (uint i = 0; i < encoded.length(); ++i) {
+			array<string> fields = Split(encoded[i], " ");
+			if (fields.length() == 4)
+				commander.insertLast(SStep(fields[0], TaskType(fields[1]),
+					float(parseInt(fields[2])), float(parseInt(fields[3]))));
+		}
+		array<string> encodedFactories = Split(factoryText, ";");
+		for (uint i = 0; i < encodedFactories.length(); ++i) {
+			array<string> parts = Split(encodedFactories[i], ":");
+			if (parts.length() == 2)
+				factories.insertLast(SFactoryOpening(parts[0], Split(parts[1], ",")));
+		}
+	}
 }
 
 // A step is skipped after this many failed tries (task aborted, or BARb offered something else)
@@ -98,7 +153,7 @@ void Log(const string& in message)
  * the one whose start is nearest to `position` (the commander's place at the
  * start); without one for the map, the first for the side and any map.
  */
-SOpening@ GetOpening(const AIFloat3& in position)
+SOpening@ GetOpening(const AIFloat3& in position_)
 {
 	if (isOpeningChosen)
 		return opening;
@@ -107,28 +162,44 @@ SOpening@ GetOpening(const AIFloat3& in position)
 	const string side = ai.GetSideName();
 	const string mapName = ai.GetMapName();
 	array<SOpening> openings = MakeOpenings();
+	// the position: of the openings for the side and map, the one whose start is nearest
 	float nearest = -1.f;
+	string position;
 	for (uint i = 0; i < openings.length(); ++i) {
 		if (openings[i].side != side || openings[i].map != mapName)
 			continue;
-		const float dx = openings[i].startX - position.x;
-		const float dz = openings[i].startZ - position.z;
+		const float dx = openings[i].startX - position_.x;
+		const float dz = openings[i].startZ - position_.z;
 		const float distance = dx * dx + dz * dz;  // squared
 		if (nearest < 0.f || distance < nearest) {
 			nearest = distance;
-			@opening = openings[i];
+			position = openings[i].position;
 		}
+	}
+	// the opening: one of the position's openings, at random
+	array<uint> variants;
+	for (uint i = 0; i < openings.length(); ++i) {
+		if (openings[i].side == side && openings[i].map == mapName && openings[i].position == position)
+			variants.insertLast(i);
+	}
+	int variant = -1;
+	if (variants.length() > 0) {
+		// teams that start in the same second share the random sequence: add the team
+		variant = (AiRandom(0, 9999) + ai.teamId) % int(variants.length());
+		@opening = openings[variants[variant]];
 	}
 	for (uint i = 0; opening is null && i < openings.length(); ++i) {
 		if (openings[i].side == side && openings[i].map.length() == 0)
 			@opening = openings[i];
 	}
+	if (opening !is null)
+		opening.Decode();
 	Log("side '" + side + "', map '" + mapName + "', start "
-		+ int(position.x) + " " + int(position.z) + ": "
+		+ int(position_.x) + " " + int(position_.z) + ": "
 		+ (opening is null ? "no opening, BARb plays its own"
 			: (opening.map.length() == 0 ? "the opening for any map"
 				: "position " + opening.position + " (start " + int(opening.startX) + " "
-					+ int(opening.startZ) + ")")
+					+ int(opening.startZ) + "), opening " + (variant + 1) + " of " + variants.length())
 				+ ", " + opening.commander.length() + " commander steps, "
 				+ opening.factories.length() + " factories"));
 	return opening;

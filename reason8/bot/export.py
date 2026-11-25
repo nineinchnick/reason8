@@ -6,13 +6,15 @@ Usage::
         --game "Beyond All Reason test-32018-ad135b9"
 
 The model (`reason8 baseline`, ADR 0013) gives the probability of the next step of an
-opening; the AI needs one fixed build order per map, start position and faction. Taking the
+opening; the AI needs fixed build orders per map, start position and faction. Taking the
 most likely step again and again does not give one: after a few wind generators another one
 is always the most likely step, so the decoded opening never ends. Instead, for every map,
 position and faction, the export scores the human openings of the training split by how
-likely the model finds their first `SCORED_STEPS` steps, and plays the most likely one. That
-opening is the model's most typical opening of the position, and it is a real one: it ends
-at its player's first contact, and its drags and factory queues have real lengths.
+likely the model finds their first `SCORED_STEPS` steps, and keeps the most likely one and
+`VARIANTS` - 1 more drawn at random from the more likely half; the AI picks one per game.
+They are typical openings of the position, and real ones: each ends at its player's first
+contact, and its drags and factory queues have real lengths. One opening per position played
+every game was easy to tell from human openings (docs/reference/evaluation.md).
 
 The opening is turned into what the AI plays (`reason8/bot/build.py`, ``opening.as``):
 
@@ -34,6 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import random
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,6 +55,9 @@ SCORED_STEPS = 15
 # At most this many candidates per map, position and faction are scored, drawn at random:
 # enough to find a typical opening, and the whole training split would take half an hour.
 MAX_CANDIDATES = 2000
+# Openings per map, position and faction. Humans at one position rarely play the same
+# opening twice; one opening per position made the bot easy to tell from them.
+VARIANTS = 5
 # The commander builds at most this many structures of the opening, its first factory
 # among them: when the factory comes later, it follows the first ones. Humans share long
 # openings with their first constructors (a tech position drags lines of 100 wind
@@ -207,21 +213,29 @@ def log_likelihood(
     return total
 
 
-def most_typical(
-    model: NgramModel, key: tuple[str, str, str], candidates: Sequence[Candidate]
-) -> tuple[Candidate, float, int] | None:
-    """The candidate the model finds most likely, its log-likelihood and how many were
-    scored."""
-    map_name, position, faction = key
+def typical_openings(
+    model: NgramModel,
+    key: tuple[str, str, str],
+    candidates: Sequence[Candidate],
+    count: int = VARIANTS,
+    seed: int = 0,
+) -> tuple[list[tuple[Candidate, float]], int]:
+    """`count` candidates drawn at random from the half the model finds most likely, with
+    their log-likelihoods (the most likely first), and how many were scored."""
     scored = [
         (log_likelihood(model, *key, [step.unit for step in candidate.steps]), candidate)
         for candidate in candidates
         if len(candidate.steps) >= SCORED_STEPS
     ]
-    if not scored:
-        return None
-    best_score, best = max(scored, key=lambda pair: (pair[0], -pair[1].match_id))
-    return best, best_score, len(scored)
+    scored.sort(key=lambda pair: (-pair[0], pair[1].match_id, pair[1].player_slot))
+    likely = scored[: max(len(scored) // 2, 1)] if scored else []
+    generator = random.Random(f"{seed}:{':'.join(key)}")
+    drawn = (
+        [likely[0]] + generator.sample(likely[1:], min(count - 1, len(likely) - 1))
+        if likely
+        else []
+    )
+    return [(candidate, score) for score, candidate in drawn], len(scored)
 
 
 def ai_opening(steps: Sequence[Step], unit_defs: Mapping[str, UnitDef]) -> dict:
@@ -289,28 +303,30 @@ def export(
     openings = []
     for key in sorted(candidates):
         map_name, position, faction = key
-        chosen = most_typical(model, key, candidates[key])
-        if chosen is None or (map_name, position) not in start_points:
+        chosen, scored = typical_openings(model, key, candidates[key])
+        if (map_name, position) not in start_points:
             continue
-        candidate, score, scored = chosen
-        played = ai_opening(candidate.steps, unit_defs)
-        tasks.update(played.pop("tasks"))
         start_x, start_z = start_points[(map_name, position)]
-        openings.append(
-            {
-                "side": faction.lower(),
-                "map": map_name,
-                "position": position,
-                "start": [round(start_x), round(start_z)],
-                "candidates": scored,
-                "log_likelihood": round(score, 3),
-                **played,
-            }
-        )
+        for variant, (candidate, score) in enumerate(chosen):
+            played = ai_opening(candidate.steps, unit_defs)
+            tasks.update(played.pop("tasks"))
+            openings.append(
+                {
+                    "side": faction.lower(),
+                    "map": map_name,
+                    "position": position,
+                    "variant": variant,
+                    "start": [round(start_x), round(start_z)],
+                    "candidates": scored,
+                    "log_likelihood": round(score, 3),
+                    **played,
+                }
+            )
     return {
         "comment": (
-            "Generated by `reason8 bot export`: per map, start position and faction, the "
-            "training opening the next-build model finds most likely. Do not edit."
+            "Generated by `reason8 bot export`: per map, start position and faction, "
+            f"{VARIANTS} training openings from the half the next-build model finds most "
+            "likely, the most likely first. The AI picks one per game. Do not edit."
         ),
         "model": model.name,
         "tasks": dict(sorted(tasks.items())),

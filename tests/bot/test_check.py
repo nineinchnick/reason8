@@ -158,18 +158,23 @@ def test_check_infolog_counts_per_team(tmp_path):
         "team 3: factory unit 1: done, frame 900",
         "team 3: factory unit 2 armpw: skipped",
         "team 5: side 'armada', map 'M', start 9 9: no opening, BARb plays its own",
+        "team 6: side 'armada', map 'M', start 1 2: position P2 (start 1 2), opening 3 of 5, "
+        "4 commander steps, 1 factories",
     ]
     log = write_log(tmp_path, [f"Skirmish AI <Reason8-0.1>: Reason8 opening: {x}" for x in lines])
     teams = check.check_infolog(log, "Reason8")["opening_by_team"]
     assert teams[3] == {
         "position": "P4",
         "commander_steps": 3,
+        "variant": 0,
         "steps_finished": 2,
         "steps_skipped": 1,
         "factory_units_done": 1,
         "factory_units_skipped": 1,
     }
     assert teams[5]["position"] is None
+    assert teams[6]["position"] == "P2" and teams[6]["variant"] == 2
+    assert teams[6]["commander_steps"] == 4
 
 
 def test_check_infolog_compile_error(tmp_path):

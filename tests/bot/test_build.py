@@ -38,9 +38,11 @@ def test_ai_identity_needs_both_keys():
 def test_opening_table_of_our_openings():
     table = build.opening_table(OPENINGS)
     assert "array<SOpening> MakeOpenings()" in table
-    assert 'SOpening("armada", "", "", 0.0f, 0.0f, array<SStep> = {' in table
-    assert 'SStep("armmex", Task::BuildType::MEX, -1.0f, -1.0f)' in table
-    assert 'SFactoryOpening("armlab", array<string> = {"armrectr", "armjeth", "armjeth"' in table
+    assert (
+        'SOpening("armada", "", "", 0.0f, 0.0f, "armwin ENERGY -1 -1;armwin ENERGY -1 -1;' in table
+    )
+    assert "armmex MEX -1 -1;" in table
+    assert '"armlab:armrectr,armjeth,armjeth,armck,armham")' in table
     assert table.count("{") == table.count("}")
 
 
@@ -51,15 +53,13 @@ def test_opening_table_without_openings():
 
 def test_opening_table_empty_lists():
     table = build.opening_table({"openings": [{"side": "armada"}]})
-    assert 'SOpening("armada", "", "", 0.0f, 0.0f, array<SStep>(), array<SFactoryOpening>())' in (
-        table
-    )
+    assert 'SOpening("armada", "", "", 0.0f, 0.0f, "", "")' in table
 
 
 def test_opening_table_with_map_and_position():
     opening = {"side": "cortex", "map": "Supreme Isthmus v2.1", "position": "P4", "start": [1, 2]}
     table = build.opening_table({"openings": [opening]})
-    assert 'SOpening("cortex", "Supreme Isthmus v2.1", "P4", 1.0f, 2.0f,' in table
+    assert 'SOpening("cortex", "Supreme Isthmus v2.1", "P4", 1.0f, 2.0f, "", "")' in table
 
 
 @pytest.mark.parametrize(

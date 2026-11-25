@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from collections.abc import Mapping
 from pathlib import Path
 
 from reason8.headless.state import read_records
@@ -157,26 +158,38 @@ def check_built(records: list[dict], team: int, opening: dict, tasks: dict) -> d
 
 
 def choose_opening(
-    openings: list[dict], side: str, map_name: str | None, start: tuple[float, float] | None
+    openings: list[dict],
+    side: str,
+    map_name: str | None,
+    start: tuple[float, float] | None,
+    variant: int = 0,
 ) -> dict | None:
     """The opening the AI plays, chosen as ``opening.as`` does: of the openings for the side
-    and map, the one whose start is nearest to the team's; without one for the map, the
+    and map, those of the position whose start is nearest to the team's, and of them the
+    `variant`-th (the script picks it at random and logs it); without one for the map, the
     first for the side and any map."""
     for_map = [o for o in openings if o["side"] == side and o.get("map", "") == map_name]
     if for_map and start is not None:
-        return min(
+        nearest = min(
             for_map,
             key=lambda o: (o["start"][0] - start[0]) ** 2 + (o["start"][1] - start[1]) ** 2,
         )
+        at_position = [o for o in for_map if o.get("position") == nearest.get("position")]
+        return at_position[variant] if variant < len(at_position) else nearest
     if for_map:
         return for_map[0]
     return next((o for o in openings if o["side"] == side and not o.get("map")), None)
 
 
 def check_replay(
-    replay: Replay, openings: dict, ai_short_name: str, state_records: list[dict] | None = None
+    replay: Replay,
+    openings: dict,
+    ai_short_name: str,
+    state_records: list[dict] | None = None,
+    variants: Mapping[int, int] | None = None,
 ) -> list[dict]:
-    """One result per team that the AI played."""
+    """One result per team that the AI played. `variants` is the opening each team chose,
+    from the engine log (`check_infolog`); without it, the first of its position."""
     tasks = openings.get("tasks", {})
     teams = replay.teams()
     map_name = replay.meta.get("map")
@@ -188,7 +201,11 @@ def check_replay(
         result = {"team": ai["teamId"], "side": side, "version_in_replay": ai.get("version")}
         team = teams.get(ai["teamId"])
         opening = choose_opening(
-            openings.get("openings", []), side, map_name, team.start_pos if team else None
+            openings.get("openings", []),
+            side,
+            map_name,
+            team.start_pos if team else None,
+            (variants or {}).get(ai["teamId"], 0),
         )
         if opening is None:
             result.update({"matches": False, "error": f"no opening for side {side!r}"})
@@ -213,7 +230,7 @@ def check_replay(
 
 
 OPENING_LINE = re.compile(r"team (\d+): (.*)")
-CHOSEN = re.compile(r"position (\S+) .*?, (\d+) commander steps")
+CHOSEN = re.compile(r"position (\S+) .*?(?:, opening (\d+) of \d+)?, (\d+) commander steps")
 
 
 def count_opening_line(teams: dict[int, dict], message: str) -> None:
@@ -226,6 +243,7 @@ def count_opening_line(teams: dict[int, dict], message: str) -> None:
         {
             "position": None,
             "commander_steps": None,
+            "variant": 0,
             "steps_finished": 0,
             "steps_skipped": 0,
             "factory_units_done": 0,
@@ -234,7 +252,8 @@ def count_opening_line(teams: dict[int, dict], message: str) -> None:
     )
     text = match.group(2)
     if chosen := CHOSEN.search(text):
-        team["position"], team["commander_steps"] = chosen.group(1), int(chosen.group(2))
+        team["position"], team["commander_steps"] = chosen.group(1), int(chosen.group(3))
+        team["variant"] = int(chosen.group(2)) - 1 if chosen.group(2) else 0
     elif text.startswith("step ") and ": finished," in text:
         team["steps_finished"] += 1
     elif text.startswith("step ") and text.endswith(": skipped"):
@@ -297,11 +316,16 @@ def run(args: argparse.Namespace) -> int:
     openings = json.loads(args.openings.read_text(encoding="utf-8"))
     document, _ = parse_replay(args.parser or default_parser(), args.replay)
     state_records = list(read_records(args.state)) if args.state else None
-    result: dict = {"teams": check_replay(Replay(document), openings, args.ai, state_records)}
-    ok = bool(result["teams"]) and all(team["matches"] for team in result["teams"])
-    if args.infolog:
-        result["log"] = check_infolog(args.infolog, args.ai)
-        ok = ok and not result["log"]["errors"]
+    log = check_infolog(args.infolog, args.ai) if args.infolog else None
+    variants = {
+        team: counts["variant"] for team, counts in (log or {}).get("opening_by_team", {}).items()
+    }
+    teams = check_replay(Replay(document), openings, args.ai, state_records, variants)
+    result: dict = {"teams": teams}
+    ok = bool(teams) and all(team["matches"] for team in teams)
+    if log is not None:
+        result["log"] = log
+        ok = ok and not log["errors"]
     result["ok"] = ok
     print(json.dumps(result, indent=1))
     return 0 if ok else 1
