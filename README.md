@@ -291,6 +291,15 @@ thousands of replays, large evaluation runs) can move to a **cloud cluster**
 of containerised headless engines when local machines aren't enough
 ([ADR 0016](docs/decisions/0016-download-and-store-the-data.md)).
 
+The bot is judged in games: `reason8 eval games` plays Reason8 and stock BARb
+in paired 8v8 games, many at a time, and `reason8 eval report` compares their
+economy at first contact
+([ADR 0003](docs/decisions/0003-define-success-as-in-game-measures.md)). A
+comparison is 60 games and takes about 20 minutes here; memory, about 6 GB a
+game, decides how many run at once. See
+[`evaluation.md`](docs/reference/evaluation.md) for the harness, the A/A test,
+the first results and the costs.
+
 ## Related work
 
 - **BARb** — the AI that ships with BAR, built on
@@ -331,6 +340,7 @@ reason8/              # the Python package and the `reason8` command (cli.py)
   openings/           #   opening extraction, first contact, the opening dataset
   models/             #   next-build baselines and their evaluation
   bot/                #   building and checking the Reason8 AI
+  evaluation/         #   paired games between the AIs and their comparison
   analysis/           #   measurements behind the research docs
 ai/Reason8/           # in-game side: a BARb variant (AngelScript, Lua, JSON)
 tools/                # fetch-parser.sh: the pinned sdfz-demo-parser
