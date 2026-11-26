@@ -13,7 +13,7 @@ from reason8.evaluation import games as evaluation_games
 from reason8.evaluation import openings as evaluation_openings
 from reason8.evaluation import report as evaluation_report
 from reason8.game import maps, positions
-from reason8.headless import batch, run, setup, state
+from reason8.headless import batch, run, setup, state, tables
 from reason8.models import evaluate
 from reason8.openings import contact, dataset
 from reason8.paths import LayoutError
@@ -50,6 +50,7 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
             ("run", run, "run a start script or play back a replay"),
             ("batch", batch, "play many replays and keep their state"),
             ("state", state, "summarise a state file"),
+            ("tables", tables, "convert state files to Parquet tables"),
         ],
     ),
     ("contact", contact, "measure first contact in re-simulated replays"),
