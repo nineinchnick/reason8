@@ -26,7 +26,7 @@ Getting the data (into the git-ignored `data/`, or `$REASON8_DATA_DIR`):
 ```sh
 uv run reason8 download --limit 100   # match dumps, then 100 replays of the slice
 tools/fetch-parser.sh                 # once: the pinned replay parser
-uv run reason8 parse                  # data/replays -> data/parsed and data/tables
+uv run reason8 parse                  # data/replays -> data/tables
 ```
 
 The downloader keeps one connection at about one request per second, never
@@ -35,11 +35,9 @@ fetches a file twice, and records every match's status in
 for the selection and [`replay-format.md`](docs/reference/replay-format.md)
 for the parsed output.
 
-`parse` also writes the Parquet tables of the parsed replays, and every pass
-over many games (`maps check`, `contact`, `dataset` and the `analysis`
-commands) reads those tables, not the JSON documents. A replay parsed with
-`--no-tables`, or before the tables existed, is converted from its JSON by
-each pass until `reason8 tables` has stored it.
+`parse` keeps the parsed replays as Parquet tables, one file per table and
+day, and every pass over many games (`maps check`, `contact`, `dataset` and
+the `analysis` commands) reads those tables.
 
 ## Commands
 
@@ -50,24 +48,25 @@ more.
 : Download the match dumps and the replays of the training slice, politely
   (`--limit N --since YYYY-MM-DD --until YYYY-MM-DD`, `--dry-run`).
 
-`sync push|pull [replays|parsed|tables|matches]`
+`sync push|pull [replays|tables|matches]`
 : Copy the data directory to or from the private S3 bucket
   (`--since YYYY-MM-DD --until YYYY-MM-DD` for some days, `--match`,
   `--dry-run`).
 
-`parse [paths] --jobs N --zstd-level L --out DIR --since D --until D`
-: Parse replays into compact, zstd-compressed JSON, and bring the Parquet
-  tables of the days parsed up to date (`--no-tables` to skip that).
+`parse [paths] --jobs N --out DIR --since D --until D --force`
+: Parse replays into the Parquet tables (commands, selections, events, chat,
+  map drawings, start picks, shares, statistics, players, games), the replays
+  not parsed yet or all of them.
 
-`tables --jobs N --since D --until D --force`
-: Build the Parquet tables of the parsed replays (commands, selections,
-  events, players, games) for the days that aren't up to date.
+`tables --from-parsed DIR --jobs N --since D --until D`
+: Once: convert the parsed JSON documents of earlier versions (`data/parsed`)
+  into the tables, without parsing the replays again.
 
 `header REPLAY`
 : Print which engine, game version and map a replay needs.
 
-`make-fixture SOURCE DEST`
-: Make the anonymised test fixture from a parsed replay.
+`make-fixture REPLAY DEST`
+: Make the anonymised test fixture from a parsed replay in the tables.
 
 `maps fetch`, `maps check`
 : Fetch BAR's pinned map list; measure how far real starts are from the
@@ -107,20 +106,20 @@ or `aws login`), and name the bucket:
 
 ```sh
 export REASON8_S3_URI=s3://<bucket>       # or pass --s3-uri to each command
-uv run reason8 sync pull replays parsed   # bucket -> data/
-uv run reason8 sync pull parsed --since 2026-11-01 --until 2026-11-08  # a week
+uv run reason8 sync pull replays tables   # bucket -> data/
+uv run reason8 sync pull tables --since 2026-11-01 --until 2026-11-08  # a week
 uv run reason8 sync push                  # data/ -> bucket: every area
 ```
 
-Replays, parsed replays, their tables and state files are kept in daily
+Replays, the tables of the parsed replays and state files are kept in daily
 partitions by the day the match started
 (`replays/date=2026-11-01/<name>.sdfz`), the same in `data/` and in the bucket
 ([`dataset.md`](docs/reference/dataset.md#data-layout)). `sync` copies files
 that are missing or differ in size, merges the manifest and the parse index,
 and never deletes anything. With the bucket configured, `reason8 download`
 looks there before asking BAR's servers and uploads what it downloads from
-them. Storing the whole first slice (about 175 GB of replays, 70 GB of parsed
-replays and 55 GB of their tables) costs about $7 a month.
+them. Storing the whole first slice (about 175 GB of replays and about 64 GB
+of tables) costs about $6 a month.
 
 ## The idea in one paragraph
 
@@ -342,7 +341,7 @@ the first results and the costs.
 ```
 reason8/              # the Python package and the `reason8` command (cli.py)
   data/               #   match dumps and the slice, downloads, the S3 bucket, sync
-  replays/            #   reading .sdfz files, parsing them, reading parsed replays and their tables
+  replays/            #   reading .sdfz files, parsing them into tables, reading the tables
   game/               #   game versions and balance patches, map metadata, positions
   headless/           #   headless engine runs, the state export widget, start scripts
   openings/           #   opening extraction, first contact, the opening dataset
