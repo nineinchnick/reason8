@@ -18,6 +18,14 @@ uv run reason8 contact             # data/state -> data/contact/first_contact.pa
 uv run reason8 contact --report    # the tables below
 ```
 
+`reason8 contact` joins each state file with the game, its players' positions
+and the frames of their opening orders, read from the Parquet tables of the
+parsed replays ([`replay-format.md`](../reference/replay-format.md#tables));
+`--since` and `--until` take the state files and replays of some days. On the
+12 re-simulated games of the tables sample (2026-10-14 to 2026-10-27) it takes
+2.4 s instead of 8.8 s from the JSON documents, in one process, with the same
+table.
+
 ## Summary
 
 - **Sample:** the first 12 minutes of 72 games of the slice, 24 per map, 1,152

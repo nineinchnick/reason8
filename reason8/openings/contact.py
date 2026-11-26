@@ -2,7 +2,7 @@
 
 Usage::
 
-    uv run reason8 contact             # state files -> first_contact.parquet
+    uv run reason8 contact             # state files, replay tables -> first_contact.parquet
     uv run reason8 contact --report    # the tables of docs/research/first-contact.md
 
 An opening can only be told apart from the rest of the game until the player meets the
@@ -10,9 +10,10 @@ enemy: after that orders answer raids and losses, which the replay's commands do
 A replay does not say when that is, so a sample of replays is played again headlessly
 (``reason8 headless batch``, ADR 0010) with the state export widget, which writes every
 first hit between two units of opposite sides. This module reads those state files, finds
-each player's first contact, and gives the dataset builder the frame at which an opening
-ends: the measured one for a game that was re-simulated, and otherwise the usual one of
-its map and start position (`POSITION_CUTOFF_SECONDS`). The decision is ADR 0012; the
+each player's first contact (with the game and the opening orders from the replays'
+tables, `reason8.replays.tables`), and gives the dataset builder the frame at which an
+opening ends: the measured one for a game that was re-simulated, and otherwise the usual
+one of its map and start position (`POSITION_CUTOFF_SECONDS`). The decision is ADR 0012; the
 measurements are in docs/research/first-contact.md.
 """
 
@@ -21,9 +22,10 @@ from __future__ import annotations
 import argparse
 import math
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -35,8 +37,8 @@ from reason8.game.positions import position_order, replay_positions
 from reason8.headless.state import STATE_SUFFIX, read_records
 from reason8.openings.extract import OPENING_SECONDS, opening_orders
 from reason8.paths import data_dir, find_files
-from reason8.replays.parse import output_path
-from reason8.replays.replay import GAME_SPEED, Replay, load_replay
+from reason8.replays import tables
+from reason8.replays.replay import GAME_SPEED, Replay
 
 COMMANDER_PREFIXES = ("armcom", "corcom", "legcom")
 
@@ -219,11 +221,23 @@ def replay_name(path: str | Path, suffix: str = STATE_SUFFIX) -> str:
 
 
 def measure_game(
-    fights: Fights, replay: Replay, name: str, map_list: Mapping[str, MapMetadata] | None = None
+    fights: Fights,
+    replay: Replay,
+    name: str,
+    map_list: Mapping[str, MapMetadata] | None = None,
+    order_frames: Mapping[int, Sequence[int | None]] | None = None,
 ) -> list[dict[str, Any]]:
-    """One row per player of a re-simulated game: who, where, and their first contact."""
+    """One row per player of a re-simulated game: who, where, and their first contact.
+
+    `order_frames` are the frames of each team's opening orders (`opening_order_frames`);
+    by default they come from the replay's events.
+    """
     positions = replay_positions(replay, map_list)
-    orders = opening_orders(replay)
+    if order_frames is None:
+        order_frames = {
+            team: [order.frame for order in orders]
+            for team, orders in opening_orders(replay).items()
+        }
     rows = []
     for team, measures in sorted(contact_measures(fights).items()):
         position = positions.get(team)
@@ -240,26 +254,63 @@ def measure_game(
                 "role": position.role if position else None,
                 "position_index": position.index if position else None,
                 **measures,
-                "order_frames": [order.frame for order in orders.get(team, [])],
+                "order_frames": list(order_frames.get(team, [])),
             }
         )
     return rows
 
 
+def opening_order_frames(commands: pl.LazyFrame) -> dict[str, dict[int, list[int | None]]]:
+    """Replay -> team -> the frames of its opening orders (`opening_orders`), from commands."""
+    frames = (
+        tables.build_order_frame(commands, until_frame=OPENING_SECONDS * GAME_SPEED)
+        .filter(pl.col("team").is_not_null(), pl.col("unit").is_not_null(), pl.col("unit") != "")
+        .group_by("replay", "team", maintain_order=True)
+        .agg("frame")
+        .collect()
+    )
+    found: dict[str, dict[int, list[int | None]]] = defaultdict(dict)
+    for replay, team, team_frames in frames.iter_rows():
+        found[replay][team] = team_frames
+    return found
+
+
 def measure(
-    state_dir: Path, parsed_dir: Path, map_list: Mapping[str, MapMetadata] | None = None
+    state_dir: Path,
+    parsed_dir: Path,
+    map_list: Mapping[str, MapMetadata] | None = None,
+    *,
+    tables_dir: Path | None = None,
+    since: date | None = None,
+    until: date | None = None,
 ) -> pl.DataFrame:
-    """The first contact of every player of every complete state file in `state_dir`."""
+    """The first contact of every player of every complete state file in `state_dir`.
+
+    The replays are read from their tables (`reason8.replays.tables.open_source`, by
+    default next to `parsed_dir`); ``since`` and ``until`` limit both to some days.
+    """
     map_list = load_map_list() if map_list is None else map_list
+    games = {}
+    for path in find_files(state_dir, "*" + STATE_SUFFIX, since=since, until=until):
+        games[replay_name(path)] = (path, read_fights(path))
+    source = tables.open_source(
+        parsed_dir,
+        parsed_dir.parent / tables.AREA if tables_dir is None else tables_dir,
+        since=since,
+        until=until,
+        replays=games,
+        tables=(tables.GAMES, tables.PLAYERS, tables.COMMANDS),
+    )
+    headers = tables.replay_headers(
+        source.scan(tables.GAMES).collect(), source.scan(tables.PLAYERS).collect()
+    )
+    order_frames = opening_order_frames(source.scan(tables.COMMANDS))
     rows: list[dict[str, Any]] = []
-    for path in find_files(state_dir, "*" + STATE_SUFFIX):
-        name = replay_name(path)
-        parsed = output_path(parsed_dir, Path(name + ".sdfz"))
-        fights = read_fights(path)
-        if not fights.complete or not parsed.exists():
+    for name, (path, fights) in games.items():
+        if not fights.complete or name not in headers:
             print(f"skipped {path.name}: cut off, or its replay is not parsed", file=sys.stderr)
             continue
-        rows += measure_game(fights, load_replay(parsed), name, map_list)
+        rows += measure_game(fights, headers[name], name, map_list, order_frames.get(name, {}))
     return pl.from_dicts(rows, schema=TABLE_SCHEMA)
 
 
@@ -567,8 +618,8 @@ def _chunks(items: Sequence[Any], size: int) -> Iterator[Sequence[Any]]:
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
+    tables.add_source_arguments(parser)
     parser.add_argument("--state", type=Path, default=data_dir() / "state")
-    parser.add_argument("--parsed", type=Path, default=data_dir() / "parsed")
     parser.add_argument("--out", type=Path, default=contact_dir() / TABLE_NAME)
     parser.add_argument(
         "--report", action="store_true", help="print the tables of an existing first contact file"
@@ -579,7 +630,9 @@ def run(args: argparse.Namespace) -> int:
     if args.report:
         print(report(pl.read_parquet(args.out)))
         return 0
-    table = measure(args.state, args.parsed)
+    table = measure(
+        args.state, args.parsed, tables_dir=args.tables, since=args.since, until=args.until
+    )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     table.write_parquet(args.out)
     print(f"{table['replay'].n_unique()} games, {table.height} players -> {args.out}")

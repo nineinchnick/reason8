@@ -1,6 +1,7 @@
 import gzip
 import json
 import math
+from datetime import date
 from pathlib import Path
 
 import polars as pl
@@ -17,6 +18,7 @@ from reason8.openings.contact import (
     cutoff_effect,
     first_contact,
     load_measured,
+    measure,
     measure_game,
     opening_cutoff,
     position_cutoffs,
@@ -242,6 +244,35 @@ def test_measure_game_and_load_measured(tmp_path):
     assert load_measured(tmp_path / "missing.parquet") == {}
     assert replay_name("dir/2026-01-01_Map_1.2.jsonl.gz") == "2026-01-01_Map_1.2"
     assert replay_name("2026-01-01_Map_1.2.json.zst", ".json.zst") == "2026-01-01_Map_1.2"
+
+
+def test_measure_reads_the_replays_from_the_tables(tmp_path):
+    replay = Replay(synthetic.with_own_starts_recommended(load_replay(FIXTURE).doc))
+    lines = state_lines([hit(3000, 0, "armcom", 8, "corak")])
+    lines[0]["teams"] = [
+        {"team": team.team_id, "ally": team.ally_team_id, "gaia": False}
+        for team in replay.teams().values()
+    ]
+    parsed, state = tmp_path / "parsed", tmp_path / "state"
+    names = [f"2026-11-0{day}_10-00-00-000_x" for day in (1, 2, 3)]
+    for name in names:
+        (state / f"date={name[:10]}").mkdir(parents=True)
+        write_state(state / f"date={name[:10]}" / f"{name}.jsonl.gz", lines)
+    synthetic.write_parsed(parsed, names[0], replay)
+    synthetic.write_tables(parsed)
+    synthetic.write_parsed(parsed, names[1], replay)  # not in the tables yet
+    # names[2] is not parsed: skipped
+
+    table = measure(state, parsed, map_list={})
+    fights = read_fights(state / "date=2026-11-01" / f"{names[0]}.jsonl.gz")
+    expected = [
+        row | {"replay": name}
+        for name in names[:2]
+        for row in measure_game(fights, replay, "x", {})
+    ]
+    assert table.to_dicts() == pl.from_dicts(expected, schema=TABLE_SCHEMA).to_dicts()
+    later = measure(state, parsed, map_list={}, since=date(2026, 11, 2))
+    assert later["replay"].unique().to_list() == [names[1]]
 
 
 def test_report_counts_the_engines_attacker_as_known():
