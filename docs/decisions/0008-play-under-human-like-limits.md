@@ -1,7 +1,7 @@
 # 0008. Play under human-like limits
 
 - **Status:** Accepted
-- **Date:** 2026-11-24
+- **Date:** 2026-11-26
 
 ## Context
 
@@ -31,6 +31,16 @@ no command in the 7 frames before. Measured there:
   widgets; in any second, a p90 of 9 to 11 with widgets.
 - The first two minutes are the quietest: a p90 of 26 to 48 actions a minute
   with widgets, depending on skill.
+
+Attention is scarcer than actions. Noticing that a factory finished its queue
+or a builder stopped takes a look, and players spend looks carefully: they
+queue ahead so that a factory or builder stays busy while they look elsewhere,
+they rely on BAR's interface, which lists idle factories and builders, to find
+what needs a new queue, and they change queues already given when something
+happens. An AI that sees every unit go idle the frame it happens, and gives
+one order at a time, plays nothing like that, and a classifier tells its
+openings from human ones at once
+([`evaluation.md`](../reference/evaluation.md)).
 
 ## Decision
 
@@ -67,12 +77,41 @@ average over the game, kept over any 5 minutes as a running budget. A bot that
 keeps to them acts like a busy player of its band, not like its fastest
 moment.
 
+### Attention
+
+Attention is modelled in steps, each measured from human games before the bot
+uses it:
+
+1. **Reaction delay.** When a factory or builder goes idle, the bot gives it
+   orders only after a delay drawn from how long players of its band take from
+   the moment a unit goes idle to their next order to it. The delays are
+   measured on re-simulated human games, where the state export records when
+   units go idle, before the bot uses them; until then the bot has no delay.
+2. **Queue ahead.** When the bot gives orders it queues as the player did: the
+   whole drag for a builder, several units for a factory, so that a unit stays
+   busy until it needs attention again. Changing a queue already given, in
+   answer to an event, is a separate action.
+3. **A focus, later.** One point of attention that moves between areas of the
+   map, costs time to move, and limits where the bot can act at once. Replays
+   record no camera, only selections and commands, so this waits until
+   selections and re-simulated games can show how attention moves.
+
+The command-rate windows above cap all of it.
+
+### Skill band
+
+The bot plays as the 30-40 band by default, a strong player, as the README's
+"strong human teammate" asks.
+
 ## Consequences
 
 - Game state used for training has to be what the player could see, not the
   spectator's full view (line of sight per ally team).
 - The in-game side needs explicit limits on command rate and reaction time:
-  the windows above, enforced on every command the bot sends.
+  the windows above, enforced on every command the bot sends, and the reaction
+  delays once they are measured.
+- The state export has to record when units go idle, and re-simulated human
+  games are needed to measure reaction delays per band.
 - Evaluation must check that the bot stays within these limits, counting its
   commands in its replays the same way (`reason8.analysis.apm.ActionCounter`;
   the `analysis apm` command itself leaves out games with bots).
