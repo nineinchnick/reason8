@@ -59,8 +59,10 @@ Measures
 Report
 : For each measure, the evaluated AI's total over the pairs as a share of the
   opponent's (100% is equal), with a 95% interval from resampling seeds (the
-  16 pairs of a seed share two games). ADR 0003 asks for the economy at first
-  contact to be at least BARb's.
+  16 pairs of a seed share two games). ADR 0003 asks for the economy at 4:00
+  to be at least BARb's, so the report measures every team at 4:00 by default
+  (`--at-seconds` for another time) and gives the economy at each team's own
+  first contact after it, for information.
 
 ## The A/A test
 

@@ -2,9 +2,8 @@
 
 Usage::
 
-    uv run reason8 eval report data/eval/reason8-vs-barb
-    uv run reason8 eval report data/eval/reason8-vs-barb --at-seconds 240 \\
-        --data-dir data/bar --game "Beyond All Reason test-32018-ad135b9"   # all at 4:00
+    uv run reason8 eval report data/eval/reason8-vs-barb                    # at 4:00
+    uv run reason8 eval report data/eval/reason8-vs-barb --at-seconds 300   # at 5:00
     uv run reason8 eval report data/eval/barb-vs-barb    # the A/A test
 
 In the two games of a seed each AI plays every position once with the same faction
@@ -15,8 +14,10 @@ the same way.
 
 For each measure the report gives the evaluated AI's total over the pairs as a share of the
 opponent's (100% is equal), with a 95% interval from resampling seeds: the 16 pairs of a
-seed share two games and are not independent. ADR 0003 asks for economy at first contact
-at least BARb's: the interval of the share should not lie below 100%.
+seed share two games and are not independent. ADR 0003 asks for economy at 4:00 at least
+BARb's: the interval of the share should not lie below 100%. Every team is measured at the
+same game time from the state files the games keep; the economy at each team's own first
+contact follows, for information.
 
 The A/A test sets how many seeds that takes. From the spread of the per-seed shares,
 ``seeds for 10%`` is the number of seeds at which a true 10% difference would be found
@@ -38,6 +39,7 @@ from reason8.game.unitdefs import game_unit_defs
 from reason8.markdown import table
 
 MEASURES = ("metal_income", "energy_income", "built_metal", "built_energy", "units")
+AT_SECONDS = 240  # ADR 0003: the economy at 4:00
 ROUNDS = 2000
 PAIR_KEY = ("seed", "faction", "position")
 
@@ -154,26 +156,44 @@ def report(teams: pl.DataFrame, when: str = "at first contact") -> str:
     return "\n".join(lines)
 
 
+def contact_lines(teams: pl.DataFrame) -> list[str]:
+    """The economy table at each team's own first contact."""
+    paired = pairs(teams)
+    if paired.is_empty():
+        return []
+    ai, opponent = paired["ai"][0], paired["opponent"][0]
+    rows = []
+    for measure in MEASURES:
+        share, low, high = share_interval(paired, measure)
+        rows.append([measure, f"{_percent(share)} ({_percent(low)}–{_percent(high)})"])
+    return [
+        "## For information: at each team's first contact",
+        "",
+        *table(["measure", f"{ai} / {opponent}"], rows),
+    ]
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("games", type=Path, help="folder of `reason8 eval games`")
     parser.add_argument(
         "--at-seconds",
         type=int,
-        help="measure every team at this game time instead of at its first contact, "
-        "from the kept state files (needs --data-dir and --game)",
+        default=AT_SECONDS,
+        help=f"game time every team is measured at (default {AT_SECONDS}, ADR 0003)",
     )
-    parser.add_argument("--data-dir", help="content dir with the game, for --at-seconds")
-    parser.add_argument("--game", help="the game version the games were played with")
+    parser.add_argument("--data-dir", default="data/bar", help="content dir with the game")
+    parser.add_argument(
+        "--game",
+        default="Beyond All Reason test-32018-ad135b9",
+        help="the game version the games were played with (for unit costs)",
+    )
 
 
 def run(args: argparse.Namespace) -> int:
-    if args.at_seconds is None:
-        print(report(pl.read_parquet(args.games / TEAMS_NAME)))
-        return 0
-    if not (args.data_dir and args.game):
-        raise SystemExit("--at-seconds needs --data-dir and --game")
     unit_defs = game_unit_defs(Path(args.data_dir).resolve(), args.game)
     teams = measure_again(args.games, unit_defs, args.at_seconds * 30)
     minutes, seconds = divmod(args.at_seconds, 60)
-    print(report(teams, when=f"at {minutes}:{seconds:02d}"))
+    lines = [report(teams, when=f"at {minutes}:{seconds:02d}"), ""]
+    lines += contact_lines(pl.read_parquet(args.games / TEAMS_NAME))
+    print("\n".join(lines))
     return 0
