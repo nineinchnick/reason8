@@ -321,6 +321,50 @@ one picked at random per game (`reason8 bot export`,
   unchanged: half as many orders before contact, BARb's own orders mixed in,
   and one factory unit queued at a time.
 
+## What gets built
+
+ADR 0003 compares what gets built, not the orders given: people queue ahead
+because attention is scarce, so orders show how a player spends attention as
+much as what the opening is. `reason8 eval openings` reads the units each team
+finished, in order, until its first contact (measured in each state file the
+same way) or 8 minutes, commanders left out: the bot's from the 60 games with
+five openings per position, the humans' from 300 re-simulated test-split games
+on Supreme Isthmus ([`reactions.md`](../research/reactions.md#method)), as
+many of each per position (469). Everything else is as above.
+
+| openings compared                                | classified right    |
+| ------------------------------------------------ | ------------------- |
+| bot and human builds, in order                   | 91.5% (89.4%–93.4%) |
+| bot and human builds, structures and units apart | 91.7% (89.7%–93.5%) |
+
+By position:
+
+| faction | position | openings | classified right     |
+| ------- | -------- | -------- | -------------------- |
+| Armada  | P1       | 60       | 86.7% (76.7%–95.0%)  |
+| Armada  | P2       | 60       | 96.7% (91.7%–100.0%) |
+| Armada  | P3       | 60       | 90.0% (81.7%–96.7%)  |
+| Armada  | P4       | 60       | 93.3% (86.7%–98.3%)  |
+| Armada  | P5       | 60       | 95.0% (88.3%–100.0%) |
+| Armada  | P6       | 60       | 93.3% (86.7%–98.3%)  |
+| Armada  | P7       | 60       | 90.0% (81.7%–96.7%)  |
+| Armada  | P8       | 60       | 88.3% (80.0%–96.7%)  |
+| Cortex  | P9       | 60       | 91.7% (85.0%–98.3%)  |
+| Cortex  | P10      | 38       | 97.4% (92.1%–100.0%) |
+| Cortex  | P11      | 60       | 95.0% (88.3%–100.0%) |
+| Cortex  | P12      | 60       | 85.0% (75.0%–93.3%)  |
+| Cortex  | P13      | 60       | 91.7% (85.0%–98.3%)  |
+| Cortex  | P14      | 60       | 91.7% (85.0%–98.3%)  |
+| Cortex  | P15      | 60       | 95.0% (88.3%–100.0%) |
+| Cortex  | P16      | 60       | 85.0% (75.0%–93.3%)  |
+
+- **What the bot builds is still easy to tell from what people build.** 91.5%
+  against 96.7% for orders: part of what gave the bot away was how orders were
+  given, but most of it is in the builds.
+- **Not the interleaving.** Taking structures and units apart changes nothing
+  (91.7%): the difference is in what is built and in what order, not in how
+  factory units and structures alternate.
+
 ## What the games cost
 
 Measured on the A/A run: 32 hardware threads, 56 GB of RAM for WSL, 7 games at
