@@ -355,6 +355,24 @@ orders = tables.build_orders(since=date(2026, 10, 14), until_frame=8 * 60 * 30)
 teams = tables.teams_from(tables.scan(tables.PLAYERS).collect())
 ```
 
+A pass over the parsed replays opens them with `open_source()` instead of
+scanning the tables directly. It reads the tables of the days asked for, and
+converts the parsed replays that the tables lack, or hold for an older parsed
+file, from their JSON, one at a time and in memory only: it says how many, and
+`reason8 tables` stores them so that the next pass does not convert them
+again. A parsed replay that cannot be read is listed in `unreadable`, so each
+pass reports it as it did when it read the JSON. Without parsed replays, the
+tables alone are read. `replay_headers()` makes a `Replay` of everything but
+the events from rows of `games` and `players`, so that `Replay.teams()`, the
+positions and the game's lobby options work as on the document:
+
+```python
+source = tables.open_source(data_dir() / "parsed", since=date(2026, 10, 14))
+headers = tables.replay_headers(
+    source.scan(tables.GAMES).collect(), source.scan(tables.PLAYERS).collect()
+)
+```
+
 Every table has `replay`, the replay's file name without `.sdfz`, and the rows
 of a replay are together, in replay order. Strings are dictionary-encoded by
 the Parquet writer; files are compressed with zstd (level 9), with statistics,

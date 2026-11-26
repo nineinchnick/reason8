@@ -84,6 +84,87 @@ def test_actions_can_be_counted_from_the_tables(make):
         assert end_frames(rebuilt) == end_frames(replay)
 
 
+def filled(value):
+    """A value of a document without names and without the keys whose value is None."""
+    if isinstance(value, dict):
+        return {
+            key: filled(item) for key, item in value.items() if item is not None and key != "name"
+        }
+    if isinstance(value, list):
+        return [filled(item) for item in value]
+    return value
+
+
+@pytest.mark.parametrize("make", REPLAYS.values(), ids=REPLAYS.keys())
+def test_replay_headers_hold_the_document_but_its_events(make):
+    replay = make()
+    rows = tables.replay_tables(replay, "game")
+    header = tables.replay_headers(rows[tables.GAMES], rows[tables.PLAYERS])["game"]
+    meta = {key: value for key, value in replay.meta.items() if key in header.meta}
+    assert filled(header.meta) == filled(meta)
+    for key in ("allyTeams", "unitdefs"):
+        assert filled(header.doc[key]) == filled(replay.doc.get(key))
+    for key in ("modoptions", "mapoptions", "restrictions"):
+        assert header.doc[key] == (replay.doc.get(key) or {})
+    for key in ("players", "ais"):
+        for record, original in zip(header.doc[key], replay.doc[key], strict=True):
+            record, original = filled(record), filled(original)
+            uncertainty = original.pop("skillUncertainty", None)
+            assert record.pop("skillUncertainty", None) == pytest.approx(uncertainty)
+            assert record == original
+    assert header.teams() == replay.teams()
+    assert header.doc["source"]["parser"] == (replay.doc.get("source") or {}).get("parser")
+    assert "events" not in header.doc
+
+
+def test_open_source_adds_the_parsed_replays_the_tables_lack(tmp_path):
+    parsed, out = tmp_path / "parsed", tmp_path / "tables"
+    replay, fixture = synthetic.command_replay(), load_replay(FIXTURE)
+    other = f"{DAY}_12-00-00-000_x"
+    write_parsed(parsed, NAME, replay)
+    write_parsed(parsed, other, fixture)
+    tables.update(tables.parsed_days(parsed), out, jobs=0, log=lambda message: None)
+    messages = []
+
+    def build_orders(source):
+        frame = tables.build_order_frame(source.scan(tables.COMMANDS)).collect()
+        return tables.build_orders_from(frame)
+
+    source = tables.open_source(parsed, out, log=messages.append)
+    assert (source.stored, source.converted, messages) == ({NAME, other}, {}, [])
+    assert build_orders(source) == {NAME: replay.build_orders(), other: fixture.build_orders()}
+
+    # a replay parsed again, a new one, an unreadable one, and one of another day
+    write_parsed(parsed, other, replay)
+    new = f"{DAY}_13-00-00-000_x"
+    write_parsed(parsed, new, fixture)
+    (parsed / f"date={DAY}" / f"{DAY}_14-00-00-000_x.json.zst").write_bytes(b"not zstd")
+    write_parsed(parsed, "2026-11-02_10-00-00-000_x", fixture)
+    source = tables.open_source(parsed, out, until=date(2026, 11, 2), log=messages.append)
+    assert source.stored == {NAME}
+    assert set(source.converted) == {other, new}
+    assert list(source.unreadable) == [f"{DAY}_14-00-00-000_x"]
+    assert messages and "reason8 tables" in messages[0]
+    assert build_orders(source) == {
+        NAME: replay.build_orders(),
+        other: replay.build_orders(),
+        new: fixture.build_orders(),
+    }
+    games = source.scan(tables.GAMES).collect()
+    assert games["replay"].to_list() == [NAME, other, new]
+    headers = tables.replay_headers(games, source.scan(tables.PLAYERS).collect())
+    assert headers[new].teams() == fixture.teams()
+
+    # only some replays and tables; without parsed replays, the tables alone
+    source = tables.open_source(parsed, out, replays=[new, NAME], tables=[tables.GAMES])
+    assert source.scan(tables.GAMES).collect()["replay"].to_list() == [NAME, new]
+    assert set(source.converted[new]) == {tables.GAMES}
+    assert source.scan(tables.COMMANDS).collect().is_empty()
+    alone = tables.open_source(None, out)
+    assert alone.scan(tables.GAMES).collect()["replay"].to_list() == [NAME, other]
+    assert tables.open_source(None, tmp_path / "none").scan(tables.GAMES).collect().is_empty()
+
+
 def test_games_and_players_keep_no_names():
     rows = tables.replay_tables(synthetic.command_replay(), "game")
     for frame in rows.values():
