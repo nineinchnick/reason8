@@ -1,21 +1,19 @@
 # 0007. Ship the model as generated tables in a BARb variant
 
 - **Status:** Accepted
-- **Date:** 2026-11-22
+- **Date:** 2026-11-26
 
 ## Context
 
-A trained model has to get its decisions into a running game. We compared five
-ways to do that and built the most promising one
-([`in-game.md`](../reference/in-game.md)):
+A trained model has to get its decisions into a running game. We compared the
+ways to do that, built the most promising one, and later measured the three
+routes past it ([`in-game.md`](../reference/in-game.md)):
 
 - A Lua AI is part of the game archive, so it cannot be used in normal lobbies
   without changing the game itself, and it sees the whole map.
 - A widget plays a human's slot, needs a game client per bot, and BAR's
   sandbox takes away its network access and, when the host says so, its right
   to give orders.
-- An own native AI can do anything, but has to be written from scratch and
-  built for every platform and engine version.
 - A BARb variant under its own short name loads next to stock BARb with no C++
   build. Its AngelScript hooks were enough to make the commander and the first
   factory play a given build order by unit name. In 11 headless games the
@@ -24,7 +22,35 @@ ways to do that and built the most promising one
 
 For the first milestone the model's output is small and known before the game
 starts: one opening per map, side and start position
-([ADR 0009](0009-start-with-team-game-openings.md)).
+([ADR 0009](0009-start-with-team-game-openings.md)). The next pieces of work
+need more, and the scripts cannot give it:
+
+- Models that decide from the game state
+  ([ADR 0005](0005-learn-decisions-with-their-context.md)). Scripts see own
+  resources, unit counts, the frame and game rules parameters, but not the
+  current wind, line of sight or a list of enemy units.
+- The action budget of [ADR 0008](0008-play-under-human-like-limits.md).
+  BARb's library sends 400 to 3,000 commands a minute, and scripts cannot
+  touch them.
+- Placement and anything else the scripts cannot see.
+
+Measured for the routes past the scripts:
+
+- **A bridge from the script to a Lua widget** works in a headless game:
+  `ai.CallUI` reached a user widget 301 times in a 5-minute game, and an
+  outside process answered every request, through files, before the next call
+  a second of game time later. But the widget is a second thing to install, it
+  is switched off by the host's `allowuserwidgets` or anonymous mode, it can
+  only use files under `LuaUI/Config/`, and it sees what the hosting player
+  sees: everything, when the host spectates. It cannot limit BARb's commands
+  either.
+- **Our own build of BARb's library** (CircuitAI) took under 7 minutes on four
+  cores with a toolchain installed without root, loaded as `Reason8` next to
+  stock BARb, and played. A command governor of about 200 lines sits in front
+  of the one engine callback every command goes through. Counting, it agreed
+  with the replay within 2%; capping at the 30-40 band's budget, it kept the
+  AI within every window and dropped 45% of BARb's commands. The same library
+  loaded in an engine two months older.
 
 ## Decision
 
@@ -41,24 +67,48 @@ play. When there is no opening, or it is over, BARb decides as before.
 Every headless evaluation checks the engine log and the recorded replay with
 `reason8 bot check` before its result is used.
 
+### Build the library ourselves
+
+For models that decide from the game state, and for the action budget, we
+build BARb's library from source instead of copying the engine's: CircuitAI at
+the commit the engine pins for BARb, plus our changes, built for Linux and
+Windows for each engine release. The scripts and the opening tables stay as
+they are and run on top of it. The first change is the command governor
+(`ai/native`). Models run inside the library: first as tables loaded from a
+data file, a runtime such as ONNX only when a model needs it, and no second
+process. The widget bridge is not used for play.
+
 ## Consequences
 
-- No C++ build and no change to the game: only the player who adds the bot
-  needs the AI installed.
+- No change to the game: only the player who adds the bot needs the AI
+  installed. Until `reason8 bot build` takes our library, the AI folder still
+  holds the engine's copy and needs no C++ build.
 - The AI folder is tied to one engine version (the library) and one game
   version (the scripts), so it is rebuilt when either changes. The build stops
   when a BARb script we replace has changed upstream.
-- The scripts see only what BARb exposes to them. Metal spots are not exposed,
-  so the opening says *when* to build an extractor and BARb picks *where*.
-  Placing buildings where players place them
-  ([ADR 0005](0005-learn-decisions-with-their-context.md)) needs positions
-  passed through the hooks.
+- The scripts see only what BARb exposes to them. Extractors already go on the
+  human player's spots: BAR publishes the map's metal spots as game rules,
+  which scripts can read. Other buildings are placed by BARb near a position
+  the opening gives. Whether wind generators are worth building can only be
+  judged from the map's average wind, which BARb's energy values give, not
+  from the current wind.
 - A wrong script or a missing AI does not stop the game; the team just stands
   still. That is why the log and replay check is mandatory.
-- BARb's own command rate (hundreds to thousands of commands a minute, up to
-  125 in one second) is outside the scripts' reach, so the limits of
-  [ADR 0008](0008-play-under-human-like-limits.md) are not met by this path
-  alone.
-- A model that needs the game state at decision time cannot be a table.
-  Revisit then: the choice is between a script-to-widget bridge, which we
-  measured once, and a C++ build of the AI.
+- With the copied library, BARb's own command rate is outside our reach and
+  the limits of [ADR 0008](0008-play-under-human-like-limits.md) are not met.
+- With our own library:
+  - The action budget is enforced on every command, and the model can read
+    everything the AI interface gives a team: current wind, the team's line of
+    sight and radar, enemy units in them, metal spots and unit queues.
+  - We keep a fork of CircuitAI current with the engine: on each engine
+    release, move to the engine's BARb commit, carry our changes over and
+    build both platforms. BAR's public build images do that for the engine
+    itself; a GitHub Actions job could use them.
+  - A library that only drops commands over budget leaves BARb believing
+    orders were given. Before the budget is used in evaluation, the governor
+    has to defer commands, or BARb's tasks have to plan within the budget.
+  - Installing stays one folder; Windows players need the `.dll` we build,
+    which has not been built yet.
+- Revisit if keeping the fork current costs more than an engine release
+  allows, or if BAR's scripts gain bindings for wind, line of sight and
+  command limits, which would make the scripts enough.
