@@ -87,9 +87,10 @@ be rebuilt from it.
   the data directory and the bucket use the same relative paths, so copying
   between them needs no mapping.
 - Commands that read a directory find the files in every partition; `sync`,
-  `parse`, `tables` and `dataset` take `--since` and `--until` to work on some
-  days only. Data files outside the partitions stop the commands that write or
-  copy them, until they are moved into their partitions.
+  `parse`, `tables` and the passes over the parsed replays take `--since` and
+  `--until` to work on some days only. Data files outside the partitions stop
+  the commands that write or copy them, until they are moved into their
+  partitions.
 - `reason8 sync push|pull` copies files that are missing or differ in size,
   merges the bookkeeping files (`manifest.parquet`, `_index.jsonl`), and never
   deletes anything on either side.

@@ -63,6 +63,13 @@ resources and the buildings already standing.
   the tables; user ids are, for the join with the match dumps. Chat, map
   drawing, start-position picks and resource shares stay in the JSON only
   until a pass needs them.
+- **Every pass over the parsed replays reads the tables**: the position check,
+  first contact, the opening dataset and the measurements of actions per
+  minute, the opening meta and the balance patches. A parsed replay that the
+  tables lack, or hold for an older parsed file, is converted from its JSON by
+  the pass itself, in memory, so that a result never depends on whether
+  `reason8 tables` has run yet. Only `reason8 tables` and `reason8 parse`
+  write the tables.
 - **State comes from re-simulating the replay.** Training data joins the
   orders with the re-simulated state, at least for the part of the game being
   learned.
@@ -83,7 +90,12 @@ resources and the buildings already standing.
   it a pass needs (a document is about 17 MB of JSON, more than half of it
   MOVE commands), about 3.6 CPU-hours over the slice. The build orders of the
   first 8 minutes of every game come out of the tables in seconds instead
-  ([`replay-format.md`](../reference/replay-format.md#tables)).
+  ([`replay-format.md`](../reference/replay-format.md#tables)): on two weeks
+  of the slice the opening dataset takes 14 s in one process instead of 288 s
+  with four, with the same rows (the other passes are measured there too).
+- A pass that needs what only the JSON holds (chat, map drawing,
+  start-position picks, shares, the end-of-game statistics) reads that part
+  from the JSON, or the field goes into a table first.
 - The tables take about four fifths of the space of the JSON again; most of it
   is the coordinates of the commands, which compress about as well in either
   form. They are derived data: they can be rebuilt from the JSON at any time,

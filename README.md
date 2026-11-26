@@ -35,6 +35,12 @@ fetches a file twice, and records every match's status in
 for the selection and [`replay-format.md`](docs/reference/replay-format.md)
 for the parsed output.
 
+`parse` also writes the Parquet tables of the parsed replays, and every pass
+over many games (`maps check`, `contact`, `dataset` and the `analysis`
+commands) reads those tables, not the JSON documents. A replay parsed with
+`--no-tables`, or before the tables existed, is converted from its JSON by
+each pass until `reason8 tables` has stored it.
+
 ## Commands
 
 Everything runs as `uv run reason8 <command>`; `--help` on any of them says
@@ -76,8 +82,8 @@ more.
   tables).
 
 `dataset`
-: Build the opening dataset from the parsed replays (`--stats` prints the
-  tables).
+: Build the opening dataset from the tables of the parsed replays (`--stats`
+  prints the tables).
 
 `baseline`
 : Fit, score and save the counting baselines for the next build.
