@@ -14,6 +14,7 @@ from reason8.openings.dataset import (
     REMOVED_UNIT,
     SPLITS,
     UNIT_TWEAKS,
+    UNREADABLE,
     UNTIL_CONTACT,
     WATER_LEVEL,
     WHOLE_WINDOW,
@@ -85,7 +86,7 @@ def test_extract_game_has_a_row_per_order():
     assert all(player["orders"] == player["orders_in_window"] for player in extract.players)
 
     orders = opening_orders(replay)
-    rows = pl.DataFrame(dict(extract.orders))
+    rows = extract.orders
     assert rows.height == sum(len(team_orders) for team_orders in orders.values())
     for (slot,), player_rows in rows.group_by("player_slot"):
         expected = orders[slot]
@@ -107,7 +108,7 @@ def test_extract_game_has_a_row_per_order():
     excluded["modoptions"]["map_waterlevel"] = "100"
     extract = extract_game(Replay(excluded), 78, map_list={})
     assert extract.game["status"] == WATER_LEVEL
-    assert not extract.players and not extract.orders
+    assert not extract.players and extract.orders.is_empty()
 
 
 def test_extract_game_ends_openings_at_first_contact():
@@ -134,7 +135,7 @@ def test_extract_game_ends_openings_at_first_contact():
     assert (players[7]["cutoff_frame"], players[7]["cutoff_source"]) == (14400, MEASURED)
     assert (players[8]["cutoff_frame"], players[8]["cutoff_source"]) == (3000, BY_POSITION)
     assert (players[1]["cutoff_frame"], players[1]["cutoff_source"]) == (14400, WINDOW)
-    rows = pl.DataFrame(dict(extract.orders))
+    rows = extract.orders
     for slot in (0, 7, 8):
         cutoff_frame = players[slot]["cutoff_frame"]
         expected = [order for order in orders[slot] if order.frame <= cutoff_frame]
@@ -184,16 +185,24 @@ def test_build_dataset(tmp_path):
             break
     games = {}
     match_ids = []
-    for index in range(12):
+    for index in range(13):
         match_id = 1000 + index
         name = f"game{index}"
         if index == 0:
             write_parsed(parsed, name, tweaked)
         elif index == 1:
             write_parsed(parsed, name, older)
+        elif index < 6:
+            write_parsed(parsed, name, document)
+        elif index == 6:
+            # the replays parsed so far are in the tables, the later ones only parsed
+            synthetic.write_tables(parsed)
+            write_parsed(parsed, name, document)
         elif index < 11:
             write_parsed(parsed, name, document)
-        # the last game is not parsed
+        elif index == 12:
+            output_path(parsed, Path(f"{name}.sdfz")).write_bytes(b"not zstd")
+        # game 11 is not parsed
         games[match_id] = name
         match_ids.append(match_id)
     selection = pl.DataFrame(
@@ -259,14 +268,14 @@ def test_build_dataset(tmp_path):
         schema=widgets.REPORT_SCHEMA,
     ).write_parquet(widgets_dir / widgets.REPORTS_FILE)
     settings["widgets_dir"] = widgets_dir
-    manifest = build_dataset(parsed, out, selection, match_players, jobs=2, **settings)
+    manifest = build_dataset(parsed, out, selection, match_players, **settings)
 
     assert manifest["selection"] == {
         "since": "2026-05-23",
         "until": "2026-11-22",
         "maps": [document["meta"]["map"]],
-        "games": 12,
-        "parsed": 11,
+        "games": 13,
+        "parsed": 12,
     }
     assert manifest["opening"] == {
         "definition": "docs/decisions/0012-end-openings-at-first-contact.md",
@@ -284,13 +293,14 @@ def test_build_dataset(tmp_path):
         BY_POSITION: 10,
         MEASURED: 2,
     }
-    assert manifest["counts"]["games_by_status"] == {INCLUDED: 10, UNIT_TWEAKS: 1}
+    assert manifest["counts"]["games_by_status"] == {INCLUDED: 10, UNIT_TWEAKS: 1, UNREADABLE: 1}
     assert manifest["counts"]["openings_by_status"] == {INCLUDED: 159, REMOVED_UNIT: 1}
     assert manifest["vocabulary"]["arm cor"]["build"] == 32018
     assert manifest["code"]["commit"]
 
     games_frame = pl.read_parquet(out / "games.parquet")
-    assert games_frame.height == 11
+    assert games_frame.height == 12
+    assert games_frame.filter(pl.col("status") == UNREADABLE)["match_id"].to_list() == [1012]
     assert games_frame["replay_file_name"].to_list()[0] == "game0.sdfz"
     openings_frame = pl.read_parquet(out / "openings.parquet")
     assert openings_frame.height == 160
@@ -355,7 +365,7 @@ def test_build_dataset(tmp_path):
     assert "Supreme Isthmus" in report
 
     # building again gives the same rows
-    again = build_dataset(parsed, out, selection, match_players, jobs=1, **settings)
+    again = build_dataset(parsed, out, selection, match_players, **settings)
     assert again["counts"] == manifest["counts"]
 
     # the whole opening window, as before openings ended at first contact

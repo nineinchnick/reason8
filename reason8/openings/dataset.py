@@ -4,7 +4,7 @@ Usage::
 
     uv run reason8 maps fetch         # once: the pinned map list
     uv run reason8 contact            # once: re-simulated games -> contact
-    uv run reason8 dataset            # parsed replays -> openings_v2/
+    uv run reason8 dataset            # tables of the parsed replays -> openings_v2/
     uv run reason8 dataset --since 2026-11-01 --out data/datasets/november    # a part of it
     uv run reason8 dataset --stats    # the tables of docs/reference/openings-dataset.md
 
@@ -13,7 +13,9 @@ window of docs/reference/dataset.md) whose replays are parsed in ``<data dir>/pa
 ``--since`` and ``--until`` narrow the window to the date partitions of those days. Building
 again reads whatever is parsed by then and rewrites the dataset: the split of a game
 depends only on its match id, so games never move between splits as more replays are
-parsed.
+parsed. The replays are read from their Parquet tables (`reason8.replays.tables`): the game
+and its players from the games and players tables, the orders from the build commands of
+the opening window, as Polars frames.
 
 An opening is a player's build orders until their first contact with the enemy, and at
 most the first 8 minutes (`reason8.openings.contact`): the measured contact when the game
@@ -44,9 +46,8 @@ import os
 import shutil
 import subprocess
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -60,6 +61,7 @@ from reason8.game.maps import COMMIT as MAP_LIST_COMMIT
 from reason8.game.maps import MapMetadata, load_map_list
 from reason8.game.positions import game_shape, position_order, replay_positions, start_setup
 from reason8.game.versions import (
+    UNIT_RENAMES,
     balance_options,
     build_number,
     current_unit_name,
@@ -72,7 +74,6 @@ from reason8.openings.extract import (
     FACTIONS,
     OPENING_SECONDS,
     first_factory,
-    opening_orders,
     unit_role,
 )
 from reason8.paths import (
@@ -82,9 +83,9 @@ from reason8.paths import (
     partition_in_range,
     require_partitioned,
 )
-from reason8.replays import widgets
-from reason8.replays.parse import PARSED_SUFFIX, output_path
-from reason8.replays.replay import GAME_SPEED, Replay, load_replay
+from reason8.replays import tables, widgets
+from reason8.replays.parse import PARSED_SUFFIX
+from reason8.replays.replay import GAME_SPEED, Replay
 
 NAME = "openings_v2"
 FORMAT = "reason8.openings/2"
@@ -150,11 +151,15 @@ def game_exclusion(replay: Replay) -> str | None:
 
 @dataclass
 class GameExtract:
-    """What one replay gives the dataset: the game, its players and their orders."""
+    """What one replay gives the dataset: the game, its players and their orders.
+
+    `game_and_players` makes the game and its players up to their cutoffs, and
+    `player_openings` adds the players' orders, for many games at once.
+    """
 
     game: dict[str, Any]
     players: list[dict[str, Any]] = field(default_factory=list)
-    orders: dict[str, list[Any]] = field(default_factory=lambda: defaultdict(list))
+    orders: pl.DataFrame = field(default_factory=lambda: pl.DataFrame(schema=ORDER_COLUMNS))
 
 
 ORDER_COLUMNS = {
@@ -176,7 +181,7 @@ ORDER_COLUMNS = {
 }
 
 
-def extract_game(
+def game_and_players(
     replay: Replay,
     match_id: int,
     map_list: Mapping[str, MapMetadata] | None = None,
@@ -185,12 +190,14 @@ def extract_game(
     measured: Mapping[int, int | None] | None = None,
     position_cutoffs: Mapping[str, Mapping[str, int]] | None = None,
 ) -> GameExtract:
-    """The game record, and for a game that is used its players and opening orders.
+    """The game record, and for a game that is used its players with their cutoffs.
 
     `seconds` is the opening window. With the `UNTIL_CONTACT` cutoff an opening ends
     earlier, at the player's first contact: `measured` (player -> frame) when the game was
     re-simulated, and otherwise the usual one of the map and position (`position_cutoffs`,
-    by default `reason8.openings.contact.POSITION_CUTOFF_SECONDS`).
+    by default `reason8.openings.contact.POSITION_CUTOFF_SECONDS`). The replay's events
+    are not needed: a header of `reason8.replays.tables.replay_headers` will do. The
+    columns that come from the orders are added by `player_openings`.
     """
     game_version = replay.meta.get("game")
     build = build_number(game_version)
@@ -224,11 +231,9 @@ def extract_game(
     winners = set(replay.winning_ally_teams)
     positions = replay_positions(replay, map_list)
     users = {player["teamId"]: player.get("userId") for player in replay.players}
-    orders_by_team = opening_orders(replay, seconds)
     window_frames = seconds * GAME_SPEED
     for team in replay.teams().values():
         position = positions.get(team.team_id)
-        window_orders = orders_by_team.get(team.team_id, [])
         cutoff_frame, cutoff_source = window_frames, contact.WINDOW
         if cutoff == UNTIL_CONTACT:
             cutoff_frame, cutoff_source = contact.opening_cutoff(
@@ -239,16 +244,12 @@ def extract_game(
                 team.team_id,
                 position_cutoffs,
             )
-        orders = [order for order in window_orders if order.frame <= cutoff_frame]
-        units = [current_unit_name(order.unit) for order in orders]
-        faction = team.faction if team.faction in FACTIONS else ordered_faction(units)
         extract.players.append(
             {
                 "match_id": match_id,
                 "player_slot": team.team_id,
                 "user_id": users.get(team.team_id),
                 "ally_team": team.ally_team_id,
-                "faction": faction,
                 "faction_picked": team.faction,
                 "start_x": team.start_pos[0] if team.start_pos else None,
                 "start_z": team.start_pos[1] if team.start_pos else None,
@@ -261,84 +262,117 @@ def extract_game(
                 "won": team.ally_team_id in winners if winners else None,
                 "cutoff_frame": cutoff_frame,
                 "cutoff_source": cutoff_source,
-                "orders_in_window": len(window_orders),
-                "orders": len(orders),
-                "added": sum(order.count > 0 for order in orders),
-                "units": sorted(set(units)),
             }
         )
-        added = 0
-        previous = None
-        columns = extract.orders
-        for index, (order, unit) in enumerate(zip(orders, units, strict=True)):
-            columns["match_id"].append(match_id)
-            columns["player_slot"].append(team.team_id)
-            columns["order_index"].append(index)
-            columns["seq_idx"].append(added if order.count > 0 else None)
-            added += order.count > 0
-            columns["frame"].append(order.frame)
-            columns["unit"].append(unit)
-            columns["kind"].append(order.kind)
-            columns["count"].append(order.count)
-            columns["via"].append(order.via)
-            columns["queued"].append(order.queued)
-            columns["inserted"].append(order.inserted)
-            columns["quota"].append(order.quota)
-            columns["repeat"].append(
-                previous is not None
-                and (previous.frame, previous.unit) == (order.frame, order.unit)
-            )
-            columns["x"].append(order.x)
-            columns["z"].append(order.z)
-            previous = order
     return extract
 
 
-_worker_map_list: Mapping[str, MapMetadata] | None = None
-_worker_seconds = OPENING_SECONDS
-_worker_cutoff = UNTIL_CONTACT
-_worker_measured: Mapping[str, Mapping[int, int | None]] = {}
-_worker_position_cutoffs: Mapping[str, Mapping[str, int]] | None = None
+def player_openings(
+    commands: pl.LazyFrame, players: pl.DataFrame, seconds: int = OPENING_SECONDS
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """The opening orders of the players, and the players with the columns of their orders.
 
-
-def _start_worker(
-    map_list: Mapping[str, MapMetadata] | None,
-    seconds: int,
-    cutoff: str,
-    measured: Mapping[str, Mapping[int, int | None]],
-    position_cutoffs: Mapping[str, Mapping[str, int]] | None,
-) -> None:
-    global _worker_map_list, _worker_seconds, _worker_cutoff, _worker_measured
-    global _worker_position_cutoffs
-    _worker_map_list = map_list
-    _worker_seconds = seconds
-    _worker_cutoff = cutoff
-    _worker_measured = measured
-    _worker_position_cutoffs = position_cutoffs
-
-
-def _extract_file(task: tuple[str, int]) -> GameExtract:
-    path, match_id = task
-    try:
-        replay = load_replay(path)
-    except (OSError, ValueError) as error:
-        return GameExtract(
-            {
-                "match_id": match_id,
-                "split": split_of(match_id),
-                "status": UNREADABLE,
-                "error": str(error),
-            }
-        )
-    return extract_game(
-        replay,
-        match_id,
-        _worker_map_list,
-        _worker_seconds,
-        _worker_cutoff,
-        _worker_measured.get(contact.replay_name(path, PARSED_SUFFIX)),
-        _worker_position_cutoffs,
+    `commands` are rows of the commands table (`reason8.replays.tables`), and `players` the
+    players of `game_and_players` with a ``replay`` column that names their rows there. An
+    opening is the build orders of the opening window (`seconds`) that have a unit, up to
+    the player's ``cutoff_frame``, with today's unit names (`current_unit_name`). Returns
+    the orders with `ORDER_COLUMNS`, by player and in stream order, and `players` in their
+    order with `PLAYER_SCHEMA`.
+    """
+    player = ["match_id", "player_slot"]
+    players = players.with_columns(
+        pl.col("match_id").cast(pl.Int64),
+        pl.col("player_slot").cast(pl.Int32),
+        pl.col("cutoff_frame").cast(pl.Int32),
     )
+    renames = {unit: current_unit_name(unit) for unit in UNIT_RENAMES}
+    window = (
+        tables.build_order_frame(commands, until_frame=seconds * GAME_SPEED)
+        .filter(pl.col("team").is_not_null(), pl.col("unit").is_not_null(), pl.col("unit") != "")
+        .select(
+            "replay",
+            pl.col("team").cast(pl.Int32).alias("player_slot"),
+            "frame",
+            pl.col("unit").alias("ordered_unit"),
+            "kind",
+            "count",
+            pl.col("via").cast(pl.String),
+            "queued",
+            "inserted",
+            "quota",
+            "x",
+            "z",
+        )
+        .join(
+            players.lazy().select("replay", *player, "cutoff_frame"),
+            on=["replay", "player_slot"],
+            maintain_order="left",
+        )
+        .sort(player, maintain_order=True)
+        .collect()
+    )
+    added = pl.col("count") > 0
+    orders = (
+        window.filter(pl.col("frame") <= pl.col("cutoff_frame"))
+        .with_columns(
+            unit=pl.col("ordered_unit").replace(renames),
+            order_index=pl.int_range(pl.len()).over(player),
+            seq_idx=pl.when(added).then(added.cast(pl.Int32).cum_sum().over(player) - 1),
+            repeat=(
+                (pl.col("frame") == pl.col("frame").shift(1).over(player))
+                & (pl.col("ordered_unit") == pl.col("ordered_unit").shift(1).over(player))
+            ).fill_null(False),
+        )
+        .select([pl.col(name).cast(dtype) for name, dtype in ORDER_COLUMNS.items()])
+    )
+    in_window = window.group_by(player).agg(pl.len().alias("orders_in_window"))
+    kept = orders.group_by(player).agg(
+        pl.len().alias("orders"),
+        added.sum().alias("added"),
+        pl.col("unit").unique().sort().alias("units"),
+        pl.col("unit").alias("ordered"),
+    )
+    found = (
+        players.join(in_window, on=player, how="left", maintain_order="left")
+        .join(kept, on=player, how="left", maintain_order="left")
+        .with_columns(
+            pl.col("orders_in_window", "orders", "added").fill_null(0),
+            pl.col("units").fill_null([]),
+        )
+    )
+    factions = [
+        picked if picked in FACTIONS else ordered_faction(ordered or [])
+        for picked, ordered in found.select("faction_picked", "ordered").iter_rows()
+    ]
+    found = found.with_columns(pl.Series("faction", factions, dtype=pl.String))
+    return orders, found.select([pl.col(name).cast(dtype) for name, dtype in PLAYER_SCHEMA.items()])
+
+
+def extract_game(
+    replay: Replay,
+    match_id: int,
+    map_list: Mapping[str, MapMetadata] | None = None,
+    seconds: int = OPENING_SECONDS,
+    cutoff: str = UNTIL_CONTACT,
+    measured: Mapping[int, int | None] | None = None,
+    position_cutoffs: Mapping[str, Mapping[str, int]] | None = None,
+) -> GameExtract:
+    """The game record, and for a game that is used its players and opening orders.
+
+    For one parsed replay with its events, through the steps of `build_dataset`:
+    `game_and_players`, then `player_openings` on the replay's rows of the commands table.
+    """
+    extract = game_and_players(
+        replay, match_id, map_list, seconds, cutoff, measured, position_cutoffs
+    )
+    if not extract.players:
+        return extract
+    commands = tables.replay_tables(replay, "replay")[tables.COMMANDS].lazy()
+    players = pl.from_dicts(extract.players, schema=PLAYER_INPUT_SCHEMA)
+    players = players.with_columns(replay=pl.lit("replay"))
+    extract.orders, found = player_openings(commands, players, seconds)
+    extract.players = found.to_dicts()
+    return extract
 
 
 def ordered_faction(units: Iterable[str]) -> str | None:
@@ -409,6 +443,25 @@ GAME_SCHEMA = {
     "unit_control_widgets": pl.Boolean,  # the lobby lets user widgets give orders
     "error": pl.String,
 }
+# The players as `game_and_players` makes them; `player_openings` adds the other columns.
+PLAYER_INPUT_SCHEMA = {
+    "match_id": pl.Int64,
+    "player_slot": pl.Int32,
+    "user_id": pl.Int64,
+    "ally_team": pl.Int32,
+    "faction_picked": pl.String,
+    "start_x": pl.Float32,
+    "start_z": pl.Float32,
+    "position": pl.String,
+    "role": pl.String,
+    "position_side": pl.Int32,
+    "position_index": pl.Int32,
+    "position_distance": pl.Float32,
+    "on_spot": pl.Boolean,
+    "won": pl.Boolean,
+    "cutoff_frame": pl.Int32,
+    "cutoff_source": pl.String,
+}
 PLAYER_SCHEMA = {
     "match_id": pl.Int64,
     "player_slot": pl.Int32,
@@ -466,7 +519,7 @@ def build_dataset(
     selection: pl.DataFrame,
     match_players: pl.LazyFrame | pl.DataFrame,
     *,
-    jobs: int = 1,
+    tables_dir: Path | None = None,
     map_list: Mapping[str, MapMetadata] | None = None,
     seconds: int = OPENING_SECONDS,
     cutoff: str = UNTIL_CONTACT,
@@ -502,44 +555,69 @@ def build_dataset(
                 return_dtype=pl.Boolean,
             )
         )
-    tasks = []
-    for row in selection.select("match_id", "replay_file_name").iter_rows(named=True):
-        path = output_path(parsed_dir, Path(row["replay_file_name"]))
-        if path.exists():
-            tasks.append((str(path), int(row["match_id"])))
-    tasks.sort(key=lambda task: task[1])
+    names = {
+        int(match_id): Path(file_name).stem
+        for match_id, file_name in selection.select("match_id", "replay_file_name").iter_rows()
+    }
+    source = tables.open_source(
+        parsed_dir,
+        parsed_dir.parent / tables.AREA if tables_dir is None else tables_dir,
+        since=since,
+        until=until,
+        replays=names.values(),
+        tables=(tables.GAMES, tables.PLAYERS, tables.COMMANDS),
+    )
+    stored_games = source.scan(tables.GAMES).collect()
+    headers = tables.replay_headers(stored_games, source.scan(tables.PLAYERS).collect())
+    tasks = sorted(
+        (match_id, name)
+        for match_id, name in names.items()
+        if name in headers or name in source.unreadable
+    )
 
     work_dir = out_dir.with_name(out_dir.name + ".building")
     if work_dir.exists():
         shutil.rmtree(work_dir)
     (work_dir / "parts").mkdir(parents=True)
     games: list[dict[str, Any]] = []
-    players: list[dict[str, Any]] = []
-    part_orders: list[pl.DataFrame] = []
+    player_parts: list[pl.DataFrame] = []
     part_files: list[Path] = []
-
-    def flush() -> None:
-        if part_orders:
-            part = work_dir / "parts" / f"part-{len(part_files):05d}.parquet"
-            pl.concat(part_orders).write_parquet(part)
-            part_files.append(part)
-            part_orders.clear()
-
-    with ProcessPoolExecutor(
-        max_workers=max(1, jobs),
-        initializer=_start_worker,
-        initargs=(map_list, seconds, cutoff, measured, position_cutoffs),
-    ) as pool:
-        for count, extract in enumerate(pool.map(_extract_file, tasks, chunksize=8), start=1):
+    for start in range(0, len(tasks), _GAMES_PER_PART):
+        players: list[dict[str, Any]] = []
+        for match_id, name in tasks[start : start + _GAMES_PER_PART]:
+            if name in source.unreadable:
+                error = source.unreadable[name]
+                games.append(
+                    {
+                        "match_id": match_id,
+                        "split": split_of(match_id),
+                        "status": UNREADABLE,
+                        "error": error,
+                    }
+                )
+                continue
+            extract = game_and_players(
+                headers[name],
+                match_id,
+                map_list,
+                seconds,
+                cutoff,
+                measured.get(name),
+                position_cutoffs,
+            )
             games.append(extract.game)
-            players += extract.players
-            if extract.orders:
-                part_orders.append(pl.DataFrame(dict(extract.orders), schema=ORDER_COLUMNS))
-            if len(part_orders) >= _GAMES_PER_PART:
-                flush()
-            if count % 500 == 0:
-                print(f"{count} of {len(tasks)} replays read", file=sys.stderr)
-    flush()
+            players += [player | {"replay": name} for player in extract.players]
+        if players:
+            frame = pl.from_dicts(players, schema=PLAYER_INPUT_SCHEMA | {"replay": pl.String})
+            replays = frame["replay"].unique().to_list()
+            orders, found = player_openings(source.scan(tables.COMMANDS, replays), frame, seconds)
+            player_parts.append(found)
+            if not orders.is_empty():
+                part_files.append(work_dir / "parts" / f"part-{len(part_files):05d}.parquet")
+                orders.write_parquet(part_files[-1])
+        done = min(start + _GAMES_PER_PART, len(tasks))
+        if done % 500 < _GAMES_PER_PART or done == len(tasks):
+            print(f"{done} of {len(tasks)} replays read", file=sys.stderr)
 
     game_frame = _frame(games, GAME_SCHEMA).join(
         selection.select(
@@ -556,11 +634,11 @@ def build_dataset(
 
     # The vocabulary is the unit names of the newest build in the dataset (ADR 0015), taken
     # from a game with the same factions loaded: a game with Legion has 244 more names.
+    unit_names = dict(stored_games.select("replay", "unitdefs").iter_rows())
     references: dict[str, dict[str, Any]] = {}
     for factions in sorted(included["factions"].unique().to_list()):
         newest = included.filter(pl.col("factions") == factions).sort("build", "match_id").tail(1)
-        file_name = newest["replay_file_name"].item()
-        unit_definitions = load_replay(output_path(parsed_dir, Path(file_name))).doc["unitdefs"]
+        unit_definitions = unit_names[Path(newest["replay_file_name"].item()).stem]
         references[factions] = {
             "build": newest["build"].item(),
             "match_id": newest["match_id"].item(),
@@ -580,7 +658,7 @@ def build_dataset(
         .collect()
     )
     player_frame = (
-        _frame(players, PLAYER_SCHEMA)
+        (pl.concat(player_parts) if player_parts else pl.DataFrame(schema=PLAYER_SCHEMA))
         .join(skills, on=["match_id", "user_id"], how="left")
         .drop("user_id")
         .with_columns(
@@ -1028,9 +1106,8 @@ def _position_key(map_name: str | None, position: str | None) -> tuple[str, int,
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--parsed", type=Path, default=data_dir() / "parsed")
+    tables.add_source_arguments(parser)
     parser.add_argument("--out", type=Path, default=dataset_dir())
-    parser.add_argument("--jobs", type=int, default=min(8, os.cpu_count() or 1))
     parser.add_argument(
         "--cutoff",
         choices=CUTOFFS,
@@ -1045,16 +1122,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=Path,
         default=contact.contact_dir() / contact.TABLE_NAME,
         help="first contacts of the re-simulated games (reason8 contact)",
-    )
-    parser.add_argument(
-        "--since",
-        type=date.fromisoformat,
-        help="only the games of the date partitions from this date (YYYY-MM-DD)",
-    )
-    parser.add_argument(
-        "--until",
-        type=date.fromisoformat,
-        help="only the games of the date partitions before this date (YYYY-MM-DD, exclusive)",
     )
     parser.add_argument(
         "--widgets",
@@ -1078,7 +1145,7 @@ def run(args: argparse.Namespace) -> int:
         args.out,
         slice_selection(),
         matches.scan_dump("match_players"),
-        jobs=args.jobs,
+        tables_dir=args.tables,
         seconds=args.window_seconds,
         cutoff=args.cutoff,
         measured=contact.load_measured(args.contact),
