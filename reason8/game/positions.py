@@ -5,6 +5,10 @@ Usage::
     uv run reason8 maps fetch    # once: fetch the pinned map list
     uv run reason8 maps check    # how far real starts are from the recommended positions,
                                  # and how the games were set up
+    uv run reason8 maps check --since 2026-10-14 --until 2026-10-28    # some days
+
+The check reads the games and players tables of the parsed replays (`reason8 tables`), not
+their JSON documents.
 
 BAR's map metadata recommends start positions per map, each with a role, and the game shows
 them before the start. A player's *position* is the nearest recommended start position of
@@ -26,7 +30,8 @@ import sys
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+
+import polars as pl
 
 from reason8.data.matches import DEFAULT_MAPS
 from reason8.game.maps import (
@@ -42,8 +47,8 @@ from reason8.game.maps import (
     parse_boxes,
     parse_start_positions,
 )
-from reason8.paths import data_dir
-from reason8.replays.replay import Replay, iter_replays
+from reason8.replays import tables
+from reason8.replays.replay import Replay
 
 FROM_GAME = "game"  # the game's own lobby options
 FROM_MAP_LIST = "map list"  # the pinned map list; the game may have used an older one
@@ -347,20 +352,33 @@ def check(replays: Iterable[Replay], map_list: Mapping[str, MapMetadata] | None 
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--parsed", type=Path, default=data_dir() / "parsed")
+    tables.add_source_arguments(parser)
     parser.add_argument(
         "--map", action="append", help="map name; default: the maps of the training slice"
     )
 
 
+def game_headers(source: tables.Source, maps: Iterable[str]) -> list[Replay]:
+    """The games on `maps` without AIs, from the games and players tables, by replay name."""
+    games = source.scan(tables.GAMES).filter(pl.col("map").is_in(list(maps))).collect()
+    players = (
+        source.scan(tables.PLAYERS).filter(pl.col("replay").is_in(games["replay"].implode()))
+    ).collect()
+    headers = tables.replay_headers(games, players)
+    return [headers[name] for name in sorted(headers) if not headers[name].ais]
+
+
 def run(args: argparse.Namespace) -> int:
     if not load_map_list():
         print("no map list: run `reason8 maps fetch` first", file=sys.stderr)
-    wanted = set(args.map or DEFAULT_MAPS)
-    replays = (
-        replay
-        for replay in iter_replays(args.parsed)
-        if replay.meta.get("map") in wanted and not replay.ais
+    source = tables.open_source(
+        args.parsed,
+        args.tables,
+        since=args.since,
+        until=args.until,
+        tables=(tables.GAMES, tables.PLAYERS),
     )
-    print(check(replays))
+    for name, error in source.unreadable.items():
+        print(f"skipped {name}: {error}", file=sys.stderr)
+    print(check(game_headers(source, args.map or DEFAULT_MAPS)))
     return 0
