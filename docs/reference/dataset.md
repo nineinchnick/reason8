@@ -239,24 +239,9 @@ name doesn't start with a date (our own test games) goes to `date=unknown`.
 read a directory find the files in every partition; `sync`, `parse`, `tables`
 and `dataset` take `--since` and `--until` (exclusive) to read only some days.
 
-Data directories and buckets from before the partitions keep their files at
-the top of each directory. `download`, `parse`, `sync`, `headless batch` and
-`dataset` stop when they find such files, and `reason8 storage migrate-layout`
-moves them:
-
-```sh
-uv run reason8 storage migrate-layout local          # list what would move
-uv run reason8 storage migrate-layout local --apply  # move it
-uv run reason8 storage migrate-layout s3             # list what would be copied
-uv run reason8 storage migrate-layout s3 --apply     # copy inside S3, verify sizes
-uv run reason8 storage migrate-layout s3 --apply --delete-old  # then delete the old keys
-```
-
-Locally it renames each file into its partition. In the bucket it copies each
-object to its partitioned key without downloading it, lists the bucket again,
-and deletes the old keys only with `--delete-old` and only where the copy has
-the same size. A file whose partition already holds a different one is left in
-place and reported. Running it again finishes what an interrupted run left.
+Data files at the top of a partitioned directory (the earlier, flat layout)
+stop `download`, `parse`, `sync`, `headless batch` and `dataset` until they
+are moved into their partitions.
 
 ## Reproducing
 

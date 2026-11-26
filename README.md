@@ -49,9 +49,6 @@ more.
   (`--since YYYY-MM-DD --until YYYY-MM-DD` for some days, `--match`,
   `--dry-run`).
 
-`storage migrate-layout local|s3 [--apply] [--delete-old]`
-: Move data files of the earlier flat layout into the date partitions.
-
 `parse [paths] --jobs N --zstd-level L --out DIR --since D --until D`
 : Parse replays into compact, zstd-compressed JSON, and bring the Parquet
   tables of the days parsed up to date (`--no-tables` to skip that).

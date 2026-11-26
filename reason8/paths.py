@@ -116,5 +116,5 @@ def require_partitioned(directory: Path, pattern: str) -> None:
     if flat:
         raise LayoutError(
             f"{len(flat)} files matching {pattern} in {directory} are not in date partitions; "
-            "move them with `reason8 storage migrate-layout local --apply`"
+            "move them into their partitions"
         )
