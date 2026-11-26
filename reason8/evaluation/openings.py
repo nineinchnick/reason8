@@ -2,11 +2,21 @@
 
 Usage::
 
-    uv run reason8 eval openings data/eval/reason8-spots
+    uv run reason8 eval openings data/eval/reason8-spots                   # what was built
+    uv run reason8 eval openings data/eval/reason8-spots --compare orders  # what was ordered
 
 ADR 0003's first measure: the openings the Reason8 bot plays are human-like when a
 classifier trained on them and on human openings of the same start positions cannot tell
-them apart on games it has not seen.
+them apart on games it has not seen. An opening is what gets built, in order, until first
+contact: the units each team finished, from the state files of the games, with first contact
+measured the same way for both (`reason8.openings.contact`, ADR 0012) and at most the
+8-minute opening window. The bot's builds come from the games of `reason8 eval games`, the
+human ones from the re-simulated games of the dataset's test split (`reason8 headless
+batch`, ADR 0010) on the same map, at the positions and with the factions the bot played,
+started on their spot. Commanders, which every team starts with, are left out.
+
+``--compare orders`` compares what was ordered instead, a stricter test that also tells
+how orders are given, and needs no re-simulated human games:
 
 Bot openings
     The build orders of every team of the evaluated AI in the games of `reason8 eval
@@ -44,10 +54,12 @@ from sklearn.feature_extraction import DictVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GroupKFold
 
-from reason8.evaluation.games import RESULT_NAME, TEAMS_NAME
+from reason8.evaluation.games import RESULT_NAME, STATE_NAME, TEAMS_NAME
 from reason8.game.positions import position_order
 from reason8.game.unitdefs import game_unit_defs
+from reason8.headless.state import read_records
 from reason8.markdown import table
+from reason8.openings.contact import first_contact, is_commander, read_fights
 from reason8.openings.dataset import INCLUDED
 from reason8.openings.extract import OPENING_SECONDS
 from reason8.paths import data_dir
@@ -56,6 +68,7 @@ from reason8.replays.replay import Replay
 
 STEPS = 20
 ORDERS = "orders"
+BUILDS = "builds"
 SEPARATE = "separate"
 VIEWS = (ORDERS, SEPARATE)
 FOLDS = 5
@@ -173,12 +186,112 @@ def human_openings(dataset: Path, map_name: str, wanted: pl.DataFrame) -> pl.Dat
 
 
 def balanced(bot: pl.DataFrame, human: pl.DataFrame, seed: int = 0) -> pl.DataFrame:
-    """As many human openings as bot openings at each position, drawn at random."""
-    parts = [bot]
-    for (position,), group in bot.group_by("position"):
+    """As many bot as human openings at each position: the larger side is drawn at random
+    down to the size of the smaller."""
+    parts = []
+    for (position,), group in bot.group_by("position", maintain_order=True):
         pool = human.filter(pl.col("position") == position)
-        parts.append(pool.sample(min(group.height, pool.height), seed=seed))
-    return pl.concat(parts)
+        size = min(group.height, pool.height)
+        if size:
+            parts += [group.sample(size, seed=seed), pool.sample(size, seed=seed)]
+    return pl.concat(parts) if parts else bot.clear()
+
+
+def built_units(
+    state_path: Path, window_frames: int = OPENING_SECONDS * 30
+) -> dict[int, list[str]]:
+    """Per team of a state file, the units it finished, in order, until its first contact
+    (measured in the same file) or the opening window; commanders left out."""
+    contact = first_contact(read_fights(state_path))
+    names: dict[str, str] = {}
+    built: dict[int, list[str]] = {}
+    for record in read_records(state_path):
+        if record["t"] == "header":
+            names = record["unitdefs"]
+        elif record["t"] == "finished":
+            team = record["team"]
+            frame = record["f"]
+            end = contact.get(team)
+            end = min(end, window_frames) if end is not None else window_frames
+            unit = names.get(str(record["d"]))
+            if frame <= end and unit and not is_commander(unit):
+                built.setdefault(team, []).append(unit)
+    return built
+
+
+def bot_builds(games_dir: Path) -> pl.DataFrame:
+    """One row per team of the evaluated AI with the units it built (`built_units`)."""
+    teams = pl.read_parquet(games_dir / TEAMS_NAME)
+    evaluated = (pl.col("game") == "a") == (pl.col("ally_team") == 0)
+    ours = teams.filter(evaluated)
+    rows = []
+    for result_path in sorted(games_dir.glob(f"*/{RESULT_NAME}")):
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        state = result_path.parent / STATE_NAME
+        if not result.get("ok") or not state.is_file():
+            continue
+        built = built_units(state)
+        seed, game = result["seed"], result["game"][-1]
+        for team in ours.filter(pl.col("seed") == seed, pl.col("game") == game).iter_rows(
+            named=True
+        ):
+            rows.append(
+                {
+                    "group": f"bot-{seed}-{game}",
+                    "source": "bot",
+                    "position": team["position"],
+                    "faction": team["faction"],
+                    "units": built.get(team["team"], []),
+                }
+            )
+    return pl.DataFrame(rows)
+
+
+def human_builds(
+    state_dir: Path, dataset: Path, map_name: str, wanted: pl.DataFrame
+) -> pl.DataFrame:
+    """One row per human player of the re-simulated test-split games on the map, at the
+    positions and with the factions of `wanted`, started on their spot, with the units they
+    built (`built_units`)."""
+    games = pl.read_parquet(dataset / "games.parquet").filter(
+        pl.col("split") == "test", pl.col("map") == map_name, pl.col("status") == INCLUDED
+    )
+    by_name = {
+        name.removesuffix(".sdfz"): match_id
+        for name, match_id in games.select("replay_file_name", "match_id").iter_rows()
+    }
+    players = (
+        pl.read_parquet(dataset / "openings.parquet")
+        .filter(pl.col("status") == INCLUDED, pl.col("on_spot"))
+        .join(wanted.unique(), on=("position", "faction"))
+        .select("match_id", "player_slot", "position", "faction")
+    )
+    rows = []
+    for state_path in sorted(state_dir.glob("date=*/*.jsonl.gz")):
+        match_id = by_name.get(state_path.name.removesuffix(".jsonl.gz"))
+        if match_id is None:
+            continue
+        built = built_units(state_path)
+        for player in players.filter(pl.col("match_id") == match_id).iter_rows(named=True):
+            rows.append(
+                {
+                    "group": f"human-{match_id}",
+                    "source": "human",
+                    "position": player["position"],
+                    "faction": player["faction"],
+                    "units": built.get(player["player_slot"], []),
+                }
+            )
+    return pl.DataFrame(
+        rows,
+        schema={
+            "group": pl.String,
+            "source": pl.String,
+            "position": pl.String,
+            "faction": pl.String,
+            "units": pl.List(pl.String),
+        },
+    )
 
 
 def classify(
@@ -278,6 +391,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--map", default="Supreme Isthmus v2.1")
     parser.add_argument("--dataset", type=Path, help="default: openings_v2")
     parser.add_argument("--parser", type=Path, help="sdfz-demo-parser binary")
+    parser.add_argument(
+        "--compare",
+        choices=(BUILDS, ORDERS),
+        default=BUILDS,
+        help="what was built (ADR 0003) or what was ordered",
+    )
+    parser.add_argument("--state-dir", type=Path, help="re-simulated games: <data dir>/state")
     parser.add_argument("--data-dir", default="data/bar", help="content dir with the game")
     parser.add_argument(
         "--game",
@@ -287,10 +407,18 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    bot = bot_openings(args.games, args.parser or default_parser())
     dataset = args.dataset or data_dir() / "datasets" / "openings_v2"
-    human = human_openings(dataset, args.map, bot.select("position", "faction"))
+    if args.compare == BUILDS:
+        bot = bot_builds(args.games)
+        state_dir = args.state_dir or data_dir() / "state"
+        human = human_builds(state_dir, dataset, args.map, bot.select("position", "faction"))
+    else:
+        bot = bot_openings(args.games, args.parser or default_parser())
+        human = human_openings(dataset, args.map, bot.select("position", "faction"))
     openings = balanced(bot, human)
+    if openings.is_empty():
+        raise SystemExit("no human openings at the bot's positions (re-simulate test games)")
+    print(f"Compared: what was {'built' if args.compare == BUILDS else 'ordered'}.")
     unit_defs = game_unit_defs(Path(args.data_dir).resolve(), args.game)
     static = {name for name, unit in unit_defs.items() if unit.is_static}
     print(report({view: classify(openings, static, view) for view in VIEWS}))
