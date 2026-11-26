@@ -60,12 +60,17 @@ float switchLimit = MakeSwitchLimit();
 
 IUnitTask@ AiMakeTask(CCircuitUnit@ unit)
 {
-	// Reason8: the opening's factory makes the opening's units first
-	IUnitTask@ openingTask = Reason8::MakeFactoryTask(unit);
-	if (openingTask !is null)
-		return openingTask;
+	// Reason8: an idle factory waits as long as a player takes to notice it
+	const int reactionFrames = Reason8::ReactionWait(unit, true);
+	if (reactionFrames > 0)
+		return aiFactoryMgr.Enqueue(TaskS::Wait(false, reactionFrames));
 
-	return aiFactoryMgr.DefaultMakeTask(unit);
+	// Reason8: the opening's factory makes the opening's units first
+	IUnitTask@ task = Reason8::MakeFactoryTask(unit);
+	if (task is null)
+		@task = aiFactoryMgr.DefaultMakeTask(unit);
+	Reason8::TaskGiven(unit, task);  // Reason8:
+	return task;
 }
 
 void AiTaskAdded(IUnitTask@ task)
@@ -75,6 +80,7 @@ void AiTaskAdded(IUnitTask@ task)
 void AiTaskRemoved(IUnitTask@ task, bool done)
 {
 	Reason8::FactoryTaskRemoved(task, done);  // Reason8:
+	Reason8::TaskEnded(task, done);  // Reason8:
 }
 
 void AiUnitAdded(CCircuitUnit@ unit, Unit::UseAs usage)

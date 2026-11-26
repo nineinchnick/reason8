@@ -137,6 +137,21 @@ def opening_table(openings: dict) -> str:
             f'SOpening("{side}", "{map_name}", "{position}", {float(start_x)}f, '
             f'{float(start_z)}f, "{";".join(steps)}", "{";".join(factories)}")'
         )
+    reaction_rows = [
+        f'"{kind} {row["until_seconds"]} {row["answered"]} '
+        + " ".join(str(value) for value in row["quantiles"])
+        + '"'
+        for kind, rows in sorted((openings.get("reactions") or {}).items())
+        for row in rows
+        if kind.isalpha()
+    ]
+    reactions = (
+        "const array<string> REACTIONS = {"
+        + ",".join(f"\n\t{row}" for row in reaction_rows)
+        + "\n};\n"
+        if reaction_rows
+        else "const array<string> REACTIONS;\n"
+    )
     body = "".join(f"\n\t\t{entry}," for entry in entries).rstrip(",")
     openings_array = f"array<SOpening> = {{{body}\n\t}}" if entries else "array<SOpening>()"
     return (
@@ -144,6 +159,9 @@ def opening_table(openings: dict) -> str:
         "\n"
         "namespace Reason8 {\n"
         "\n"
+        '// Reaction delays: "<kind> <until second> <answered> <quantiles of seconds>".\n'
+        + reactions
+        + "\n"
         "array<SOpening> MakeOpenings()\n"
         "{\n"
         f"\treturn {openings_array};\n"

@@ -102,3 +102,34 @@ def test_typical_openings_keeps_the_most_likely_and_draws_the_rest():
     assert chosen[0][0].match_id == 0  # the one the model finds most likely comes first
     assert chosen[0][1] >= max(score for _, score in chosen[1:])
     assert typical_openings(model, key, candidates, count=3)[0] == chosen  # reproducible
+
+
+def test_reaction_table():
+    from reason8.analysis.reactions import IDLE_SCHEMA
+    from reason8.bot.export import reaction_table
+
+    rows = []
+    for index in range(10):  # builders of the band, early: 8 answered after 1..8 s, 2 not
+        rows.append(
+            {
+                "replay": "g",
+                "team": 0,
+                "unit_id": index,
+                "unit": "armck",
+                "kind": "builder",
+                "frame": 300,
+                "skill": 35.0,
+                "clicked_frame": 300 + 30 * (index + 1) if index < 8 else None,
+                "any_frame": None,
+            }
+        )
+    table = reaction_table(pl.DataFrame(rows, schema=IDLE_SCHEMA))
+    early = table["builder"][0]
+    assert early["until_seconds"] == 180 and early["events"] == 10 and early["answered"] == 0.8
+    assert len(early["quantiles"]) == 19 and early["quantiles"][9] == 4.5
+    assert table["factory"][0] == {
+        "until_seconds": 180,
+        "events": 0,
+        "answered": 0.0,
+        "quantiles": [],
+    }
