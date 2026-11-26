@@ -35,6 +35,11 @@ ships with BAR, and the scripts mentioned here.
 - **BARb is not human-like in how often it gives orders**: 40 to 700 commands
   a minute in the first five minutes, peaks of 1,100 to 3,200 a minute later,
   and up to 125 in one second. The scripts cannot change that.
+- **Past the tables, our own build of BARb's library is the route that covers
+  everything.** We built CircuitAI from source in under 7 minutes, loaded it
+  as `Reason8`, and capped its commands at a human budget. A script-to-widget
+  bridge also works, but only adds a little state and cannot cap commands. See
+  [Past the tables](#past-the-tables).
 
 ## The options
 
@@ -82,9 +87,11 @@ Limits
 How decisions get in
 : Two routes. (a) The script calls Lua with `ai.CallUI(text)`; a widget on the
   same computer answers with a string. *Measured: the call and the answer
-  arrive.* (b) A C++ build of the AI (CircuitAI) that runs the model itself or
-  talks to another process, which is what Apex does
-  ([`related-work.md`](../research/related-work.md)). *Not tried.*
+  arrive, and an outside process can answer through files.* (b) A C++ build of
+  the AI (CircuitAI) that runs the model itself or talks to another process,
+  which is what Apex does ([`related-work.md`](../research/related-work.md)).
+  *Measured: it builds, loads and plays.* Both are in
+  [Past the tables](#past-the-tables).
 
 Latency
 : (a) The call is synchronous and in-process. The widget's log line and the
@@ -99,20 +106,20 @@ What it sees
 Install and lobbies
 : (a) The AI folder plus a widget on the same computer. BAR runs user widgets
   in a sandbox that removes `socket` (*measured: `socket` is `nil`*) and
-  leaves file access under the game's write folder (*measured: a file could be
-  written*). So a user widget reaches another process through files only. The
-  host can also switch user widgets off (`allowuserwidgets`). (b) One folder,
-  but a library to build for Windows and Linux against each engine version.
+  allows files only under `LuaUI/Config/` and `LuaUI/Widgets/` (*measured:
+  anything else is refused*). So a user widget reaches another process through
+  files only. The host can also switch user widgets off (`allowuserwidgets`,
+  or anonymous mode). (b) One folder, but a library to build for Windows and
+  Linux against each engine release.
 
 Headless test
 : Same runner; `--widget` installs the widget.
 
 Limits
-: (a) In one of three runs that had the test widget installed, the engine
-  stopped advancing after frame 289 and had to be killed. The run that hung
-  and one that finished both made the call; we could not reproduce it, so we
-  do not know the cause. Treat the bridge as unproven. The test widget and the
-  one-line script change are not in the repo.
+: (a) In one of three early runs that had a test widget installed, the engine
+  stopped advancing after frame 289 and had to be killed; the two later runs
+  with a widget finished. The cause is unknown, so a bridge needs a timeout.
+  The test widgets and the script changes are not in the repo.
 
 ### 3. Own native Skirmish AI
 
@@ -367,8 +374,12 @@ Can do
   `ai.CallRules`) and receive a Lua message (`AiLuaMessage`).
 
 Cannot
-: Read files, open sockets, read a clock, list enemy units, or see metal
-  spots.
+: Read files, open sockets, read a clock, list enemy units, read the current
+  wind or line of sight, or send or limit unit commands except through BARb's
+  tasks. Metal spots are readable only because BAR publishes them as game
+  rules (`mex_count`, `mex_x1`, ...); the wind only as the map's average, in
+  the energy BARb expects from a wind generator
+  (`aiEconomyMgr.GetEnergyMake`).
 
 *So the start position needed for per-position openings is available: the map
 name and the commander's position at frame 0. The opening script uses both.*
@@ -628,13 +639,270 @@ second. In a 5-minute game most commands were `MOVE`, `WAIT` and `REMOVE`.
 *This is far from a person's rate, and it comes from BARb's unit handling, not
 from the opening: the opening itself is 5 build orders in the first minute.
 The limits of [ADR 0008](../decisions/0008-play-under-human-like-limits.md)
-cannot be met by scripts; they need a change in the library or have to be
-accepted for the layers BARb still plays.*
+cannot be met by scripts; they need a change in the library (see
+[the governor](#a-command-governor)) or have to be accepted for the layers
+BARb still plays.*
 
 The opening's own timing is not human-like either: each order is given 2 to 4
 s after the previous structure is finished, one at a time. People queue the
 first buildings at once. *So order times of the bot and of humans cannot be
 compared directly; compare when things are started or finished.*
+
+## Past the tables
+
+Three pieces of planned work need more than a table fixed before the game:
+models that decide from the game state
+([ADR 0005](../decisions/0005-learn-decisions-with-their-context.md)), the
+action budget of
+[ADR 0008](../decisions/0008-play-under-human-like-limits.md), and placement
+and other things the scripts cannot see. We compared three routes for them.
+
+Setup for everything measured here: engine `recoil_2026.09.03`, game
+`Beyond All Reason test-32018-ad135b9`, Supreme Isthmus v2.1, Reason8 (Armada)
+against stock BARb (Cortex), 5 game minutes (9,000 frames), one worker thread.
+Each game took 73 to 100 s of wall time while other jobs shared the machine.
+
+### A. Tables that branch on state
+
+Read, not run.
+
+What a table can branch on
+: Whatever the scripts see (see
+  [What a script can see and do](#what-a-script-can-see-and-do)): the frame,
+  own metal and energy, how many of each unit the team has, game and team
+  rules parameters (BAR publishes the metal spots there), BARb's sums of the
+  enemy's threat and cost by role, and the map's average wind through the
+  energy BARb expects from a wind generator.
+
+What fits
+: A decision tree or an n-gram whose context includes a few state buckets,
+  such as income bands or "has a factory", exported like today's openings.
+  Tables have to stay strings decoded when used: 480 openings as nested script
+  arrays took minutes to compile.
+
+What cannot be done
+: Anything that needs the current wind, the team's line of sight or a list of
+  enemy units; any limit on the commands BARb's library sends; placement
+  beyond "near this position" and "this metal spot".
+
+*Covers part of the first need only. It costs nothing new to build or keep.*
+
+### B. A bridge to a widget and another process
+
+Measured with a stand-in for a model. One line added to `Main::AiUpdate`,
+which BARb runs every 30 frames, sends the frame and the team's metal and
+energy income with `ai.CallUI`. A user widget answers: it reads the wind,
+writes the request to a file, and returns the reply that a Python process
+wrote to another file after the previous call. The Python process polls every
+0.5 ms. The widget, the script line and the process are not in the repo.
+
+Calls
+: 301 in 5 minutes, one per update, all answered by the widget in the same
+  frame.
+
+The outside process
+: Answered 300 of 300 requests before the next call. The game ran at about 15
+  times real time, so it had about 67 ms; in a real game it has a second.
+
+Cost in the game
+: The widget spent 0.19 ms per call on average, 2 ms at most, on reading and
+  writing the files.
+
+Files
+: User widgets may read only under `LuaUI/` and write only under
+  `LuaUI/Config/` and `LuaUI/Widgets/`. Our first try wrote to the write
+  folder's root: the sandbox refused, the widget was removed at frame 0, and
+  the AI got empty answers for the rest of the game without any script error.
+
+What it sees
+: The current wind, which scripts cannot read (0 at frame 0, 1.5 to 19 later).
+  Otherwise what the hosting player sees: in our runs the host spectates, and
+  `Spring.GetSpectatingState` gave a full view of the map. In a lobby game the
+  widget runs on the computer of the player who added the AI, with that
+  player's view, which is not the AI team's.
+
+Hangs
+: None in the two runs with a widget. One early run hung (see option 2).
+
+Read in the game: `ai.CallRules` reaches only LuaRules gadgets, which live in
+the game archive. User widgets are off when the host sets `allowuserwidgets`
+to false or turns on anonymous mode. A player would install the AI folder, the
+widget and the model's process, and start the process before the game.
+
+*Covers the wind, but not the team's view, not the action budget and not
+placement beyond what scripts already pass to BARb. Cheap to build; every
+install has three parts, and the game can take the widget away.*
+
+### C. Our own build of BARb's library
+
+Measured. BAR's engine repository
+([RecoilEngine](https://github.com/beyond-all-reason/RecoilEngine)) at tag
+`2026.09.03` pins BARb as a git submodule: CircuitAI
+([rlcevg/CircuitAI](https://github.com/rlcevg/CircuitAI)), commit `f4a6ca3` on
+branch `barbarian`, two commits behind its head. The AI is built inside the
+engine's CMake tree, which generates the C++ wrapper around the AI interface.
+[`ai/native/build.sh`](../../ai/native/build.sh) does every step.
+
+Toolchain
+: This machine had no compiler and no root. GCC 13 (the version in BAR's own
+  build image), CMake and Ninja came from conda-forge through `micromamba` in
+  11 s. Configuring the engine tree needs DevIL and SDL2 even for the AI
+  alone; BAR's prebuilt `spring-static-libs` and conda's SDL2 headers satisfy
+  it, with the engine's own targets switched off.
+
+Pinned downloads
+: The script builds on Linux x86-64 only and stops elsewhere. Everything it
+  downloads is checked before it runs: `micromamba` against a SHA-256 in the
+  script, the 98 toolchain packages against the SHA-256 of each in
+  [`ai/native/toolchain.lock`](../../ai/native/toolchain.lock), the engine and
+  `spring-static-libs` against their commits. The engine commit fixes the
+  commit of every submodule, BARb included. Another engine tag needs its
+  commit as an argument. To change the toolchain, create the environment from
+  package names and write the lock again with
+  `micromamba list --explicit --sha256`.
+
+Build time
+: 4 min 56 s of wall time on 4 cores (18 min of CPU) for the first build; 6
+  min 50 s (23 min of CPU) for a clean rerun of the script with the governor.
+  Peak memory 1 GB. A change to our own files rebuilds in seconds.
+
+Result
+: 8.3 MB after stripping (stock: 8.5 MB), with `libstdc++` linked in like
+  stock. conda's default sysroot made it need glibc 2.38, where the engine
+  needs 2.27; the script pins the glibc 2.17 sysroot.
+
+Loads next to stock BARb
+: Yes. Copied over the library of a `reason8 bot build` folder, it logged
+  `Skirmish AI <Reason8-0.1>: 1.6.29`, the stock library's version, and played
+  its opening: 27 of 30 commander steps and 13 factory units in 5 minutes, no
+  script errors.
+
+Another engine
+: The same library, in a `Reason8` folder built from engine
+  `recoil_2026.07.04`, loaded in that engine and played. The AI interface did
+  not change in between.
+
+Windows
+: Not tried. BAR builds its Windows engine on Linux with MinGW, in a public
+  image (`ghcr.io/beyond-all-reason/recoil-build-amd64-windows`) next to the
+  Linux one; a CI job could use both.
+
+#### A command governor
+
+Every command the library sends goes through one function. The engine hands
+the AI a table of callbacks (`SSkirmishAICallback`) in `init` in
+`src/AIExport.cpp`. BARb gives unit orders through `CCircuitUnit::Cmd*` (245
+call sites) and a few direct calls to the C++ wrapper; all of them end in the
+table's `Engine_handleCommand`, and only debug drawing calls the table itself.
+The governor ([`ai/native`](../../ai/native)) copies the table, replaces that
+one pointer, and counts each unit command the way
+`reason8.analysis.apm.ActionCounter` counts a player's: at most one action a
+frame, and a command counts only if its unit got no command in the 7 frames
+before. In `cap` mode it drops a command that would go over any window of the
+30-40 band's budget. A spike setting (`REASON8_GOVERNOR=count` or `cap`)
+switches it on; it is off otherwise. It is three added lines in BARb's code
+and two new files of about 200 lines.
+
+The governor's counts and the replay's, for the Reason8 team. Two seeds, each
+played counting and capped; the opening script drew a different opening (of
+the position's five) in each game.
+
+| Game           | Opening |  Sent | Actions | Dropped | Replay: commands | Replay: actions | Most in 1 s | 10 s | 60 s |
+| -------------- | ------: | ----: | ------: | ------: | ---------------: | --------------: | ----------: | ---: | ---: |
+| seed 1, count  |       2 | 1,565 |     969 |       0 |            1,562 |             946 |          11 |   74 |  345 |
+| seed 1, cap    |       3 |   445 |     250 |     377 |              445 |             244 |           8 |   41 |   91 |
+| seed 11, count |       2 | 1,410 |     797 |       0 |            1,399 |             776 |          10 |   53 |  262 |
+| seed 11, cap   |       4 |   526 |     250 |     387 |              526 |             247 |           7 |   39 |   91 |
+
+"Sent" is what reached the engine; the last three columns are from the replay
+(the budget allows 11, 50 and 90).
+
+- **The counts agree with the replay.** Every command the capped governor let
+  through is in the replay, and its action count is within 3% of the replay's.
+  The replay saw 91 actions in one 60-second window against a cap of 90.
+- **The cap holds and costs half of BARb's commands.** Each capped game used
+  its whole 5-minute budget of 250 actions, and 45% of the commands BARb sent
+  were dropped, all from minute 3 on and most in minutes 4 and 5. Uncapped,
+  the Reason8 team took up to 345 actions in a minute.
+- **Stock BARb on the other side** took 541 actions in the first counted game:
+  by this count it is over a strong player's budget on its own.
+- **Effect on play: not known.** No game had script errors. The capped games
+  drew late-factory openings (3 and 4) and the counting ones the factory-first
+  opening 2, so the openings, not the cap, explain most of the difference in
+  what was built. In the seed 1 capped game, the factory was lost at 4:38.
+
+Read in the source: a dropped command returns success, because CircuitAI
+treats an error as a broken unit. BARb then believes the unit has its order; a
+unit that was idle gets no new idle event and may wait until a task times out.
+*Dropping proves the budget can be enforced underneath BARb, not that BARb
+plays well under it; the governor has to defer commands, or BARb's tasks have
+to plan within the budget.*
+
+#### What a model could use and how it would run
+
+Read from the AI interface (`rts/ExternalAI/Interface/SSkirmishAICallback.h`)
+and CircuitAI:
+
+State
+: The current wind (`Map_getCurWind`) as well as its range; the team's line of
+  sight, air sight and radar maps; enemy units in line of sight or radar, as
+  the engine allows without cheats; every unit's command queue; game, team and
+  unit rules parameters; and what CircuitAI already keeps: metal spots, the
+  threat map, terrain and pathing.
+
+Running a model
+: Tables loaded from a data file at start: the library already contains a JSON
+  reader (`jsoncpp`), so the export stays data. A runtime such as ONNX Runtime
+  is one more library per platform in the AI folder; not tried. A socket to
+  another process is possible in native code, but players would have to
+  install and start that process.
+
+What has to be rebuilt
+: The library for every engine release, from the engine's BARb commit with our
+  changes carried over, for Linux and Windows. The scripts still come from the
+  game: a game whose scripts call something our library lacks fails to compile
+  them, and the team stands still (`reason8 bot check` reports it).
+
+*Covers all three needs. The cost is a fork of CircuitAI to keep current with
+each engine release and a build for two platforms.*
+
+### Comparison
+
+A. Tables that branch on state
+: *Measured:* nothing new; the scripts' reach was read from the bindings.
+  *Needs:* state in part (resources, units, average wind); no budget; no new
+  placement. *Build:* nothing new. *Keep working:* as today, rebuilt per
+  engine and game. *Install:* one folder.
+
+B. Bridge to a widget and a process
+: *Measured:* calls, an outside answer within one update, the widget's cost,
+  the file sandbox. *Needs:* adds the current wind, with the host's view
+  instead of the team's; no budget; no new placement. *Build:* small, in Lua
+  and Python. *Keep working:* follows BAR's widget sandbox, which changed
+  since the first measurement. *Install:* folder, widget and process; the host
+  can switch widgets off.
+
+C. Own build of the library
+: *Measured:* build, load next to stock BARb, the governor counting and
+  capping, the library in an older engine. *Needs:* all three. *Build:* a
+  toolchain and 5 to 7 minutes per platform. *Keep working:* a fork rebased
+  for each engine release, two platforms. *Install:* one folder, as today.
+
+### Recommendation
+
+Build the library ourselves (C) and keep the scripts and their tables on top
+of it; the opening hooks need no change. Do not use the bridge (B) for play.
+Tables that branch on state (A) stay useful for anything the scripts can see,
+in either library.
+
+Next steps, in order:
+
+1. Make the governor defer commands over budget instead of dropping them, and
+   compare capped and uncapped games with the same opening.
+2. Let `reason8 bot build` take the library from our build instead of the
+   engine's, and build Linux and Windows libraries in CI with BAR's images.
+3. Pass the first piece of state a model needs (the current wind) from the
+   library to the scripts.
 
 ## What we learned that the next step needs
 
@@ -647,9 +915,9 @@ compared directly; compare when things are started or finished.*
    opened with four wind generators and a bot lab in one game, and with three
    solar collectors and a vehicle plant in another. BARb seeds its own random
    numbers from the clock. Evaluation needs several games per setting.
-4. **Extractors are BARb's choice.** The opening says when, BARb says where.
-   Placing other structures is also BARb's: the script gives a position near
-   the commander and BARb picks the spot.
+4. **Placement is shared.** Extractors go on the free spot nearest to where
+   the human built them. Other structures get a position from the opening and
+   BARb picks the exact site around it.
 5. **The parser's `kind` is wrong for AI factories.** An AI's factory orders
    carry a position, so `reason8.replays.replay` labels them `structure`. Tell
    factories from the builder's id, as `reason8 bot check` does.
@@ -682,8 +950,11 @@ Not tried: we have no graphical BAR install here. What we know:
 
 - A real lobby, Legion, Rosetta (only Supreme Isthmus and All That Glitters
   were played), and Reason8 next to human players.
-- A model that runs during the game. The script-to-widget call was shown once
-  and one run hung; a C++ build was not tried.
+- A model that runs during the game. The bridge and our own library were
+  measured with a stand-in, not with a model.
+- A Windows build of the library, and our library in a real lobby.
+- Whether BARb plays worse under the command cap: the capped and uncapped
+  games drew different openings.
 - Whether queueing one unit at a time really prevents the lost unit; more
   games are needed.
 - Saving and loading a game in the middle of an opening.
@@ -706,4 +977,12 @@ Not tried: we have no graphical BAR install here. What we know:
   (header). Read for ideas; no code copied
 - Engine `recoil_2026.09.03`: `AI/Skirmish/BARb/stable/`,
   `AI/Skirmish/NullAI/`
+- RecoilEngine, tag `2026.09.03`: `.gitmodules` and the BARb submodule commit,
+  `CMakeLists.txt`, `docker-build-v2/` (BAR's build images),
+  `rts/ExternalAI/Interface/` (`SSkirmishAICallback.h`, `AISCommands.h`); the
+  generated `AI/Wrappers/Cpp/src-generated/CombinedCallbackBridge.c`
+- CircuitAI, commit `f4a6ca3`: `src/AIExport.cpp`,
+  `src/circuit/CircuitAI.cpp`, `unit/CircuitUnit.h`,
+  `module/EconomyManager.cpp` (wind), `script/*.cpp`
+- BAR's `spring-static-libs`, branch `18.04`
 - Our runs: engine logs and replays of the games described above
