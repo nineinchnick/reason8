@@ -7,9 +7,16 @@ take per minute in the games of the slice, how that changes over a game and
 with skill, and how fast they act in bursts. Code: `reason8/analysis/apm.py`.
 
 ```sh
-uv run reason8 analysis apm --jobs 24    # data/parsed -> data/apm/
-uv run reason8 analysis apm --report     # every table this is drawn from
+uv run reason8 analysis apm             # data/tables -> data/apm/
+uv run reason8 analysis apm --report    # every table this is drawn from
 ```
+
+The pass reads the commands, selections and events tables of the parsed
+replays ([`replay-format.md`](../reference/replay-format.md#tables)), a day
+per process (`--jobs`, 4 by default; each holds one day of commands). On the
+two weeks of the tables sample (2,830 replays) it takes 325 s with 3
+processes, where reading the JSON documents took 383 s with 4, with the same
+tables. The numbers below were measured from the JSON documents.
 
 The limits recommended for the bot are in ADR 0008; this document holds the
 measurements.
