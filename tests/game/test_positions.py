@@ -1,4 +1,5 @@
 import math
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from reason8.game.positions import (
     FROM_MAP_LIST,
     check,
     default_boxes,
+    game_headers,
     game_shape,
     position_order,
     recommended_positions,
@@ -18,6 +20,7 @@ from reason8.game.positions import (
     start_setup,
     team_sides,
 )
+from reason8.replays import tables
 from reason8.replays.replay import Replay, load_replay
 from tests import synthetic
 
@@ -228,3 +231,30 @@ def test_check_reports_setup_and_distances():
     assert "| P1 | front | 3 | 66.7% |" in text
     assert "| P3 | front | 3 | 100.0% |" in text
     assert "no recommended positions" in check([game(options={})], NO_MAP_LIST)
+
+
+def test_game_headers_read_the_games_from_the_tables(tmp_path):
+    parsed = tmp_path / "parsed"
+    replays = {
+        "2026-11-01_00-00-00-000_a": game(),
+        "2026-11-01_01-00-00-000_b": game({0: TOP_RIGHT, 1: [(4300.0, 6000.0), BOTTOM_LEFT[1]]}),
+        "2026-11-02_00-00-00-000_c": game(options=synthetic.start_options(positions=None)),
+        "2026-11-02_01-00-00-000_d": game(map_name="Elsewhere 1.0"),
+    }
+    with_ai = game()
+    with_ai.doc["ais"] = [{"aiId": 0, "teamId": 9, "allyTeamId": 1, "shortName": "BARb"}]
+    replays["2026-11-02_02-00-00-000_e"] = with_ai
+    for name, replay in replays.items():
+        synthetic.write_parsed(parsed, name, replay)
+    out = synthetic.write_tables(parsed)
+    # parsed after the tables were written: read from its JSON
+    late = "2026-11-02_03-00-00-000_f"
+    replays[late] = game()
+    synthetic.write_parsed(parsed, late, replays[late])
+
+    headers = game_headers(tables.open_source(parsed, out), [synthetic.MAP])
+    kept = [name for name in replays if name[-1] in "abcf"]
+    assert [header.teams() for header in headers] == [replays[name].teams() for name in kept]
+    assert check(headers, MAP_LIST) == check([replays[name] for name in kept], MAP_LIST)
+    source = tables.open_source(parsed, out, since=date(2026, 11, 2))
+    assert len(game_headers(source, [synthetic.MAP])) == 2
