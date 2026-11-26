@@ -36,7 +36,6 @@ import base64
 import binascii
 import gzip
 import json
-import os
 import re
 import struct
 import sys
@@ -50,6 +49,7 @@ from typing import Any
 import polars as pl
 
 from reason8.paths import data_dir, find_files
+from reason8.replays.parse import default_jobs
 from reason8.replays.sdfz import DemoError, iter_packets, parse_header, script_value
 
 PACKET_LUAMSG = 50
@@ -293,10 +293,6 @@ def player_widgets(reports: pl.DataFrame) -> pl.DataFrame:
             .alias("automation_widgets")
         )
     )
-
-
-def default_jobs() -> int:
-    return max(1, (os.cpu_count() or 1) * 3 // 4)
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
