@@ -328,6 +328,22 @@ Placement
   `openings.json`). The first try builds there, BARb choosing the exact site
   around it; when that fails, the next tries build next to the builder.
 
+Reaction delays
+: Every factory and builder of the AI, the opening's and BARb's, waits before
+  its next task as long as a player of the 30-40 band takes to notice it
+  ([ADR 0008](../decisions/0008-play-under-human-like-limits.md),
+  [`reactions.md`](../research/reactions.md)). The hooks in `builder.as` and
+  `factory.as` ask `opening.as` first: when a unit's batch of tasks is used
+  up, it draws a delay for its kind (factory, builder, construction turret)
+  and phase of the game from the table `reason8 bot export` writes, 60 s for a
+  draw of "no answer", and gives the unit a wait task. A batch is how many
+  tasks one look gives a unit, drawn around what players start between two
+  idle events: about six units for a factory, one or two structures for a
+  builder. Only a finished task uses up the batch, so a unit taking back a
+  task it dropped, or the opening's own short waits, add no delay.
+  `reason8 bot build --limits-only` builds the same AI without openings as
+  `BARbLimited`, stock BARb under the same limits.
+
 Hidden timers
 : BARb's configs hold some units back (`since` in `behaviour.json`): the radar
   until 120 s, the light laser tower until 70 s. The script sets the unit's

@@ -365,6 +365,36 @@ By position:
   (91.7%): the difference is in what is built and in what order, not in how
   factory units and structures alternate.
 
+## Under human-like limits
+
+With reaction delays (ADR 0008, [`reactions.md`](../research/reactions.md))
+every idle factory and builder waits as long as a player takes to notice it.
+Against stock BARb, which reacts in the same frame, that measures the limits
+more than the decisions: so ADR 0003 compares the bot with `BARbLimited`, BARb
+under the same limits (`reason8 bot build --limits-only`,
+`reason8 eval games --opponent BARbLimited`). 30 seeds each, at 4:00:
+
+| Reason8 against             | built metal         | metal income        | units                | classifier on builds |
+| --------------------------- | ------------------- | ------------------- | -------------------- | -------------------- |
+| stock BARb, no delays       | 96.6% (96.0%–97.3%) | 94.7% (91.8%–98.0%) | 94.7% (93.0%–96.3%)  | 91.5% (89.4%–93.4%)  |
+| stock BARb, one task a look | 72.4% (71.6%–73.2%) | 64.8% (63.1%–66.4%) | 41.5% (40.5%–42.5%)  | 91.9% (89.9%–93.7%)  |
+| stock BARb, batches         | 84.1% (83.1%–85.1%) | 75.8% (73.4%–78.1%) | 64.9% (62.9%–66.9%)  | 89.3% (87.0%–91.3%)  |
+| BARbLimited, batches        | 97.2% (96.2%–98.2%) | 96.5% (93.4%–99.7%) | 97.4% (94.1%–100.7%) | 90.1% (88.0%–92.1%)  |
+
+- **One task per look cripples a BARb AI.** BARb gives a factory one unit at a
+  time, so with a delay after every task its factories stood idle: 41% of
+  BARb's finished units. Players queue: between two idle events a human
+  factory starts about six units and a builder one or two. Letting one look
+  give a unit a batch of that size recovers most of it.
+- **Against BARb under the same limits, the economy is close but short.**
+  Reason8 has built 97.2% of BARbLimited's metal value at 4:00, the interval
+  below 100%: the measure is narrowly missed. The limits cost BARb itself
+  about 12% (4,280 against 4,876 at 4:00).
+- **Waiting does not change what gets built, much.** The classifier tells the
+  bot's builds from human ones 89–92% of the time with delays, against 92%
+  without, the intervals overlapping: what is built, and in what order, gives
+  the bot away, not when.
+
 ## What the games cost
 
 Measured on the A/A run: 32 hardware threads, 56 GB of RAM for WSL, 7 games at
