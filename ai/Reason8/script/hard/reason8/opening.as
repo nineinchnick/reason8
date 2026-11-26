@@ -143,6 +143,128 @@ uint factoryStep = 0;
 int factoryTries = 0;
 IUnitTask@ factoryTask = null;  // the task of the current factory unit
 
+// --- reaction delays (docs/decisions/0008): an idle factory or builder waits as long as a
+// player of the bot's band takes to notice it and give it orders
+
+const int NO_ANSWER_SECONDS = 60;  // a draw of "no answer": orders after a minute
+
+class SReaction {  // one kind of unit in one phase of the game
+	string kind;
+	int untilFrame;
+	float answered;
+	array<float> quantiles;  // seconds
+}
+
+array<SReaction@> reactionRows;
+bool areReactionsRead = false;
+array<int> busyUnits;  // units whose task finished: their next idle draws a delay
+array<int> givenUnits;  // the real task each unit was last given
+array<IUnitTask@> givenTasks;
+array<int> waitingUnits;  // units waiting out a delay, and when it ends
+array<int> releaseFrames;
+bool madeWait = false;  // the opening just made a wait task of its own
+
+void ReadReactions()
+{
+	areReactionsRead = true;
+	for (uint i = 0; i < REACTIONS.length(); ++i) {
+		array<string> fields = Split(REACTIONS[i], " ");
+		if (fields.length() < 3)
+			continue;
+		SReaction row;
+		row.kind = fields[0];
+		row.untilFrame = int(parseInt(fields[1])) * SECOND;
+		row.answered = float(parseFloat(fields[2]));
+		for (uint j = 3; j < fields.length(); ++j)
+			row.quantiles.insertLast(float(parseFloat(fields[j])));
+		reactionRows.insertLast(row);
+	}
+}
+
+// A reaction delay in frames for a unit of `kind`, drawn for the current phase; 0: none.
+int DrawReaction(const string& in kind)
+{
+	if (!areReactionsRead)
+		ReadReactions();
+	SReaction@ row = null;
+	for (uint i = 0; i < reactionRows.length(); ++i) {
+		if (reactionRows[i].kind != kind)
+			continue;
+		@row = reactionRows[i];
+		if (ai.frame < reactionRows[i].untilFrame)
+			break;
+	}
+	if (row is null || row.quantiles.length() == 0)
+		return 0;
+	if (AiRandom(0, 9999) >= int(row.answered * 10000.f))
+		return NO_ANSWER_SECONDS * SECOND;
+	const float seconds = row.quantiles[AiRandom(0, int(row.quantiles.length()) - 1)];
+	return int(seconds * SECOND);
+}
+
+string ReactionKind(CCircuitUnit@ unit, bool isFactory)
+{
+	if (isFactory)
+		return "factory";
+	return unit.circuitDef.GetName().findFirst("nanotc") >= 0 ? "turret" : "builder";
+}
+
+/*
+ * Called first for every idle factory or builder. After a real task, the unit waits a
+ * drawn delay before its next one: returns the frames to wait, or 0 to go on.
+ */
+int ReactionWait(CCircuitUnit@ unit, bool isFactory)
+{
+	const int waiting = waitingUnits.find(unit.id);
+	if (waiting >= 0) {
+		if (ai.frame < releaseFrames[waiting])
+			return releaseFrames[waiting] - ai.frame;
+		waitingUnits.removeAt(waiting);
+		releaseFrames.removeAt(waiting);
+		return 0;
+	}
+	const int busy = busyUnits.find(unit.id);
+	if (busy < 0)
+		return 0;
+	busyUnits.removeAt(busy);
+	const int frames = DrawReaction(ReactionKind(unit, isFactory));
+	if (frames <= 0)
+		return 0;
+	waitingUnits.insertLast(unit.id);
+	releaseFrames.insertLast(ai.frame + frames);
+	Log("unit " + unit.id + " idle, answering in " + (frames / SECOND) + " s");
+	return frames;
+}
+
+// Called with the task an idle unit got, to know whose task it is when it finishes.
+void TaskGiven(CCircuitUnit@ unit, IUnitTask@ task)
+{
+	if (task !is null && !madeWait) {
+		const int index = givenUnits.find(unit.id);
+		if (index >= 0) {
+			@givenTasks[index] = task;
+		} else {
+			givenUnits.insertLast(unit.id);
+			givenTasks.insertLast(task);
+		}
+	}
+	madeWait = false;
+}
+
+// Called when a task ends: when it was finished, its unit's next idle draws a delay.
+void TaskEnded(IUnitTask@ task, bool done)
+{
+	for (uint i = 0; i < givenTasks.length(); ++i) {
+		if (givenTasks[i] !is task)
+			continue;
+		if (done && busyUnits.find(givenUnits[i]) < 0)
+			busyUnits.insertLast(givenUnits[i]);
+		givenUnits.removeAt(i);
+		givenTasks.removeAt(i);
+		return;
+	}
+}
+
 void Log(const string& in message)
 {
 	AiLog("Reason8 opening: team " + ai.teamId + ": " + message);
@@ -277,8 +399,10 @@ IUnitTask@ MakeCommanderTask(CCircuitUnit@ unit)
 		return null;
 	if (commanderTask !is null)
 		return commanderTask;  // the commander dropped the current step and is idle again
-	if (ai.frame < retryFrame)
+	if (ai.frame < retryFrame) {
+		madeWait = true;
 		return aiBuilderMgr.Enqueue(TaskB::Wait(retryFrame - ai.frame));
+	}
 
 	while (commanderStep < plan.commander.length()) {
 		const string unitName = plan.commander[commanderStep].unit;
@@ -321,6 +445,7 @@ IUnitTask@ MakeCommanderTask(CCircuitUnit@ unit)
 			}
 			++tries;
 			Log("step " + (commanderStep + 1) + " " + unitName + ": BARb offered another task, try " + tries);
+			madeWait = true;
 			return aiBuilderMgr.Enqueue(TaskB::Wait(SECOND));
 		}
 

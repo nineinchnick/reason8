@@ -13,12 +13,17 @@ CCircuitUnit@ energizer2 = null;
 
 IUnitTask@ AiMakeTask(CCircuitUnit@ unit)
 {
-	// Reason8: the commander plays the opening first
-	IUnitTask@ openingTask = Reason8::MakeCommanderTask(unit);
-	if (openingTask !is null)
-		return openingTask;
+	// Reason8: an idle builder waits as long as a player takes to notice it
+	const int reactionFrames = Reason8::ReactionWait(unit, false);
+	if (reactionFrames > 0)
+		return aiBuilderMgr.Enqueue(TaskB::Wait(reactionFrames));
 
-	return aiBuilderMgr.DefaultMakeTask(unit);
+	// Reason8: the commander plays the opening first
+	IUnitTask@ task = Reason8::MakeCommanderTask(unit);
+	if (task is null)
+		@task = aiBuilderMgr.DefaultMakeTask(unit);
+	Reason8::TaskGiven(unit, task);  // Reason8:
+	return task;
 }
 
 void AiTaskAdded(IUnitTask@ task)
@@ -28,6 +33,7 @@ void AiTaskAdded(IUnitTask@ task)
 void AiTaskRemoved(IUnitTask@ task, bool done)
 {
 	Reason8::CommanderTaskRemoved(task, done);  // Reason8:
+	Reason8::TaskEnded(task, done);  // Reason8:
 }
 
 void AiUnitAdded(CCircuitUnit@ unit, Unit::UseAs usage)

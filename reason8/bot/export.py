@@ -58,6 +58,11 @@ MAX_CANDIDATES = 2000
 # Openings per map, position and faction. Humans at one position rarely play the same
 # opening twice; one opening per position made the bot easy to tell from them.
 VARIANTS = 5
+# The bot's reaction delays (ADR 0008): the 30-40 skill band, quantiles of the measured
+# delays, and the least events of the band a phase needs before every band's are used.
+SKILL_LOW, SKILL_HIGH = 30.0, 40.0
+REACTION_QUANTILES = 19
+MIN_REACTIONS = 200
 # The commander builds at most this many structures of the opening, its first factory
 # among them: when the factory comes later, it follows the first ones. Humans share long
 # openings with their first constructors (a tech position drags lines of 100 wind
@@ -334,6 +339,45 @@ def export(
     }
 
 
+def reaction_table(idle: pl.DataFrame, low: float = SKILL_LOW, high: float = SKILL_HIGH) -> dict:
+    """The bot's reaction delays (ADR 0008): per kind of unit and phase of the game, the share
+    of idle events players of the skill band answered with a click within the horizon, and
+    `REACTION_QUANTILES` quantiles of those delays in seconds (`reason8 analysis reactions`).
+    A phase with fewer than `MIN_REACTIONS` events of the band takes every band's."""
+    from reason8.analysis.reactions import KINDS, PHASES
+
+    idle = idle.with_columns(
+        delay=(pl.col("clicked_frame") - pl.col("frame")) / 30, seconds=pl.col("frame") / 30
+    )
+    shares = [index / (REACTION_QUANTILES + 1) for index in range(1, REACTION_QUANTILES + 1)]
+    table: dict[str, list[dict]] = {}
+    for kind in KINDS:
+        rows = []
+        for _, first, end in PHASES:
+            part = idle.filter(
+                pl.col("kind") == kind, pl.col("seconds") >= first, pl.col("seconds") < end
+            )
+            band = part.filter(pl.col("skill") >= low, pl.col("skill") < high)
+            if band.height >= MIN_REACTIONS:
+                part = band
+            answered = part.filter(pl.col("delay").is_not_null())["delay"]
+            rows.append(
+                {
+                    "until_seconds": end,
+                    "events": part.height,
+                    "answered": round(answered.len() / part.height, 3) if part.height else 0.0,
+                    "quantiles": [
+                        round(float(answered.quantile(share, interpolation="linear")), 1)
+                        for share in shares
+                    ]
+                    if answered.len()
+                    else [],
+                }
+            )
+        table[kind] = rows
+    return table
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--data-dir", required=True, help="content dir with the game (reason8 headless setup)"
@@ -342,6 +386,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model", type=Path, default=None, help="default: models/ngram_v2.json")
     parser.add_argument("--dataset", type=Path, default=None, help="default: openings_v2")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument(
+        "--reactions",
+        type=Path,
+        help="idle events (reason8 analysis reactions); default: <data dir>/reactions/idle.parquet",
+    )
 
 
 def run(args: argparse.Namespace) -> int:
@@ -352,6 +401,10 @@ def run(args: argparse.Namespace) -> int:
     candidates, start_points = load_candidates(dataset)
     unit_defs = game_unit_defs(Path(args.data_dir).resolve(), args.game)
     document = export(model, candidates, start_points, unit_defs)
+    reactions = args.reactions or data_dir() / "reactions" / "idle.parquet"
+    if reactions.is_file():
+        document["reactions"] = reaction_table(pl.read_parquet(reactions))
+        document["reactions_band"] = [SKILL_LOW, SKILL_HIGH]
     args.out.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
     print(f"{len(document['openings'])} openings -> {args.out}")
     return 0
