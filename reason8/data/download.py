@@ -214,10 +214,6 @@ class FetchResult:
     error: str | None = None
 
 
-class SlowDown(Exception):
-    """The server asked for fewer requests (HTTP 429 or 503)."""
-
-
 def fetch(client: httpx.Client, url: str, path: Path) -> FetchResult:
     """Download ``url`` into ``path`` via a ``.part`` file that is renamed when complete."""
     temporary_path = path.with_name(path.name + ".part")
