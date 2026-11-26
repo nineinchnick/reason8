@@ -69,7 +69,7 @@ IUnitTask@ AiMakeTask(CCircuitUnit@ unit)
 	IUnitTask@ task = Reason8::MakeFactoryTask(unit);
 	if (task is null)
 		@task = aiFactoryMgr.DefaultMakeTask(unit);
-	Reason8::TaskGiven(unit, task);  // Reason8:
+	Reason8::TaskGiven(unit, task, true);  // Reason8:
 	return task;
 }
 

@@ -22,7 +22,7 @@ IUnitTask@ AiMakeTask(CCircuitUnit@ unit)
 	IUnitTask@ task = Reason8::MakeCommanderTask(unit);
 	if (task is null)
 		@task = aiBuilderMgr.DefaultMakeTask(unit);
-	Reason8::TaskGiven(unit, task);  // Reason8:
+	Reason8::TaskGiven(unit, task, false);  // Reason8:
 	return task;
 }
 

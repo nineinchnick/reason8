@@ -158,8 +158,13 @@ class SReaction {  // one kind of unit in one phase of the game
 array<SReaction@> reactionRows;
 bool areReactionsRead = false;
 array<int> busyUnits;  // units whose task finished: their next idle draws a delay
-array<int> givenUnits;  // the real task each unit was last given
+array<int> givenUnits;  // the real task each unit was last given, and the unit's kind
 array<IUnitTask@> givenTasks;
+array<string> givenKinds;
+array<int> batchUnits;  // units in a batch, and how many tasks the batch has left
+array<int> batchLeft;
+array<string> batchKinds;  // mean units started per look, by kind (BATCHES)
+array<float> batchMeans;
 array<int> waitingUnits;  // units waiting out a delay, and when it ends
 array<int> releaseFrames;
 bool madeWait = false;  // the opening just made a wait task of its own
@@ -167,6 +172,13 @@ bool madeWait = false;  // the opening just made a wait task of its own
 void ReadReactions()
 {
 	areReactionsRead = true;
+	for (uint i = 0; i < BATCHES.length(); ++i) {
+		array<string> fields = Split(BATCHES[i], " ");
+		if (fields.length() == 2) {
+			batchKinds.insertLast(fields[0]);
+			batchMeans.insertLast(float(parseFloat(fields[1])));
+		}
+	}
 	for (uint i = 0; i < REACTIONS.length(); ++i) {
 		array<string> fields = Split(REACTIONS[i], " ");
 		if (fields.length() < 3)
@@ -237,7 +249,7 @@ int ReactionWait(CCircuitUnit@ unit, bool isFactory)
 }
 
 // Called with the task an idle unit got, to know whose task it is when it finishes.
-void TaskGiven(CCircuitUnit@ unit, IUnitTask@ task)
+void TaskGiven(CCircuitUnit@ unit, IUnitTask@ task, bool isFactory)
 {
 	if (task !is null && !madeWait) {
 		const int index = givenUnits.find(unit.id);
@@ -246,21 +258,54 @@ void TaskGiven(CCircuitUnit@ unit, IUnitTask@ task)
 		} else {
 			givenUnits.insertLast(unit.id);
 			givenTasks.insertLast(task);
+			givenKinds.insertLast(ReactionKind(unit, isFactory));
 		}
 	}
 	madeWait = false;
 }
 
-// Called when a task ends: when it was finished, its unit's next idle draws a delay.
+/*
+ * How many tasks one look gives a unit of `kind`: a player queues several units in a
+ * factory and a drag of buildings for a builder. Drawn evenly from 1 to twice the measured
+ * mean less one, so its mean is the players'.
+ */
+int DrawBatch(const string& in kind)
+{
+	if (!areReactionsRead)
+		ReadReactions();
+	const int index = batchKinds.find(kind);
+	if (index < 0)
+		return 1;
+	const int mean = int(batchMeans[index] + 0.5f);
+	return mean <= 1 ? 1 : AiRandom(1, 2 * mean - 1);
+}
+
+// Called when a task ends. A finished task uses up one of its unit's batch; when the batch
+// is used up, the unit's next idle draws a delay.
 void TaskEnded(IUnitTask@ task, bool done)
 {
 	for (uint i = 0; i < givenTasks.length(); ++i) {
 		if (givenTasks[i] !is task)
 			continue;
-		if (done && busyUnits.find(givenUnits[i]) < 0)
-			busyUnits.insertLast(givenUnits[i]);
+		const int unitId = givenUnits[i];
+		const string kind = givenKinds[i];
 		givenUnits.removeAt(i);
 		givenTasks.removeAt(i);
+		givenKinds.removeAt(i);
+		if (!done)
+			return;
+		int batch = batchUnits.find(unitId);
+		if (batch < 0) {
+			batchUnits.insertLast(unitId);
+			batchLeft.insertLast(DrawBatch(kind));
+			batch = int(batchUnits.length()) - 1;
+		}
+		if (--batchLeft[batch] > 0)
+			return;
+		batchUnits.removeAt(batch);
+		batchLeft.removeAt(batch);
+		if (busyUnits.find(unitId) < 0)
+			busyUnits.insertLast(unitId);
 		return;
 	}
 }

@@ -70,6 +70,7 @@ IDLE_SCHEMA = {
     "kind": pl.String,  # factory, turret (a static builder) or builder (a mobile one)
     "frame": pl.Int32,
     "skill": pl.Float64,
+    "started": pl.Int32,  # units it started since its previous idle event
     "clicked_frame": pl.Int32,
     "any_frame": pl.Int32,
 }
@@ -127,12 +128,21 @@ def reactions(
 
 
 def idle_records(state_path: Path) -> tuple[dict[str, str], list[dict]]:
-    """Unit def id -> name, and the idle events of a state file; none if its format has none."""
+    """Unit def id -> name, and the idle events of a state file, each with ``started``: how
+    many units the idle unit started (a factory's units, a builder's structures) since its
+    previous idle event. None if the file's format has no idle events."""
     records = read_records(state_path)
     header = next(records, None)
     if not header or header.get("t") != "header" or header.get("v", 1) < IDLE_FORMAT:
         return {}, []
-    return header["unitdefs"], [record for record in records if record["t"] == "idle"]
+    idle = []
+    started: dict[int, int] = {}
+    for record in records:
+        if record["t"] == "created" and "by" in record:
+            started[record["by"]] = started.get(record["by"], 0) + 1
+        elif record["t"] == "idle":
+            idle.append({**record, "started": started.pop(record["u"], 0)})
+    return header["unitdefs"], idle
 
 
 def game_reactions(
@@ -167,6 +177,7 @@ def game_reactions(
                 "kind": None,
                 "frame": event["f"],
                 "skill": skill_of.get(event["team"]),
+                "started": event["started"],
                 "clicked_frame": clicked,
                 "any_frame": any_kind,
             }
