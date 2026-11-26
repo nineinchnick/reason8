@@ -45,3 +45,9 @@ def test_parse_flags():
     )
     assert args.inputs == [Path("a.sdfz"), Path("replays")]
     assert (args.jobs, args.zstd_level, args.out) == (4, 3, Path("parsed"))
+
+
+def test_the_two_tables_commands_run_their_own_module():
+    parser = cli.make_parser()
+    assert parser.parse_args(["tables"]).run.__module__ == "reason8.replays.tables"
+    assert parser.parse_args(["headless", "tables"]).run.__module__ == "reason8.headless.tables"

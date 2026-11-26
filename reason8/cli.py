@@ -13,11 +13,13 @@ from reason8.evaluation import games as evaluation_games
 from reason8.evaluation import openings as evaluation_openings
 from reason8.evaluation import report as evaluation_report
 from reason8.game import maps, positions
-from reason8.headless import batch, run, setup, state, tables
+from reason8.headless import batch, run, setup, state
+from reason8.headless import tables as state_tables
 from reason8.models import evaluate
 from reason8.openings import contact, dataset
 from reason8.paths import LayoutError
-from reason8.replays import fixture, parse, sdfz, tables, widgets
+from reason8.replays import fixture, parse, sdfz, widgets
+from reason8.replays import tables as replay_tables
 
 # (name, module, summary): each module has `run(args)` and, when it takes arguments,
 # `add_arguments(parser)`. A group is (name, summary, [commands]).
@@ -31,7 +33,7 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
         [("migrate-layout", migrate, "move flat data files into the date partitions")],
     ),
     ("parse", parse, "parse replays into compact JSON"),
-    ("tables", tables, "build the Parquet tables of the parsed replays"),
+    ("tables", replay_tables, "build the Parquet tables of the parsed replays"),
     ("header", sdfz, "print which engine, game and map a replay needs"),
     ("widgets", widgets, "read the user widgets of each player from the replays"),
     ("make-fixture", fixture, "make the anonymised test fixture from a parsed replay"),
@@ -51,7 +53,7 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
             ("run", run, "run a start script or play back a replay"),
             ("batch", batch, "play many replays and keep their state"),
             ("state", state, "summarise a state file"),
-            ("tables", tables, "convert state files to Parquet tables"),
+            ("tables", state_tables, "convert state files to Parquet tables"),
         ],
     ),
     ("contact", contact, "measure first contact in re-simulated replays"),
