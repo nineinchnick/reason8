@@ -378,6 +378,21 @@ def reaction_table(idle: pl.DataFrame, low: float = SKILL_LOW, high: float = SKI
     return table
 
 
+def batch_sizes(idle: pl.DataFrame, low: float = SKILL_LOW, high: float = SKILL_HIGH) -> dict:
+    """Per kind of unit, how many units a player's idle unit started between two idle
+    events, on average: how much one look at it keeps it busy (ADR 0008, queue ahead)."""
+    from reason8.analysis.reactions import KINDS
+
+    sizes = {}
+    for kind in KINDS:
+        part = idle.filter(pl.col("kind") == kind)
+        band = part.filter(pl.col("skill") >= low, pl.col("skill") < high)
+        part = band if band.height >= MIN_REACTIONS else part
+        mean = part["started"].mean() if part.height else None
+        sizes[kind] = round(max(float(mean), 1.0), 2) if mean is not None else 1.0
+    return sizes
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--data-dir", required=True, help="content dir with the game (reason8 headless setup)"
@@ -403,7 +418,9 @@ def run(args: argparse.Namespace) -> int:
     document = export(model, candidates, start_points, unit_defs)
     reactions = args.reactions or data_dir() / "reactions" / "idle.parquet"
     if reactions.is_file():
-        document["reactions"] = reaction_table(pl.read_parquet(reactions))
+        idle = pl.read_parquet(reactions)
+        document["reactions"] = reaction_table(idle)
+        document["batches"] = batch_sizes(idle)
         document["reactions_band"] = [SKILL_LOW, SKILL_HIGH]
     args.out.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
     print(f"{len(document['openings'])} openings -> {args.out}")

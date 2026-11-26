@@ -98310,6 +98310,11 @@
       }
     ]
   },
+  "batches": {
+    "factory": 5.8,
+    "builder": 1.5,
+    "turret": 1.0
+  },
   "reactions_band": [
     30.0,
     40.0

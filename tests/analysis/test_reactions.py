@@ -56,11 +56,17 @@ def write_state(path, records):
 
 def test_idle_records_need_format_4(tmp_path):
     idle = {"t": "idle", "f": 95, "u": 5, "d": 12, "team": 0}
+    created = {"t": "created", "f": 40, "u": 9, "d": 13, "team": 0, "by": 5}
     current = write_state(
-        tmp_path / "current.jsonl", [{"t": "header", "v": 4, "unitdefs": {"12": "armlab"}}, idle]
+        tmp_path / "current.jsonl",
+        [{"t": "header", "v": 4, "unitdefs": {"12": "armlab"}}, created, created, idle, idle],
     )
     old = write_state(tmp_path / "old.jsonl", [{"t": "header", "v": 3, "unitdefs": {}}, idle])
-    assert idle_records(current) == ({"12": "armlab"}, [idle])
+    # the units the idle unit started since its previous idle event
+    assert idle_records(current) == (
+        {"12": "armlab"},
+        [{**idle, "started": 2}, {**idle, "started": 0}],
+    )
     assert idle_records(old) == ({}, [])
 
 
