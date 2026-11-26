@@ -1,11 +1,10 @@
-import json
-from compression import zstd
-
 import polars as pl
 
 from reason8.analysis.apm import (
     FRAMES_PER_MINUTE,
     INCLUDED,
+    PLAYER_SCHEMA,
+    UNREADABLE,
     WITH_BOTS,
     ActionCounter,
     end_frames,
@@ -17,6 +16,7 @@ from reason8.analysis.apm import (
     report,
 )
 from reason8.replays.replay import FORMAT, Replay
+from tests import synthetic
 
 MINUTE = FRAMES_PER_MINUTE
 
@@ -147,17 +147,29 @@ def test_game_apm_rows():
 
 
 def test_measure_and_report(tmp_path):
-    parsed = tmp_path / "parsed" / "date=2026-11-01"
-    parsed.mkdir(parents=True)
+    parsed = tmp_path / "parsed"
     events = [select(0, 0, 100), select(0, 1, 200)]
     events += [click(frame, 0) for frame in range(0, 3 * MINUTE, 200)]
     events += [widget(frame, 1, 200) for frame in range(0, 3 * MINUTE, 400)]
-    document = make_replay(events).doc
-    (parsed / "2026-11-01_game.json.zst").write_bytes(zstd.compress(json.dumps(document).encode()))
-    counts = measure(tmp_path / "parsed", tmp_path / "apm")
-    assert counts == {"replays": 1, "games": 1, "players": 2}
+    synthetic.write_parsed(parsed, "2026-11-01_game", make_replay(events))
+    synthetic.write_tables(parsed)
+    # parsed after the tables were written, and a replay that cannot be read
+    later = make_replay(events[:1] + [widget(frame, 0, 100) for frame in range(0, MINUTE, 3)])
+    synthetic.write_parsed(parsed, "2026-11-02_game", later)
+    (parsed / "date=2026-11-02" / "2026-11-02_broken.json.zst").write_bytes(b"not zstd")
+    counts = measure(parsed, tmp_path / "apm", jobs=2)
+    assert counts == {"replays": 3, "games": 2, "players": 4}
+    games = pl.read_parquet(tmp_path / "apm" / "games.parquet")
+    assert games["replay"].to_list() == ["2026-11-01_game", "2026-11-02_broken", "2026-11-02_game"]
+    assert games["status"].to_list() == [INCLUDED, UNREADABLE, INCLUDED]
+    players = pl.read_parquet(tmp_path / "apm" / "players.parquet")
+    assert players.to_dicts() == [
+        {name: pl.Series([value], dtype=PLAYER_SCHEMA[name]).item() for name, value in row.items()}
+        for replay, name in ((make_replay(events), "2026-11-01_game"), (later, "2026-11-02_game"))
+        for row in game_apm(replay, name).players
+    ]
     minutes = pl.read_parquet(tmp_path / "apm" / "minutes.parquet")
-    assert minutes.height == 6 and minutes["clicked"].sum() == 27
+    assert minutes.height == 12 and minutes["clicked"].sum() == 27
     text = report(tmp_path / "apm")
     assert "## Actions per minute, `clicked`, by game phase" in text
-    assert "| 40 and up | 3 |" in text
+    assert "| 40 and up | 6 |" in text  # player-minutes of the two players with 45.5

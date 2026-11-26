@@ -2,11 +2,13 @@
 
 Usage::
 
-    uv run reason8 analysis apm             # parsed replays -> <data dir>/apm/
+    uv run reason8 analysis apm             # tables of the parsed replays -> <data dir>/apm/
     uv run reason8 analysis apm --since 2026-11-01 --until 2026-11-08 --out data/apm-week
     uv run reason8 analysis apm --report    # the tables of docs/research/apm.md
 
-Only the command packets of the parsed replays are used, no re-simulation. An action is
+Only the command packets of the parsed replays are used, no re-simulation. They are read
+from the commands, selections and events tables (`reason8.replays.tables`), a day per
+process, and put back in stream order (`event_stream`). An action is
 counted the way BAR's own APM gadget (``luarules/gadgets/game_apm_broadcast.lua``) counts it,
 from the commands a player's units receive:
 
@@ -49,7 +51,6 @@ from __future__ import annotations
 
 import argparse
 import math
-import os
 import sys
 from bisect import bisect_left
 from collections.abc import Iterable, Mapping, Sequence
@@ -62,8 +63,9 @@ from typing import Any
 import polars as pl
 
 from reason8 import markdown
-from reason8.paths import data_dir, find_files, require_partitioned
-from reason8.replays.replay import GAME_SPEED, Replay, load_replay, parse_skill
+from reason8.paths import data_dir, require_partitioned
+from reason8.replays import tables
+from reason8.replays.replay import GAME_SPEED, Replay, parse_skill
 
 #: BAR's APM gadget ignores a unit's commands for this many frames after its last one.
 SPAM_FRAMES = 7
@@ -141,26 +143,41 @@ class FrameCounter:
         return True
 
 
-def end_frames(replay: Replay) -> dict[int, int]:
-    """Player id -> the frame their game ended: game over, resign, team died or left for good."""
+#: The fields of an event that the counting reads, in the order of `event_rows`.
+EVENT_FIELDS = ("type", "frame", "player", "via", "ai", "units", "action", "param")
+EventRow = tuple[Any, ...]
+
+
+def event_rows(events: Iterable[Mapping[str, Any]]) -> list[EventRow]:
+    """The events of a parsed document as tuples of `EVENT_FIELDS`."""
+    return [tuple(event.get(name) for name in EVENT_FIELDS) for event in events]
+
+
+def end_frames(replay: Replay, events: Sequence[EventRow] | None = None) -> dict[int, int]:
+    """Player id -> the frame their game ended: game over, resign, team died or left for good.
+
+    `events` are the replay's events as `event_rows` gives them (by default from its
+    document), or as `day_apm` reads them from the tables.
+    """
     game_end = replay.end_frame or 0
     team_of = {player["playerId"]: player["teamId"] for player in replay.players}
     ends = dict.fromkeys(team_of, game_end)
     left: dict[int, int] = {}
     last_command: dict[int, int] = {}
     team_died: dict[int, int] = {}
-    for event in replay.events:
-        frame, player = event["frame"], event.get("player")
+    if events is None:
+        events = event_rows(replay.events)
+    for kind, frame, player, _, _, _, action, param in events:
         if frame is None or frame < 0:
             continue
-        if event["type"] == "cmd" and player is not None:
+        if kind == "cmd" and player is not None:
             last_command[player] = frame
-        elif event["type"] == "team":
-            if event.get("action") == "resign" and player in ends:
+        elif kind == "team":
+            if action == "resign" and player in ends:
                 ends[player] = min(ends[player], frame)
-            elif event.get("action") == "team_died" and event.get("param") is not None:
-                team_died.setdefault(int(event["param"]), frame)
-        elif event["type"] == "playerleft" and player in ends:
+            elif action == "team_died" and param is not None:
+                team_died.setdefault(int(param), frame)
+        elif kind == "playerleft" and player in ends:
             left[player] = frame
     for player, team in team_of.items():
         if team in team_died:
@@ -170,8 +187,13 @@ def end_frames(replay: Replay) -> dict[int, int]:
     return ends
 
 
-def player_actions(replay: Replay) -> dict[int, dict[str, list[int]]]:
-    """Player id -> kind -> the frames of that player's actions (see the module docs)."""
+def player_actions(
+    replay: Replay, events: Sequence[EventRow] | None = None
+) -> dict[int, dict[str, list[int]]]:
+    """Player id -> kind -> the frames of that player's actions (see the module docs).
+
+    `events` as for `end_frames`.
+    """
     counters = {
         player["playerId"]: {
             "clicked": ActionCounter(),
@@ -182,24 +204,24 @@ def player_actions(replay: Replay) -> dict[int, dict[str, list[int]]]:
         for player in replay.players
     }
     selections: dict[int, Sequence[int]] = {}
-    for event in replay.events:
-        player = event.get("player")
+    if events is None:
+        events = event_rows(replay.events)
+    for kind, frame, player, via, ai, event_units, _, _ in events:
         if player not in counters:
             continue
-        if event["type"] == "select":  # pregame selections count too
-            selections[player] = event.get("units") or ()
+        if kind == "select":  # pregame selections count too
+            selections[player] = event_units or ()
             continue
-        frame = event["frame"]
-        if event["type"] != "cmd" or frame is None or frame < 0:
+        if kind != "cmd" or frame is None or frame < 0:
             continue
         counter = counters[player]
-        if event["via"] == "COMMAND":
+        if via == "COMMAND":
             units = selections.get(player, ())
             counter["clicked"].command(frame, units)
             if units:
                 counter["clicked_raw"].command(frame)
-        elif event.get("ai") == WIDGET_AI:
-            units = event.get("units") or ()
+        elif ai == WIDGET_AI:
+            units = event_units or ()
             counter["widget"].command(frame, units)
         else:
             continue
@@ -253,8 +275,11 @@ def game_exclusion(replay: Replay) -> str | None:
     return None
 
 
-def game_apm(replay: Replay, replay_name: str) -> GameApm:
-    """The actions of every player of one replay, per minute and over the game."""
+def game_apm(replay: Replay, replay_name: str, events: Sequence[EventRow] | None = None) -> GameApm:
+    """The actions of every player of one replay, per minute and over the game.
+
+    `events` as for `end_frames`.
+    """
     team_sizes: dict[int, int] = {}
     for player in replay.players:
         team_sizes[player["allyTeamId"]] = team_sizes.get(player["allyTeamId"], 0) + 1
@@ -272,8 +297,10 @@ def game_apm(replay: Replay, replay_name: str) -> GameApm:
     result = GameApm(game)
     if game["status"] != INCLUDED:
         return result
-    actions = player_actions(replay)
-    ends = end_frames(replay)
+    if events is None:
+        events = event_rows(replay.events)
+    actions = player_actions(replay, events)
+    ends = end_frames(replay, events)
     winners = set(replay.winning_ally_teams)
     minute_columns: dict[str, list[Any]] = {
         name: []
@@ -331,13 +358,78 @@ def game_apm(replay: Replay, replay_name: str) -> GameApm:
     return result
 
 
-def _game_file(path: str) -> GameApm:
-    name = Path(path).name.removesuffix(".json.zst")
-    try:
-        replay = load_replay(path)
-    except (OSError, ValueError) as error:
-        return GameApm({"replay": name, "status": UNREADABLE, "error": str(error)})
-    return game_apm(replay, name)
+def event_stream(source: tables.Source, replays: Iterable[str]) -> pl.LazyFrame:
+    """The commands, selections and events of `replays`, in stream order, from the tables.
+
+    One row per event with the fields that `player_actions` and `end_frames` read: ``type``,
+    ``frame``, ``player``, ``via``, ``ai``, ``units``, ``action`` and ``param``. A command
+    comes after the selections and events whose ``commands_before`` is at most its position
+    among the replay's commands.
+    """
+    replays = list(replays)
+    order = pl.col("position").cast(pl.Int64), pl.col("kind").cast(pl.Int8)
+    commands = source.scan(tables.COMMANDS, replays).select(
+        "replay",
+        pl.int_range(pl.len()).over("replay").alias("position"),
+        pl.lit(1).alias("kind"),
+        pl.lit(0).alias("seq"),
+        pl.lit("cmd").alias("type"),
+        "frame",
+        "player",
+        pl.col("via").cast(pl.String),
+        "ai",
+        "units",
+    )
+    selections = source.scan(tables.SELECTIONS, replays).select(
+        "replay",
+        pl.col("commands_before").alias("position"),
+        pl.lit(0).alias("kind"),
+        "seq",
+        pl.lit("select").alias("type"),
+        "frame",
+        "player",
+        "units",
+    )
+    events = source.scan(tables.EVENTS, replays).select(
+        "replay",
+        pl.col("commands_before").alias("position"),
+        pl.lit(0).alias("kind"),
+        "seq",
+        pl.col("type").cast(pl.String),
+        "frame",
+        "player",
+        "action",
+        "param",
+    )
+    return (
+        pl.concat([commands, selections, events], how="diagonal_relaxed")
+        .with_columns(*order, pl.col("seq").cast(pl.Int64))
+        .sort("replay", "position", "kind", "seq", maintain_order=True)
+        .drop("position", "kind", "seq")
+    )
+
+
+def day_apm(source: tables.Source) -> dict[str, GameApm]:
+    """Replay -> its actions, for the replays of a source (one day, to keep memory low)."""
+    headers = tables.replay_headers(
+        source.scan(tables.GAMES).collect(), source.scan(tables.PLAYERS).collect()
+    )
+    results = {
+        name: game_apm(header, name)
+        for name, header in headers.items()
+        if game_exclusion(header) is not None
+    }
+    included = sorted(set(headers) - set(results))
+    stream = event_stream(source, included).collect()
+    for (name,), rows in stream.group_by("replay", maintain_order=True):
+        events = list(zip(*(rows[field].to_list() for field in EVENT_FIELDS), strict=True))
+        results[name] = game_apm(headers[name], name, events)
+    for name in included:
+        if name not in results:  # no events at all
+            results[name] = game_apm(headers[name], name, [])
+    for name, error in source.unreadable.items():
+        results[name] = GameApm({"replay": name, "status": UNREADABLE, "error": error})
+    return results
 
 
 GAME_SCHEMA = {
@@ -382,24 +474,38 @@ def measure(
     parsed_dir: Path,
     out_dir: Path,
     *,
+    tables_dir: Path | None = None,
     jobs: int = 1,
     since: date | None = None,
     until: date | None = None,
 ) -> dict[str, int]:
-    """Count the actions in every parsed replay and write the three tables to `out_dir`."""
+    """Count the actions in every parsed replay and write the three tables to `out_dir`.
+
+    The replays are read from their tables (`reason8.replays.tables.open_source`, by
+    default next to `parsed_dir`), a day per process.
+    """
     require_partitioned(parsed_dir, "*.json.zst")
-    paths = [str(path) for path in find_files(parsed_dir, "*.json.zst", since=since, until=until)]
+    source = tables.open_source(
+        parsed_dir,
+        parsed_dir.parent / tables.AREA if tables_dir is None else tables_dir,
+        since=since,
+        until=until,
+    )
+    results: dict[str, GameApm] = {}
+    days = source.by_day()
+    with ProcessPoolExecutor(max_workers=max(1, jobs)) as pool:
+        for count, found in enumerate(pool.map(day_apm, days), start=1):
+            results.update(found)
+            print(f"{count} of {len(days)} days, {len(results)} replays read", file=sys.stderr)
     games: list[dict[str, Any]] = []
     players: list[dict[str, Any]] = []
     minute_parts: list[pl.DataFrame] = []
-    with ProcessPoolExecutor(max_workers=max(1, jobs)) as pool:
-        for count, result in enumerate(pool.map(_game_file, paths, chunksize=8), start=1):
-            games.append(result.game)
-            players += result.players
-            if result.minutes:
-                minute_parts.append(pl.DataFrame(result.minutes, schema=MINUTE_SCHEMA))
-            if count % 1000 == 0:
-                print(f"{count} of {len(paths)} replays read", file=sys.stderr)
+    for name in sorted(results):
+        result = results[name]
+        games.append(result.game)
+        players += result.players
+        if result.minutes:
+            minute_parts.append(pl.DataFrame(result.minutes, schema=MINUTE_SCHEMA))
     out_dir.mkdir(parents=True, exist_ok=True)
     pl.DataFrame(games, schema=GAME_SCHEMA).write_parquet(out_dir / "games.parquet")
     pl.DataFrame(players, schema=PLAYER_SCHEMA).write_parquet(out_dir / "players.parquet")
@@ -636,11 +742,9 @@ def summary_lines(counts: Mapping[str, int]) -> str:
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--parsed", type=Path, default=data_dir() / "parsed")
+    tables.add_source_arguments(parser)
     parser.add_argument("--out", type=Path, default=data_dir() / "apm")
-    parser.add_argument("--jobs", type=int, default=min(8, os.cpu_count() or 1))
-    parser.add_argument("--since", type=date.fromisoformat, help="first partition day")
-    parser.add_argument("--until", type=date.fromisoformat, help="partition day to stop before")
+    parser.add_argument("--jobs", type=int, default=4, help="days read in parallel (default: 4)")
     parser.add_argument(
         "--report", action="store_true", help="print the tables from an earlier run"
     )
@@ -650,6 +754,13 @@ def run(args: argparse.Namespace) -> int:
     if args.report:
         print(report(args.out))
         return 0
-    counts = measure(args.parsed, args.out, jobs=args.jobs, since=args.since, until=args.until)
+    counts = measure(
+        args.parsed,
+        args.out,
+        tables_dir=args.tables,
+        jobs=args.jobs,
+        since=args.since,
+        until=args.until,
+    )
     print(summary_lines(counts))
     return 0
