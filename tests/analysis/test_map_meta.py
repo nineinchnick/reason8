@@ -1,7 +1,7 @@
 import json
 import math
 from collections import Counter
-from compression import zstd
+from datetime import date
 from pathlib import Path
 
 from reason8.analysis.map_meta import (
@@ -24,7 +24,8 @@ from reason8.analysis.map_meta import (
 )
 from reason8.analysis.opening_shift import NextUnitModel
 from reason8.game.positions import FROM_GAME, FROM_MAP_LIST, StartSetup
-from reason8.openings.extract import Opening
+from reason8.openings.extract import Opening, openings
+from reason8.replays.replay import Replay
 from tests import synthetic
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "replay.json"
@@ -222,16 +223,20 @@ def test_sides_lines_compare_the_same_place_on_both_sides():
 
 
 def test_load_sample_keeps_full_human_games(tmp_path):
+    parsed = tmp_path / "parsed"
     document = synthetic.with_own_starts_recommended(json.loads(FIXTURE.read_text("utf-8")))
-    (tmp_path / "game.json.zst").write_bytes(zstd.compress(json.dumps(document).encode()))
+    synthetic.write_parsed(parsed, "2026-11-01_game", document)
     flooded = dict(document, modoptions={**document.get("modoptions", {}), "map_waterlevel": "50"})
-    (tmp_path / "flooded.json.zst").write_bytes(zstd.compress(json.dumps(flooded).encode()))
+    synthetic.write_parsed(parsed, "2026-11-01_flooded", flooded)
+    synthetic.write_tables(parsed)
     short = dict(document, players=document["players"][:-1])
-    (tmp_path / "short.json.zst").write_bytes(zstd.compress(json.dumps(short).encode()))
-    sample = load_sample(tmp_path, map_list={})
+    synthetic.write_parsed(parsed, "2026-11-02_short", short)  # read from its JSON
+    sample = load_sample(parsed, map_list={})
     assert list(sample.openings) == [MAP]
     assert len(sample.openings[MAP]) == 16
+    assert sample.openings[MAP] == openings(Replay(document), map_list={})
     assert list(sample.setups) == [sample.openings[MAP][0].match]
     # every player is on a position: (side of the layout, place in its list)
     assert sorted(sample.places.values()) == [(side, n) for side in (0, 1) for n in range(8)]
-    assert not load_sample(tmp_path, maps=["Rosetta 1.4.4"], map_list={}).openings
+    assert not load_sample(parsed, maps=["Rosetta 1.4.4"], map_list={}).openings
+    assert not load_sample(parsed, map_list={}, since=date(2026, 11, 2)).openings

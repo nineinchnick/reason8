@@ -27,6 +27,13 @@ uv run reason8 maps check          # start setup, starts and recommended positio
 uv run reason8 analysis map-meta   # every other table of the three documents
 ```
 
+Both read the Parquet tables of the parsed replays
+([`replay-format.md`](../../reference/replay-format.md#tables)), and take
+`--since` and `--until`. On the two weeks of the tables sample (2,830
+replays), `maps check` takes 4.2 s instead of 986 s from the JSON documents,
+and `map-meta` 311 s instead of 1,536 s, nearly all of it the measurement; the
+reports are the same.
+
 How the maps were chosen is in [`dataset.md`](../../reference/dataset.md); how
 openings on Supreme Isthmus moved across balance patches is in
 [`game-versions.md`](../game-versions.md).

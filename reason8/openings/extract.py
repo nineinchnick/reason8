@@ -13,8 +13,11 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
+import polars as pl
+
 from reason8.game.maps import MapMetadata
 from reason8.game.positions import replay_positions
+from reason8.replays import tables
 from reason8.replays.replay import GAME_SPEED, BuildOrder, Replay, parse_skill
 
 OPENING_SECONDS = 8 * 60
@@ -67,22 +70,55 @@ def opening_orders(replay: Replay, seconds: int = OPENING_SECONDS) -> dict[int, 
     return by_team
 
 
+def added_orders(
+    commands: pl.LazyFrame, seconds: int = OPENING_SECONDS
+) -> dict[str, dict[int, tuple[tuple[str, ...], tuple[int, ...]]]]:
+    """Replay -> team -> the units and frames of the orders `openings()` keeps, in order.
+
+    The same orders as `opening_orders` gives without those that take units out of a
+    factory queue, from rows of the commands table (`reason8.replays.tables`).
+    """
+    frame = (
+        tables.build_order_frame(commands, until_frame=seconds * GAME_SPEED)
+        .filter(
+            pl.col("team").is_not_null(),
+            pl.col("unit").is_not_null(),
+            pl.col("unit") != "",
+            pl.col("count") > 0,
+        )
+        .group_by("replay", "team", maintain_order=True)
+        .agg("unit", "frame")
+        .collect()
+    )
+    found: dict[str, dict[int, tuple[tuple[str, ...], tuple[int, ...]]]] = defaultdict(dict)
+    for replay, team, units, frames in frame.iter_rows():
+        found[replay][team] = (tuple(units), tuple(frames))
+    return found
+
+
 def openings(
     replay: Replay,
     seconds: int = OPENING_SECONDS,
     map_list: Mapping[str, MapMetadata] | None = None,
+    added: Mapping[int, tuple[Sequence[str], Sequence[int]]] | None = None,
 ) -> list[Opening]:
     """The units each human player ordered in the first `seconds` of the game, in order.
 
     These are orders, not finished units (see docs/reference/replay-format.md). Orders that
     take units out of a factory queue are left out. `position` is the recommended start position the
     player started on; it is None for a start that is on none of them and for games
-    without recommended positions.
+    without recommended positions. `added` gives the orders from the tables
+    (`added_orders()`, team -> units and frames); without it they come from the replay's
+    events.
     """
-    added = {
-        team: [order for order in orders if order.count > 0]
-        for team, orders in opening_orders(replay, seconds).items()
-    }
+    if added is None:
+        added = {
+            team: (
+                tuple(order.unit for order in orders if order.count > 0),
+                tuple(order.frame for order in orders if order.count > 0),
+            )
+            for team, orders in opening_orders(replay, seconds).items()
+        }
     match = str(replay.meta.get("serverMatchId") or replay.meta.get("gameId"))
     positions = {
         team: position
@@ -97,11 +133,11 @@ def openings(
             side=team.ally_team_id,
             faction=team.faction,
             start=team.start_pos,
-            units=tuple(order.unit for order in added.get(team.team_id, [])),
+            units=tuple(added.get(team.team_id, ((), ()))[0]),
             position=(positions[team.team_id].spawn_point if team.team_id in positions else None),
             role=positions[team.team_id].role if team.team_id in positions else None,
             skill=skills.get(team.team_id),
-            frames=tuple(order.frame for order in added.get(team.team_id, [])),
+            frames=tuple(added.get(team.team_id, ((), ()))[1]),
         )
         for team in replay.teams().values()
         if not team.is_ai

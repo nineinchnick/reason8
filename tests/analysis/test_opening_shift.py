@@ -1,6 +1,9 @@
 import math
 from collections import Counter
+from datetime import date
+from pathlib import Path
 
+from reason8.analysis import opening_shift
 from reason8.analysis.opening_shift import (
     NextUnitModel,
     accuracy,
@@ -12,7 +15,9 @@ from reason8.analysis.opening_shift import (
     total_variation,
     transfer_scores,
 )
-from reason8.openings.extract import Opening, first_factory
+from reason8.openings.extract import Opening, first_factory, openings
+from reason8.replays.replay import Replay, load_replay
+from tests import synthetic
 
 BOTS = ("armmex", "armmex", "armwin", "armwin", "armlab", "armck")
 AIR = ("cormex", "corwin", "corwin", "corap", "corca")
@@ -86,3 +91,27 @@ def test_group_of():
     assert group_of(30000) is None
     assert group_of(30236) == "May patch"
     assert group_of(32018) == "since August patch"
+
+
+def test_load_sample_reads_the_sample_from_the_tables(tmp_path, monkeypatch):
+    fixture = Path(__file__).parents[1] / "fixtures" / "replay.json"
+    replay = Replay(synthetic.with_own_starts_recommended(load_replay(fixture).doc))
+    parsed = tmp_path / "parsed"
+    names = [f"2026-11-0{day}_10-00-00-000_x" for day in (1, 2, 3, 4)]
+    synthetic.write_parsed(parsed, names[0], replay)
+    synthetic.write_tables(parsed)
+    synthetic.write_parsed(parsed, names[1], replay)  # not in the tables yet
+    synthetic.write_parsed(parsed, names[2], replay)  # a build of no group
+    # names[3] is not parsed
+    builds = {names[0]: 32018, names[1]: 31000, names[2]: 30000, names[3]: 32018}
+    monkeypatch.setattr(
+        opening_shift, "sample_matches", lambda: {f"{n}.sdfz": b for n, b in builds.items()}
+    )
+    found, matches = opening_shift.load_sample(parsed)
+    expected = openings(replay)
+    assert found == expected + expected
+    assert matches == {
+        expected[0].match: opening_shift.SampleMatch(31000, {"naval_balance_tweaks": "1"})
+    }
+    found, _ = opening_shift.load_sample(parsed, until=date(2026, 11, 2))
+    assert found == expected

@@ -5,9 +5,9 @@ Usage::
     uv run reason8 analysis map-meta                        # the tables of docs/research/maps/
     uv run reason8 analysis map-meta --map "Rosetta 1.4.4"  # one map
 
-Replays come from ``<data dir>/parsed/``. A game counts when it is on a map of the
-training slice, it is an 8v8 of human players and the lobby left the map's water level
-alone. Positions are the recommended start positions of BAR's map metadata
+Replays come from the Parquet tables of the parsed replays (`reason8 tables`). A game counts
+when it is on a map of the training slice, it is an 8v8 of human players and the lobby left
+the map's water level alone. Positions are the recommended start positions of BAR's map metadata
 (`reason8.game.positions`); fetch the pinned map list once with
 ``reason8 maps fetch``.
 
@@ -31,7 +31,10 @@ import random
 from collections import Counter, defaultdict
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from datetime import date
 from pathlib import Path
+
+import polars as pl
 
 from reason8 import markdown
 from reason8.analysis.opening_shift import (
@@ -48,13 +51,14 @@ from reason8.models.ngram import OpeningSteps
 from reason8.openings.extract import (
     FACTIONS,
     Opening,
+    added_orders,
     first_factory,
     opening_shape,
     openings,
     unit_role,
 )
-from reason8.paths import data_dir
-from reason8.replays.replay import GAME_SPEED, iter_replays
+from reason8.replays import tables
+from reason8.replays.replay import GAME_SPEED
 
 TEAM_SIZE = 8
 FIRST_ORDERS = 6  # "the first N builds" of the consistency tables
@@ -86,24 +90,42 @@ def load_sample(
     parsed_dir: Path,
     maps: Iterable[str] | None = None,
     map_list: Mapping[str, MapMetadata] | None = None,
+    *,
+    tables_dir: Path | None = None,
+    since: date | None = None,
+    until: date | None = None,
 ) -> Sample:
     """Openings of the 8v8 games between humans on the slice maps (or on `maps`).
 
     Games with a changed water level (the ``map_waterlevel`` lobby option) are left out:
-    they are played on different terrain.
+    they are played on different terrain. The replays are read from their tables
+    (`reason8.replays.tables.open_source`, by default next to `parsed_dir`), of the days
+    ``since`` (inclusive) .. ``until`` (exclusive).
     """
     wanted = set(maps) if maps is not None else set(DEFAULT_MAPS)
+    source = tables.open_source(
+        parsed_dir,
+        parsed_dir.parent / tables.AREA if tables_dir is None else tables_dir,
+        since=since,
+        until=until,
+        tables=(tables.GAMES, tables.PLAYERS, tables.COMMANDS),
+    )
+    games = source.scan(tables.GAMES).filter(pl.col("map").is_in(sorted(wanted))).collect()
+    players = source.scan(tables.PLAYERS, games["replay"]).collect()
+    headers = tables.replay_headers(games, players)
+    names = [
+        name
+        for name, replay in sorted(headers.items())
+        if not replay.ais and (replay.doc.get("modoptions") or {}).get("map_waterlevel", "0") == "0"
+    ]
+    added = added_orders(source.scan(tables.COMMANDS, names))
     sample = Sample()
-    for replay in iter_replays(parsed_dir):
-        map_name = replay.meta.get("map")
-        if map_name not in wanted or replay.ais:
-            continue
-        if (replay.doc.get("modoptions") or {}).get("map_waterlevel", "0") != "0":
-            continue
-        found = openings(replay, map_list=map_list)
+    for name in names:
+        replay = headers[name]
+        found = openings(replay, map_list=map_list, added=added.get(name, {}))
         sides = Counter(opening.side for opening in found)
         if sorted(sides.values()) == [TEAM_SIZE, TEAM_SIZE]:
-            sample.openings[map_name] += found
+            sample.openings[replay.meta.get("map")] += found
             sample.setups[found[0].match] = start_setup(replay, map_list)
             for team, position in replay_positions(replay, map_list).items():
                 if position.on_spot:
@@ -669,12 +691,14 @@ def report(
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--parsed", type=Path, default=data_dir() / "parsed")
+    tables.add_source_arguments(parser)
     parser.add_argument("--map", action="append", help="map name; default: all")
 
 
 def run(args: argparse.Namespace) -> int:
-    sample = load_sample(args.parsed, args.map)
+    sample = load_sample(
+        args.parsed, args.map, tables_dir=args.tables, since=args.since, until=args.until
+    )
     for map_name, group in sample.openings.items():
         print(report(map_name, group, sample.setups, sample.places))
         print()

@@ -485,7 +485,14 @@ uv run reason8 analysis opening-shift --list   # the sample's replay files
 uv run reason8 analysis opening-shift          # every table above
 ```
 
-Both read the match dumps and `data/parsed/`. The replay files of the sample
-are the slice-quality Isthmus games that are parsed locally; with more parsed
-replays the same command measures a bigger sample. The cutoff counts are
+Both read the match dumps; `--list` then looks for the parsed files in
+`data/parsed/`, and the measurement reads the sample's games from the Parquet
+tables of the parsed replays
+([`replay-format.md`](../reference/replay-format.md#tables)), of the days
+`--since` and `--until` name. Loading the 1,512 games of the tables sample
+(2026-10-14 to 2026-10-27) takes 4.1 s from the tables instead of about nine
+minutes from the JSON documents; the label shuffles take the rest. The replay
+files of the sample are the slice-quality Isthmus games that are parsed
+locally; with more parsed replays the same command measures a bigger sample.
+The cutoff counts are
 `select_matches(maps=[…], since=…, until=…, min_avg_skill=…, min_build=…)`.

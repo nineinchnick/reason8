@@ -5,8 +5,8 @@ Usage::
     uv run reason8 analysis opening-shift            # the tables of docs/research/game-versions.md
     uv run reason8 analysis opening-shift --list     # replay files of the sample, per group
 
-Replays come from ``<data dir>/parsed/``; only games that pass the training-slice filters of
-`reason8.data.matches.select_matches()` are used.
+Replays come from the Parquet tables of the parsed replays (`reason8 tables`); only games
+that pass the training-slice filters of `reason8.data.matches.select_matches()` are used.
 
 Every comparison is reported next to its noise floor: the same statistic after shuffling the
 group labels of whole matches. Two samples from one distribution are never at distance zero,
@@ -21,7 +21,7 @@ import random
 from collections import Counter, defaultdict
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from reason8 import markdown
@@ -30,10 +30,9 @@ from reason8.game.positions import position_order
 from reason8.game.versions import BALANCE_OPTIONS, balance_options, build_number
 from reason8.models.evaluate import SCORED_STEPS
 from reason8.models.ngram import Level, NgramModel, OpeningSteps
-from reason8.openings.extract import Opening, first_factory, opening_shape, openings
-from reason8.paths import data_dir
+from reason8.openings.extract import Opening, added_orders, first_factory, opening_shape, openings
+from reason8.replays import tables
 from reason8.replays.parse import output_path
-from reason8.replays.replay import load_replay
 
 
 def total_variation(first: Counter, second: Counter) -> float:
@@ -239,21 +238,46 @@ def sample_matches() -> dict[str, int]:
     return builds
 
 
-def load_sample(parsed_dir: Path) -> tuple[list[Opening], dict[str, SampleMatch]]:
-    """Openings (with start spots) and match details of the parsed sample replays."""
+def load_sample(
+    parsed_dir: Path,
+    *,
+    tables_dir: Path | None = None,
+    since: date | None = None,
+    until: date | None = None,
+) -> tuple[list[Opening], dict[str, SampleMatch]]:
+    """Openings (with start spots) and match details of the parsed sample replays.
+
+    The replays are read from their tables (`reason8.replays.tables.open_source`, by
+    default next to `parsed_dir`), of the days ``since`` (inclusive) .. ``until``
+    (exclusive).
+    """
+    builds = {
+        Path(file_name).stem: build
+        for file_name, build in sample_matches().items()
+        if group_of(build) is not None
+    }
+    source = tables.open_source(
+        parsed_dir,
+        parsed_dir.parent / tables.AREA if tables_dir is None else tables_dir,
+        since=since,
+        until=until,
+        replays=builds,
+        tables=(tables.GAMES, tables.PLAYERS, tables.COMMANDS),
+    )
+    headers = tables.replay_headers(
+        source.scan(tables.GAMES).collect(), source.scan(tables.PLAYERS).collect()
+    )
+    added = added_orders(source.scan(tables.COMMANDS))
     loaded: list[Opening] = []
     matches: dict[str, SampleMatch] = {}
-    for file_name, build in sorted(sample_matches().items()):
-        path = output_path(parsed_dir, Path(file_name))
-        if not path.exists() or group_of(build) is None:
-            continue
-        replay = load_replay(path)
-        match_openings = openings(replay)
+    for name in sorted(headers):
+        replay = headers[name]
+        match_openings = openings(replay, added=added.get(name, {}))
         if not match_openings:
             continue
         loaded += match_openings
         matches[match_openings[0].match] = SampleMatch(
-            build, balance_options(replay.doc.get("modoptions") or {})
+            builds[name], balance_options(replay.doc.get("modoptions") or {})
         )
     return loaded, matches
 
@@ -429,7 +453,7 @@ def report(all_openings: Sequence[Opening], matches: Mapping[str, SampleMatch], 
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--parsed", type=Path, default=data_dir() / "parsed")
+    tables.add_source_arguments(parser)
     parser.add_argument("--rounds", type=int, default=1000, help="label shuffles")
     parser.add_argument(
         "--list", action="store_true", help="print the parsed replays of the sample, per group"
@@ -443,5 +467,6 @@ def run(args: argparse.Namespace) -> int:
             if group_of(build) and path.exists():
                 print(f"{group_of(build)}\t{build}\t{file_name}")
         return 0
-    print(report(*load_sample(args.parsed), args.rounds))
+    sample = load_sample(args.parsed, tables_dir=args.tables, since=args.since, until=args.until)
+    print(report(*sample, args.rounds))
     return 0
