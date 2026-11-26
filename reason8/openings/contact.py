@@ -401,13 +401,6 @@ def position_cutoffs(
 # --- the tables of docs/research/first-contact.md
 
 
-def _clock(frame: float) -> str:
-    if math.isinf(frame):
-        return "none"
-    seconds = int(frame // GAME_SPEED)
-    return f"{seconds // 60}:{seconds % 60:02d}"
-
-
 def _share(part: float, whole: float) -> str:
     return f"{100 * part / whole:.0f}%" if whole else "-"
 
@@ -416,7 +409,7 @@ def _spread(frames: Sequence[int | None], window_frames: int) -> list[str]:
     """Lower quartile, median, upper quartile, and the share with contact in the window."""
     in_window = sum(frame is not None and frame <= window_frames for frame in frames)
     return [
-        *(_clock(quantile_frame(frames, share)) for share in (0.25, 0.5, 0.75)),
+        *(markdown.clock(quantile_frame(frames, share)) for share in (0.25, 0.5, 0.75)),
         _share(in_window, len(frames)),
     ]
 
@@ -478,8 +471,8 @@ def report(table: pl.DataFrame, window_seconds: int = OPENING_SECONDS) -> str:
     played = sorted(games["last_frame"].to_list())
     lines += [
         "",
-        f"Played for {_clock(played[0])} to {_clock(played[-1])} of game time "
-        f"(median {_clock(played[len(played) // 2])}).",
+        f"Played for {markdown.clock(played[0])} to {markdown.clock(played[-1])} of game time "
+        f"(median {markdown.clock(played[len(played) // 2])}).",
     ]
 
     lines += ["", "## The definitions compared", ""]
@@ -527,7 +520,7 @@ def report(table: pl.DataFrame, window_seconds: int = OPENING_SECONDS) -> str:
                 [", ".join(positions), roles or "-", group.height]
                 + _spread(group[CONTACT].to_list(), window_frames)
                 + [_orders_after(group, CONTACT)]
-                + [_clock(cutoffs[map_name][positions[0]] * GAME_SPEED)]
+                + [markdown.clock(cutoffs[map_name][positions[0]] * GAME_SPEED)]
             )
         lines += markdown.table(["positions", "role", *header, "cutoff"], rows)
         lines += [""]
