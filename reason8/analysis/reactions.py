@@ -24,7 +24,8 @@ Two reactions are kept per idle event: ``clicked`` (``COMMAND``: what the player
 The output, in ``<data dir>/reactions/``:
 
 ``idle.parquet``
-    One row per idle event of a human player: game, team, unit, unit name, whether a factory,
+    One row per idle event of a human player: game, team, unit, unit name, its kind (``factory``,
+    ``turret`` for a construction turret, ``builder`` for a mobile builder),
     frame, the player's skill, and the frame of each reaction (empty: none within the
     horizon).
 """
@@ -57,6 +58,8 @@ from reason8.replays import tables
 from reason8.replays.replay import GAME_SPEED, Replay, parse_skill
 
 HORIZON_SECONDS = 60
+FACTORY, TURRET, BUILDER = "factory", "turret", "builder"
+KINDS = (FACTORY, BUILDER, TURRET)
 #: The first state format with idle events.
 IDLE_FORMAT = 4
 IDLE_SCHEMA = {
@@ -64,7 +67,7 @@ IDLE_SCHEMA = {
     "team": pl.Int32,
     "unit_id": pl.Int32,
     "unit": pl.String,
-    "is_factory": pl.Boolean,
+    "kind": pl.String,  # factory, turret (a static builder) or builder (a mobile one)
     "frame": pl.Int32,
     "skill": pl.Float64,
     "clicked_frame": pl.Int32,
@@ -161,7 +164,7 @@ def game_reactions(
                 "team": event["team"],
                 "unit_id": event["u"],
                 "unit": names.get(str(event["d"])),
-                "is_factory": None,
+                "kind": None,
                 "frame": event["f"],
                 "skill": skill_of.get(event["team"]),
                 "clicked_frame": clicked,
@@ -258,8 +261,22 @@ def measure(
     if unparsed:
         print(f"skipped {unparsed} games whose replay is not parsed", flush=True)
     frame = pl.DataFrame(rows, schema=IDLE_SCHEMA)
-    factories = {name for name, unit in unit_defs.items() if unit.is_static and unit.build_options}
-    return frame.with_columns(is_factory=pl.col("unit").is_in(sorted(factories)))
+    kinds = unit_kinds(unit_defs)
+    return frame.with_columns(
+        kind=pl.col("unit").replace_strict(kinds, default=BUILDER, return_dtype=pl.String)
+    )
+
+
+def unit_kinds(unit_defs: Mapping[str, UnitDef]) -> dict[str, str]:
+    """Factory or turret, by unit name, for the static units that build; every other unit
+    that goes idle is a (mobile) builder."""
+    kinds = {}
+    for name, unit in unit_defs.items():
+        if unit.is_static and unit.build_options:
+            kinds[name] = FACTORY
+        elif unit.is_static and unit.number("workertime") > 0:
+            kinds[name] = TURRET
+    return kinds
 
 
 def phase_of(column: str = "frame") -> pl.Expr:
@@ -300,7 +317,6 @@ def report(idle: pl.DataFrame) -> str:
     idle = idle.with_columns(
         skill_band(),
         phase_of(),
-        kind=pl.when(pl.col("is_factory")).then(pl.lit("factory")).otherwise(pl.lit("builder")),
     )
     header_tail = ["events", "answered", *[f"p{round(100 * share)} (s)" for share in QUANTILES]]
     bands = [name for name, _, _ in SKILL_BANDS] + ["all"]
@@ -311,7 +327,7 @@ def report(idle: pl.DataFrame) -> str:
     ]
     for reaction, title in (("clicked", "Clicked orders"), ("any", "Any order, widgets included")):
         lines += [f"## {title}", ""]
-        for kind in ("factory", "builder"):
+        for kind in KINDS:
             part = idle.filter(pl.col("kind") == kind)
             lines += [f"### {kind.capitalize()}, by skill", ""]
             lines += table(

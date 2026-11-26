@@ -84,9 +84,12 @@ uses it:
 
 1. **Reaction delay.** When a factory or builder goes idle, the bot gives it
    orders only after a delay drawn from how long players of its band take from
-   the moment a unit goes idle to their next order to it. The delays are
-   measured on re-simulated human games, where the state export records when
-   units go idle, before the bot uses them; until then the bot has no delay.
+   the moment a unit goes idle to their next order to it, by kind of unit
+   (factory, mobile builder, construction turret) and phase of the game, as
+   measured in [`reactions.md`](../research/reactions.md). The player's own
+   clicks count, not the commands their widgets send at once. When the draw is
+   "no answer", which happens as often as players leave an idle unit for a
+   minute, the bot waits 60 s and then acts.
 2. **Queue ahead.** When the bot gives orders it queues as the player did: the
    whole drag for a builder, several units for a factory, so that a unit stays
    busy until it needs attention again. Changing a queue already given, in
