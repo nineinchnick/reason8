@@ -1,7 +1,7 @@
 # 0010. Re-simulate replays headlessly for game state
 
 - **Status:** Accepted
-- **Date:** 2026-11-23
+- **Date:** 2026-11-26
 
 ## Context
 
@@ -25,14 +25,53 @@ engine 2026.09.03 and on older engines:
   minutes and its first 10 minutes about 65 s; an engine needs 5 to 6 GB of
   RAM, so RAM limits how many run at once.
 
+The next use joins the state with every build order of every player: what
+stood on the map and what the team had at that frame, over thousands of games.
+Buildings do not move, and the lines for units created, finished, given and
+destroyed carry unit, type, team, position and frame, so what stands at any
+frame follows from them; rebuilt that way it matches the snapshots of 247 real
+games but for units still dying and a few made between two frames
+(`state-extraction.md`, section 4). What changes all the time is each team's
+resources and the wind. A Lua widget can only write text.
+
 ## Decision
 
 Recover game state by re-running each replay in `spring-headless` with a
-spectator widget that writes snapshots and events
-(`reason8/headless/widgets/reason8_state_export.lua`): each team's resources
-and the wind per snapshot, units created, finished, destroyed and given, the
-first hit of each unit by an enemy, and damage per second between teams.
-`reason8 headless run` plays one replay and `reason8 headless batch` many.
+spectator widget that writes JSON lines
+(`reason8/headless/widgets/reason8_state_export.lua`), and convert them to
+Parquet tables right after the run.
+
+The widget writes (format 5):
+
+- every second, each team's resources and the wind;
+- every 5 seconds, a snapshot of the units that can move or are still being
+  built, with position, health and build progress. Finished buildings are left
+  out: where they stand and who owns them follows from the unit lines. Only
+  their health is lost, which matters in fights after the opening and is not
+  needed to know what a team had built; the `hit` and `damage` lines still say
+  when and how hard buildings were attacked;
+- a line per unit created, finished, destroyed, given and gone idle, the first
+  hit of each unit by each enemy team, and damage per second between teams.
+
+Resource and snapshot lines are written at the end of their frame, so a line
+of frame F shows the world after the unit lines up to F.
+
+`reason8 headless batch` and the evaluation games convert each state file into
+six Parquet tables next to it (`game`, `resources`, `events`, `units`, `hits`,
+`damage`; `reason8/headless/tables.py`): one file per game and table, in the
+date partition of the replay
+([ADR 0016](0016-download-and-store-the-data.md)), zstd-compressed, with
+16-bit and 32-bit integers, 32-bit floats and dictionary-encoded unit types.
+`reason8 headless tables` converts state files written before; their resources
+come at the snapshot interval (5 s). Readers use `tables.scan()` (lazy Polars
+frames by date range), `standing.standing_units()` (what stands at a frame) or
+`state.read_records()`, which reads every format, from JSON lines or tables,
+as the same records.
+
+The JSON lines are kept next to the tables: they are what the engine wrote,
+and when the table layout changes they are converted again in a second, while
+writing them again means playing the game again (a core-minute and 6 GB of RAM
+per 8v8 opening). They are 40% bigger than the tables.
 
 - **1v1:** re-run whole games.
 - **8v8:** stop at the part being learned (`--max-frame`); the openings need
@@ -51,8 +90,14 @@ timeout.
   games of the slice would take about two weeks on one machine, so games are
   re-simulated as a growing sample, and whole games in bulk wait for a cloud
   cluster ([ADR 0016](0016-download-and-store-the-data.md)).
+- Six small files per game: tens of thousands of files for a sample of
+  thousands of games. If that gets slow to list or sync, the tables of a day
+  can be merged into one file per table later, without touching the widget.
 - The state is the spectator's full view. Line of sight per player must be
   recorded before the state is used for training
-  ([ADR 0008](0008-play-under-human-like-limits.md)).
+  ([ADR 0008](0008-play-under-human-like-limits.md)). The format has room for
+  it and for other additions as lines and tables of their own: visibility per
+  ally team (LOS and radar), unit command queues, and static map data (metal
+  spots, features).
 - Revisit if a replay stops re-simulating exactly, or if per-replay cost makes
   the needed part of 8v8 games too expensive even in the cloud.
