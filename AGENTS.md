@@ -26,6 +26,15 @@ Keep this file as `AGENTS.md` with no `CLAUDE.md`, `.claude/CLAUDE.md` or
 - Address each review comment with a fix and a reply in the thread, then
   resolve the thread.
 
+## Decisions and questions
+
+- Ask the maintainer as soon as a decision is theirs to make, during the work,
+  not at the end: a choice between approaches, a change to a recorded
+  decision, anything with no clear default. Wait for the answer before
+  building on one side of it.
+- Before opening a pull request, ask the open questions it raises first. Don't
+  leave them in the PR description to be found later.
+
 ## Files in the repo
 
 - Don't reference issues (`#N`, issue links) in any committed file: docs,
