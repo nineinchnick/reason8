@@ -3,12 +3,16 @@
     uv run reason8 headless state STATE.jsonl[.gz] [--builds]
 
 The file is JSON lines (see the widget for the fields):
-    {"t":"header", ...}                         game, map, wind range, teams, unitDefID -> name
-    {"t":"s","f":frame,"wind":strength,"teams":[...],"units":[...]}   one snapshot
-    {"t":"created"|"finished"|"destroyed"|"given", "f":frame, "u":unitID, ...}
+    {"t":"header", ...}           game, map, wind range, teams, unitDefID -> name, static types
+    {"t":"r","f":frame,"wind":strength,"teams":[...]}   resources, every second (format 5)
+    {"t":"s","f":frame,"units":[...]}   one snapshot (to format 4 also "wind" and "teams")
+    {"t":"created"|"finished"|"destroyed"|"given"|"idle", "f":frame, "u":unitID, ...}
     {"t":"hit","f":frame,"u":unitID,...,"by":unitID,"by_team":team}   first hit by an enemy
     {"t":"damage","f":frame,"team":team,"by_team":team,"hits":n,"damage":sum}   per second
     {"t":"end","f":frame,"reason":...,"winners":[allyTeam,...],"attackers":...}
+
+`read_records()` reads every format the same way, from the JSON lines or from the Parquet
+tables of a game (`reason8.headless.tables`).
 
 Prints sizes (raw and gzip) and counts as JSON. With --builds it also prints,
 per team, the first units that were *finished* (not just ordered), which is
@@ -40,7 +44,11 @@ SNAPSHOT_TEAM_FIELDS = (
     "energy_income",
     "energy_expense",
 )
-EVENT_KINDS = ("created", "finished", "destroyed", "given", "hit", "damage")
+EVENT_KINDS = ("created", "finished", "destroyed", "given", "idle", "hit", "damage")
+#: From this format on resources are lines of their own ("r") and snapshots leave out
+#: finished units that cannot move (the header lists their types as "static").
+RESOURCE_LINES_FORMAT = 5
+SNAPSHOT_KINDS = ("s", "r")
 SNAPSHOT_UNIT_FIELDS = ("unit_id", "unit_def_id", "team", "x", "z", "health_pct", "build_pct")
 
 
@@ -50,20 +58,92 @@ def state_path(out_dir: Path, replay: Path) -> Path:
     return partitioned_path(out_dir, replay.stem + STATE_SUFFIX)
 
 
-def read_records(path: str | Path, snapshots: bool = False) -> Iterator[dict]:
-    """The records of a state file (plain or .gz).
+def read_lines(path: str | Path, snapshots: bool = False) -> Iterator[dict]:
+    """The lines of a state file (plain or .gz) as they were written.
 
-    Snapshot lines are most of a file and are skipped unless asked for. A last line that
-    was cut off (the engine was killed) is left out.
+    Snapshot and resource lines are most of a file and are skipped unless asked for. A
+    last line that was cut off (the engine was killed) is left out.
     """
     opener = gzip.open if str(path).endswith(".gz") else open
     with opener(path, "rt", encoding="utf-8") as file:
         for line in file:
-            if not snapshots and line.startswith('{"t":"s"'):
+            if not snapshots and line.startswith(('{"t":"s"', '{"t":"r"')):
                 continue
             if not line.endswith("}\n"):
                 return
             yield json.loads(line)
+
+
+def read_records(path: str | Path, snapshots: bool = False) -> Iterator[dict]:
+    """The records of a game's state, in the same shape for every format.
+
+    `path` is a state file (.jsonl or .jsonl.gz) or one of the Parquet tables of a game
+    (`reason8.headless.tables`). With `snapshots`, every snapshot has the wind, the
+    resources of every team and every unit, as up to format 4: from format 5 on the wind
+    and resources come from the resource line of the same frame, and the finished units
+    that cannot move from the unit lines before it, with an unknown health (None). The
+    resource lines themselves ("r") come too.
+    """
+    if str(path).endswith(".parquet"):
+        from reason8.headless import tables
+
+        records = tables.read_table_records(path, snapshots)
+    else:
+        records = read_lines(path, snapshots)
+    header = next(records, None)
+    if header is None:
+        return
+    yield header
+    if not snapshots or header.get("v", 1) < RESOURCE_LINES_FORMAT:
+        yield from records
+        return
+    yield from complete_snapshots(header, records)
+
+
+def complete_snapshots(header: dict, records: Iterator[dict]) -> Iterator[dict]:
+    """Records of format 5 and later, with each snapshot made whole (see `read_records`)."""
+    static = set(header.get("static", ()))
+    buildings: dict[int, list] = {}  # unit id -> [unit, type, team, x, z, finished]
+    resources: dict | None = None
+    for record in records:
+        kind = record["t"]
+        if kind == "created":
+            if record["d"] in static:
+                buildings[record["u"]] = [
+                    record["u"],
+                    record["d"],
+                    record["team"],
+                    record["x"],
+                    record["z"],
+                    False,
+                ]
+            else:
+                buildings.pop(record["u"], None)  # a unit id is used again
+        elif kind == "finished" and record["u"] in buildings:
+            buildings[record["u"]][5] = True
+        elif kind == "given" and record["u"] in buildings:
+            buildings[record["u"]][2] = record["team"]
+        elif kind == "destroyed":
+            buildings.pop(record["u"], None)
+        elif kind == "r":
+            resources = record
+        elif kind == "s":
+            listed = {unit[0] for unit in record["units"]}
+            units = list(record["units"]) + [
+                [unit_id, unit_def_id, team, x, z, None, 100]
+                for unit_id, unit_def_id, team, x, z, done in buildings.values()
+                if done and unit_id not in listed
+            ]
+            units.sort(key=lambda unit: unit[0])
+            same_frame = resources is not None and resources["f"] == record["f"]
+            record = {
+                "t": "s",
+                "f": record["f"],
+                "wind": resources["wind"] if same_frame else None,
+                "teams": resources["teams"] if same_frame else [],
+                "units": units,
+            }
+        yield record
 
 
 def summarise(path: str | Path, builds: int = 0) -> dict:
@@ -112,6 +192,7 @@ def summarise(path: str | Path, builds: int = 0) -> dict:
         "end_reason": end.get("reason"),
         "winners": end.get("winners"),
         "snapshots": counts["s"],
+        "resource_lines": counts["r"],
         "snapshot_frames": header.get("snapshot_frames"),
         "max_units": max_units,
         "unit_rows": unit_rows,
