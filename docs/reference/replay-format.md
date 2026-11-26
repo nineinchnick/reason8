@@ -308,6 +308,118 @@ re-running the replay headlessly. The only outcome data in the replay is in
   so it can be slightly past `endFrame`). There is no time series.
 - `playerStats` holds command and input counters per player.
 
+## Tables
+
+Decoding a parsed document takes about a third of a second, however little of
+it a pass needs. So the parsed replays also become Parquet tables, one row per
+command, selection, event, player and game, and passes over many games read
+only the columns they need. Code: `reason8/replays/tables.py`. Why:
+[ADR 0005](../decisions/0005-learn-decisions-with-their-context.md); layout:
+[ADR 0016](../decisions/0016-download-and-store-the-data.md). The JSON
+documents stay the archival copy, and the tables can be rebuilt from them at
+any time without parsing the replays again.
+
+```sh
+# data/parsed/date=<day>/ -> data/tables/date=<day>/<day>.<table>.parquet
+uv run reason8 tables
+uv run reason8 tables --since 2026-10-14 --until 2026-10-28 --jobs 4
+uv run reason8 tables --force      # rebuild days that are up to date
+```
+
+Each day has one file per table, in the same partitions as the parsed replays.
+A day is up to date when its `games` table lists exactly the parsed files of
+that day with their sizes, and was written by the current version of the code
+(`reason8.tables/1` in the file metadata). Other days are brought up to date
+by converting only the replays that are new or changed: each one is converted
+into small staged files (`tables/_staging/<day>/`), then the day is streamed
+into new files that copy the rows of the unchanged replays, written under a
+temporary name and renamed into place, `games` last. `reason8 parse` does the
+same for the days it parsed replays of (`--no-tables` to skip it), and
+`reason8 sync` copies the `tables` area.
+
+Reading:
+
+```python
+from datetime import date
+
+import polars as pl
+
+from reason8.replays import tables
+
+# a lazy frame with a `date` column; since inclusive, until exclusive
+commands = tables.scan(tables.COMMANDS, since=date(2026, 10, 14), until=date(2026, 10, 28))
+opening = tables.build_order_frame(commands, until_frame=8 * 60 * 30).collect()
+# replay -> [BuildOrder], equal to Replay.build_orders(team, until_frame)
+orders = tables.build_orders(since=date(2026, 10, 14), until_frame=8 * 60 * 30)
+# replay -> team id -> Team, equal to Replay.teams()
+teams = tables.teams_from(tables.scan(tables.PLAYERS).collect())
+```
+
+Every table has `replay`, the replay's file name without `.sdfz`, and the rows
+of a replay are together, in replay order. Strings are dictionary-encoded by
+the Parquet writer; files are compressed with zstd (level 9), with statistics,
+in row groups of 16,384 rows.
+
+`commands`
+: One row per command (`cmd` event), in stream order within a replay. `frame`
+  Int32, `player`, `team`, `ai` Int16, `via` (an enum of `COMMAND`,
+  `AICOMMAND`, `AICOMMANDS`), `units` (List of Int32, null for `COMMAND`,
+  which applies to the player's current selection), `command` and
+  `command_id`, `unit` (the unit a BUILD orders), `options` (UInt8, the bits
+  of `OPTION_BITS`: 4 meta, 8 internal, 16 right, 32 shift, 64 ctrl, 128 alt),
+  `params` (List of Float32, null for NaN), and `x`, `z` (Float32) and
+  `facing` (Int8) for a BUILD of a structure. For an INSERT whose inserted
+  command could be read, `inserted` is true, the columns above describe the
+  inserted command, and `insert_options` and `insert_position` are the
+  INSERT's own; an INSERT of an INSERT keeps the inner one's raw parameters.
+
+`selections`
+: One row per `select` event: `seq` (index in the document's events),
+  `commands_before` (how many commands of the replay came before it), `frame`,
+  `player`, `units`. A `COMMAND` row applies to the player's last selection
+  with `commands_before` at most its position among the replay's commands.
+
+`events`
+: The events that end or interrupt a player's game: `start`, `gameover`,
+  `team`, `playerleft`, `pause` and `quit`, with `seq`, `commands_before`,
+  `frame`, `type`, `player`, `action` (for `team`: `resign`, `team_died`, …)
+  and `param` (for `team` its param, for `playerleft` the reason, for `pause`
+  1 or 0).
+
+`players`
+: One row per player, then one per AI, in document order (`slot`): `team_id`,
+  `ally_team_id`, `player_id` or `ai_id`, `is_ai`, `user_id` (for the join
+  with the match dumps), `faction`, `rank`, `skill` (as written, e.g.
+  `"[45.67]"`), `skill_uncertainty`, `start_x`, `start_y`, `start_z`, and for
+  AIs `ai_short_name` and `ai_version`.
+
+`games`
+: One row per replay: `parsed_bytes` (the size of its `.json.zst`, for the
+  up-to-date check), `sdfz_bytes`, `parser`, `match_id` (Int64, from
+  `serverMatchId`), `game_id`, `engine`, `game`, `map`, `start_time`,
+  `duration_ms`, `full_duration_ms`, `winning_ally_teams`, `start_pos_type`,
+  `demo_version`, `game_time`, `wallclock_time`, `start_frame`, `end_frame`,
+  `ally_teams` (id, player count and start box), `modoptions`, `mapoptions`
+  and `restrictions` (lists of `name`/`value`; `tables.options_dict()` turns
+  one back into the dict of the JSON) and `unitdefs`.
+
+From these, `Replay.build_orders()` (with `count`, `queued`, `inserted` and
+`quota`), `Replay.teams()`, the action counting of `reason8.analysis.apm`
+(commands and selections in stream order, ends from `events`) and what the
+opening dataset, first contact and the position check take from a replay can
+be read without the JSON. The tests check the first three against the JSON on
+the fixture and on synthetic replays.
+
+Not in the tables:
+
+- **Names** of players, AIs and spectators: they are personal data, and no
+  pass needs them.
+- **Chat, map drawing, start-position picks and resource shares** (`chat`,
+  `mapdraw`, `startpos`, `share`, `setshare`, `aishare`): about 1% of the
+  events, used by no pass yet; the final start positions are in `players`. Add
+  a table when a pass needs them.
+- **`statistics`** (end-of-game team and player counters) and spectators.
+
 ## Measurements
 
 ### First sample of the slice
@@ -384,6 +496,53 @@ here), 240 replays took 88 s: 164 replays a minute, against 35 a minute at
 level 19 with 8 jobs. That is about 4.5 h for the whole slice (42,913
 replays), and about 70 GB of parsed JSON (1.64 MB per replay) next to 175 GB
 of replays.
+
+### Tables
+
+Two weeks of the slice, the partitions 2026-10-14 to 2026-10-27: 2,830 replays
+(1,512 Supreme Isthmus, 1,263 All That Glitters, 55 Rosetta), built with
+`reason8 tables --since 2026-10-14 --until 2026-10-28 --jobs 4` on the
+32-thread WSL2 machine while it was running headless simulations (load average
+40 to 70), so the times are pessimistic.
+
+| Table      | Rows        | Size     | Bytes per row |
+| ---------- | ----------- | -------- | ------------- |
+| commands   | 359,424,419 | 3,464 MB | 9.6           |
+| selections | 8,625,853   | 122 MB   | 14.1          |
+| events     | 173,289     | 1.7 MB   | 9.8           |
+| players    | 45,280      | 0.9 MB   | 20            |
+| games      | 2,830       | 0.7 MB   | 250           |
+| all        |             | 3,589 MB |               |
+
+- **Size:** the tables are 82% of the parsed JSON they come from (4,396 MB),
+  1.27 MB per replay. Half of the commands table is `params`: map coordinates
+  as float32 take about 2.5 bytes each after compression, and storing them as
+  integer hundredths or as separate columns saves under 10%. zstd level 9 is
+  3% smaller than level 3 and costs nothing measurable when writing.
+- **Build time:** 18 min 41 s of wall time, 0.40 s per replay with 4
+  processes, and 2.1 s of CPU per replay including Polars' own threads. One
+  replay alone on an idle core takes about 0.7 s: 0.3 s to decode the JSON and
+  0.4 s to make the rows. A worker peaks at 1.7 GB on the largest replay of
+  the sample (9.3 MB of `.json.zst`), most take a few hundred MB. Running it
+  again with every day up to date takes 2.4 s.
+- **Build orders of the first 8 minutes** of every game of the sample
+  (6,227,332 orders): from the tables, 2.4 s to collect
+  `build_order_frame(..., until_frame=14400)` as a Polars frame, 53 s when
+  each order is also made into a `BuildOrder` object. From the JSON, 1,285 s
+  of CPU (0.45 s per replay), 327 s of wall time with 4 processes. The orders
+  were **equal for all 2,830 replays**. The frame filter skips row groups:
+  counting the BUILD commands takes 1.1 s for whole games and 0.26 s for the
+  first 8 minutes.
+
+For the whole slice (about 43k parsed replays), the build is
+
+```sh
+uv run reason8 tables --jobs 8
+```
+
+At the rate of the sample with 4 processes that is about 4.8 hours; on an
+otherwise idle machine with the default 8 processes about 1 to 1.5 hours. The
+tables will take about 55 GB next to the 70 GB of JSON.
 
 ### Earlier replays
 

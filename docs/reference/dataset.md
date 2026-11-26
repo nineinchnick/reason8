@@ -212,9 +212,10 @@ is theirs to set.
 
 ## Data layout
 
-Replays, parsed replays and state files are kept in daily partitions by the
-day the match started, Hive style, the same in the data directory and in the
-bucket ([ADR 0016](../decisions/0016-download-and-store-the-data.md)):
+Replays, parsed replays, their Parquet tables and state files are kept in
+daily partitions by the day the match started, Hive style, the same in the
+data directory and in the bucket
+([ADR 0016](../decisions/0016-download-and-store-the-data.md)):
 
 ```
 data/
@@ -224,6 +225,9 @@ data/
   parsed/
     _index.jsonl
     date=2026-11-01/2026-11-01_10-26-55-123_Rosetta 1.4.4_2026.09.03.json.zst
+  tables/             # one file per table and day, see replay-format.md
+    date=2026-11-01/2026-11-01.commands.parquet
+    date=2026-11-01/2026-11-01.games.parquet
   state/
     date=2026-11-01/2026-11-01_10-26-55-123_Rosetta 1.4.4_2026.09.03.jsonl.gz
   matches/            # the match dumps, not partitioned
@@ -232,8 +236,8 @@ data/
 The day is the first ten characters of the replay's file name; a file whose
 name doesn't start with a date (our own test games) goes to `date=unknown`.
 `reason8.paths.partition()` is the one place that knows this. Commands that
-read a directory find the files in every partition; `sync`, `parse` and
-`dataset` take `--since` and `--until` (exclusive) to read only some days.
+read a directory find the files in every partition; `sync`, `parse`, `tables`
+and `dataset` take `--since` and `--until` (exclusive) to read only some days.
 
 Data directories and buckets from before the partitions keep their files at
 the top of each directory. `download`, `parse`, `sync`, `headless batch` and

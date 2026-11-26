@@ -176,3 +176,196 @@ def with_own_starts_recommended(document: dict) -> dict:
         "mapmetadata_startpos": encode_option({"positions": points, "team": [layout]}),
     }
     return document
+
+
+# --- replays, for the tests of the commands tables
+
+
+def _command(frame, player, team, command, *, via="COMMAND", units=None, **fields):
+    event = {"frame": frame, "type": "cmd", "player": player, "via": via, "team": team}
+    if via != "COMMAND":
+        event["ai"] = fields.pop("ai", 255)
+    if units is not None:
+        event["units"] = list(units)
+    return event | {"cmd": command} | fields
+
+
+def command_replay(*, started: bool = True) -> Replay:
+    """A parsed replay with every kind of build order and the events around them.
+
+    Options are listed in the order the parser writes them (`reason8.replays.parse.OPTION_BITS`).
+
+    Two players share team 0, a bot plays team 1. ``started=False`` gives a game that never
+    started: every frame is None.
+    """
+
+    def frame(value):
+        return value if started else None
+
+    def build(unit, cmd_id, params, opts=()):
+        record = {"cmd": "BUILD", "cmd_id": cmd_id, "unit": unit, "params": params}
+        return record | ({"opts": list(opts)} if opts else {})
+
+    events = [
+        {"frame": frame(-300), "type": "select", "player": 0, "units": [100]},
+        {"frame": frame(-200), "type": "team", "player": 0, "action": "join_team", "param": 0},
+        {"frame": frame(-100), "type": "chat", "player": 0, "to": 252, "message": "hello"},
+        {"frame": frame(0), "type": "start"},
+        # pregame queue: widget orders for the commander, shift-appended
+        _command(
+            frame(5),
+            0,
+            0,
+            "BUILD",
+            via="AICOMMAND",
+            units=[100],
+            cmd_id=-3,
+            unit="armmex",
+            opts=["shift"],
+            params=[5200.12, 38.1, 6704.5, 1],
+        ),
+        _command(frame(5), 0, 0, "BUILD", **build("armwin", -4, [5300, 40, 6800, 3], ["shift"])),
+        # a structure without facing, and one with a NaN coordinate
+        _command(frame(40), 1, 0, "BUILD", **build("armsolar", -5, [100.25, 0, 200.75])),
+        _command(frame(41), 1, 0, "BUILD", **build("armsolar", -5, [None, 0, 1, 2])),
+        # factory orders: every combination of shift, ctrl and right
+        *(
+            _command(frame(60 + index), 0, 0, "BUILD", **build("armpw", -6, [], opts))
+            for index, opts in enumerate(
+                [
+                    (),
+                    ("shift",),
+                    ("ctrl",),
+                    ("shift", "ctrl"),
+                    ("right",),
+                    ("right", "shift"),
+                    ("right", "ctrl", "alt"),
+                    ("meta", "internal"),
+                ]
+            )
+        ),
+        {"frame": frame(70), "type": "select", "player": 1, "units": [200, 201]},
+        _command(frame(70), 1, 0, "MOVE", cmd_id=10, params=[1000, 50, 2000]),
+        # BAR's factory quota widget, and INSERTs of other commands
+        _command(
+            frame(80),
+            0,
+            0,
+            "INSERT",
+            via="AICOMMANDS",
+            units=[300],
+            cmd_id=1,
+            opts=["ctrl", "alt"],
+            pos=0,
+            inner=build("armpw", -6, [], ["internal", "alt"]),
+        ),
+        _command(
+            frame(81),
+            0,
+            0,
+            "INSERT",
+            cmd_id=1,
+            opts=["alt"],
+            pos=2,
+            inner=build("armmex", -3, [10, 0, 20, 0], ["shift"]),
+        ),
+        _command(
+            frame(82),
+            0,
+            0,
+            "INSERT",
+            cmd_id=1,
+            pos=123456,
+            inner={"cmd": "MOVE", "cmd_id": 10, "params": [1, 2, 3]},
+        ),
+        _command(
+            frame(83),
+            0,
+            0,
+            "INSERT",
+            cmd_id=1,
+            pos=0,
+            inner={
+                "cmd": "INSERT",
+                "cmd_id": 1,
+                "pos": 1,
+                "inner": build("armpw", -6, [], ["ctrl"]),
+            },
+        ),
+        _command(frame(84), 0, 0, "INSERT", cmd_id=1, params=[0, 1]),  # too short to resolve
+        _command(frame(90), 0, None, "BUILD", **build("armpw", -6, [])),  # no team
+        _command(frame(91), 0, 0, "BUILD", **build(None, -999, [])),  # not in the unit list
+        # the bot's orders, pairwise to two builders
+        *(
+            _command(
+                frame(100),
+                2,
+                1,
+                "BUILD",
+                via="AICOMMANDS",
+                ai=0,
+                units=[builder],
+                **build("cormex", -7, [7000, 0, 3000 + builder, 1]),
+            )
+            for builder in (400, 401)
+        ),
+        {"frame": frame(150), "type": "pause", "player": 0, "paused": True},
+        {"frame": frame(160), "type": "pause", "player": 0, "paused": False},
+        _command(frame(300), 0, 0, "BUILD", **build("armlab", -8, [500, 0, 600, 2])),
+        {"frame": frame(400), "type": "team", "player": 1, "action": "resign", "param": 0},
+        {"frame": frame(410), "type": "playerleft", "player": 1, "reason": 1},
+        {"frame": frame(500), "type": "team", "player": 2, "action": "team_died", "param": 1},
+        {"frame": frame(600), "type": "gameover", "player": 0, "winners": [0]},
+        {"frame": frame(601), "type": "quit"},
+    ]
+    players = [
+        {
+            "playerId": player_id,
+            "teamId": 0,
+            "allyTeamId": 0,
+            "name": f"Player{player_id + 1}",
+            "userId": 1000 + player_id,
+            "faction": "Armada",
+            "rank": 3,
+            "skill": "[25.5]",
+            "skillUncertainty": 3.25,
+            "startPos": {"x": 1000.5 + player_id, "y": 10.0, "z": 9000.25},
+        }
+        for player_id in (0, 1)
+    ]
+    ais = [
+        {
+            "aiId": 0,
+            "teamId": 1,
+            "allyTeamId": 1,
+            "name": "BARb(1)",
+            "shortName": "BARb",
+            "version": "stable",
+            "faction": "Cortex",
+            "startPos": {"x": 9000.0, "y": 0.0, "z": 1000.0},
+        }
+    ]
+    return Replay(
+        {
+            "format": "reason8.replay/1",
+            "source": {"file": "2026-11-01_00-00-00-000_Test Valley 1.0_2026.09.03.sdfz"},
+            "meta": {
+                "map": MAP,
+                "game": "Beyond All Reason test-32018-ad135b9",
+                "engine": "2026.09.03",
+                "serverMatchId": "123",
+                "winningAllyTeamIds": [0],
+                "startFrame": 0 if started else None,
+                "endFrame": frame(600),
+            },
+            "allyTeams": [{"allyTeamId": 0, "startBox": BOTTOM_LEFT, "playerCount": 2}],
+            "players": players,
+            "ais": ais,
+            "spectators": [{"playerId": 3, "name": "Spectator1", "userId": 2000}],
+            "modoptions": {"map_waterlevel": "0", "mapmetadata_startpos": ""},
+            "mapoptions": {},
+            "restrictions": {},
+            "unitdefs": ["", "armcom", "corcom", "armmex", "armwin", "armsolar", "armpw"],
+            "events": events,
+        }
+    )

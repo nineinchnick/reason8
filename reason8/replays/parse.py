@@ -12,6 +12,8 @@ written to the date partition of the replay (``<out>/date=YYYY-MM-DD/``, see `re
 Directories are searched at any depth; ``--since`` and ``--until`` read only their partitions.
 A replay that fails to parse gets an entry with the error in `<out>/_index.jsonl`
 instead of stopping the run. Already parsed replays are skipped unless `--force`.
+Afterwards the Parquet tables (`reason8.replays.tables`) of the days it parsed replays of are
+brought up to date, in the ``tables`` directory next to ``<out>``, unless `--no-tables`.
 Default paths are under the data directory (``REASON8_DATA_DIR``, or ``data/`` in the repo).
 """
 
@@ -677,6 +679,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--force", action="store_true", help="re-parse replays already done")
     parser.add_argument(
+        "--no-tables",
+        dest="tables",
+        action="store_false",
+        help="don't update the Parquet tables of the days parsed (see `reason8 tables`)",
+    )
+    parser.add_argument(
         "--since",
         type=date.fromisoformat,
         help="read only the partitions of directories from this date (YYYY-MM-DD)",
@@ -724,4 +732,17 @@ def run(args: argparse.Namespace) -> int:
     write_index(args.out, index)
     if results:
         print(summarize(results), file=sys.stderr)
+    parsed_days = {
+        partitioned_path(args.out, entry["file"]).parent
+        for entry in results
+        if entry["status"] == "ok"
+    }
+    if args.tables and parsed_days:
+        # imported here: the tables module builds on this one
+        from reason8.replays import tables
+
+        table_results = tables.update(
+            sorted(parsed_days), args.out.parent / tables.AREA, jobs=tables.default_jobs()
+        )
+        print(tables.summarize(table_results), file=sys.stderr)
     return 0
