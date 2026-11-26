@@ -47,8 +47,6 @@ def test_parse_flags():
     assert (args.jobs, args.force, args.out) == (4, True, Path("tables"))
 
 
-def test_the_two_tables_commands_run_their_own_module():
+def test_headless_tables_runs_the_state_tables():
     parser = cli.make_parser()
-    arguments = ["tables", "--from-parsed", "parsed"]
-    assert parser.parse_args(arguments).run.__module__ == "reason8.replays.from_parsed"
     assert parser.parse_args(["headless", "tables"]).run.__module__ == "reason8.headless.tables"

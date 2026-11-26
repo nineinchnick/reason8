@@ -1,6 +1,5 @@
 import copy
 import json
-from compression import zstd
 from datetime import date
 from pathlib import Path
 
@@ -8,7 +7,7 @@ import polars as pl
 import pytest
 
 from reason8.analysis.apm import end_frames, event_stream, player_actions
-from reason8.replays import from_parsed, parse, tables
+from reason8.replays import parse, tables
 from reason8.replays.replay import Replay, load_replay
 from tests import synthetic
 
@@ -419,45 +418,3 @@ def test_a_document_with_an_unknown_field_fails_its_replay(tmp_path, monkeypatch
     entry = parse.parse_into(tmp_path / "parser", replay, tmp_path / "staging")
     assert entry["status"] == "error" and "newField" in entry["error"]
     assert not (tmp_path / "staging").exists()
-
-
-def write_parsed(directory: Path, name: str, replay: Replay) -> Path:
-    path = directory / f"date={name[:10]}" / f"{name}.json.zst"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(zstd.compress(json.dumps(replay.doc).encode()))
-    return path
-
-
-def test_the_parsed_json_of_earlier_versions_is_converted_once(tmp_path):
-    parsed, out = tmp_path / "parsed", tmp_path / "tables"
-    replay, fixture = synthetic.command_replay(), load_replay(FIXTURE)
-    other, later = f"{DAY}_12-00-00-000_x", "2026-11-02_10-00-00-000_x"
-    for name, document in ((NAME, replay), (other, fixture), (later, fixture)):
-        write_parsed(parsed, name, document)
-    (parsed / f"date={DAY}" / f"{DAY}_14-00-00-000_x.json.zst").write_bytes(b"not zstd")
-    parse.write_index(parsed, {"a.sdfz": {"file": "a.sdfz", "status": "error", "error": "x"}})
-    parse.write_index(out, {"b.sdfz": {"file": "b.sdfz", "status": "ok"}})
-
-    results = from_parsed.convert(parsed, out, jobs=0, log=lambda message: None)
-    assert [(result.converted, len(result.errors)) for result in results] == [(2, 1), (1, 0)]
-    assert set(parse.read_index(out)) == {"a.sdfz", "b.sdfz"}
-    expected = synthetic.write_tables(
-        tmp_path / "direct", {NAME: replay, other: fixture, later: fixture}
-    )
-    for table in tables.TABLES:
-        converted = tables.scan(table, out).collect()
-        assert converted.equals(tables.scan(table, expected).collect()), table
-
-    # converted documents are skipped; the one that failed is tried again
-    again = from_parsed.convert(parsed, out, jobs=0, log=lambda message: None)
-    assert [(result.converted, len(result.errors)) for result in again] == [(0, 1), (0, 0)]
-    assert again[1].up_to_date
-
-
-def test_the_tables_command_needs_the_parsed_directory(tmp_path):
-    from reason8.cli import make_parser
-
-    with pytest.raises(SystemExit):
-        make_parser().parse_args(["tables"])
-    args = make_parser().parse_args(["tables", "--from-parsed", str(tmp_path), "--jobs", "0"])
-    assert args.from_parsed == tmp_path and args.run(args) == 0
