@@ -49,7 +49,20 @@ resources and the buildings already standing.
   pinned standalone `sdfz-demo-parser`, and the command packets are read again
   from the replay file by our own reader (`reason8.replays.sdfz`) to recover
   the correct command ids. Each replay is stored as one compact,
-  zstd-compressed JSON document (`reason8 parse`).
+  zstd-compressed JSON document (`reason8 parse`), the archival copy that
+  keeps everything we take from the replay.
+- **Passes over many games read Parquet tables.** Tables derived from the JSON
+  documents (`reason8 tables`) hold one row per command, per selection, per
+  lifecycle event (start, game over, resign, team died, player left, pause,
+  quit), per player or AI and per game. A command keeps its frame, player,
+  team, `via`, the units it is addressed to, its name and id, its options as a
+  bitmask, its unit, its parameters (x, z and facing in their own columns for
+  structures) and what an INSERT wraps, so that the build orders and the
+  action counts come out exactly as from the JSON. Rows are in stream order,
+  so a scan of the opening stops reading a game early. Player names are not in
+  the tables; user ids are, for the join with the match dumps. Chat, map
+  drawing, start-position picks and resource shares stay in the JSON only
+  until a pass needs them.
 - **State comes from re-simulating the replay.** Training data joins the
   orders with the re-simulated state, at least for the part of the game being
   learned.
@@ -66,6 +79,15 @@ resources and the buildings already standing.
   the first 10 minutes.
 - Our command reader must agree with the parser packet by packet; a mismatch
   is an error, not a guess.
+- Decoding a JSON document costs about a third of a second however little of
+  it a pass needs (a document is about 17 MB of JSON, more than half of it
+  MOVE commands), about 3.6 CPU-hours over the slice. The build orders of the
+  first 8 minutes of every game come out of the tables in seconds instead
+  ([`replay-format.md`](../reference/replay-format.md#tables)).
+- The tables take about four fifths of the space of the JSON again; most of it
+  is the coordinates of the commands, which compress about as well in either
+  form. They are derived data: they can be rebuilt from the JSON at any time,
+  and a change to their layout is a new version that rebuilds them.
 - The parsed files keep player names and ids for joining with match data, so
   they must not be published.
 - The dataset gains placement (position relative to the start, metal spots,

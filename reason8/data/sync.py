@@ -16,6 +16,8 @@ name in the bucket:
     raw ``.sdfz`` replays in daily partitions (``date=YYYY-MM-DD/``), and ``manifest.parquet``;
 ``parsed``
     parsed ``.json.zst`` replays in daily partitions, and ``_index.jsonl``;
+``tables``
+    the Parquet tables of the parsed replays (``reason8 tables``) in daily partitions;
 ``matches``
     the cached match dumps (``.parquet``) and other downloaded ``.json``.
 
@@ -45,7 +47,7 @@ from pathlib import Path, PurePosixPath
 from reason8.data import download, storage
 from reason8.data.storage import Bucket
 from reason8.paths import LayoutError, data_dir, partition, partition_in_range
-from reason8.replays import parse
+from reason8.replays import parse, tables
 
 PUSH = "push"
 PULL = "pull"
@@ -72,6 +74,7 @@ AREAS = {
     "parsed": Area(
         ("*" + parse.PARSED_SUFFIX,), {parse.INDEX_NAME: parse.merge_indexes}, partitioned=True
     ),
+    tables.AREA: Area(("*" + tables.SUFFIX,), partitioned=True),
     "matches": Area(("*.parquet", "*.json")),
 }
 
