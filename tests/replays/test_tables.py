@@ -152,6 +152,15 @@ def test_open_source_adds_the_parsed_replays_the_tables_lack(tmp_path):
     }
     games = source.scan(tables.GAMES).collect()
     assert games["replay"].to_list() == [NAME, other, new]
+    days = source.by_day()
+    assert [day.scan(tables.GAMES).collect()["replay"].to_list() for day in days] == [
+        [NAME, other, new]
+    ]
+    assert list(days[0].unreadable) == [f"{DAY}_14-00-00-000_x"]
+    later = tables.open_source(parsed, out, log=messages.append).by_day()
+    assert [day.scan(tables.GAMES).collect().height for day in later] == [3, 1]
+    assert source.scan(tables.GAMES, [new, NAME]).collect()["replay"].to_list() == [NAME, new]
+    assert source.scan(tables.GAMES, []).collect().is_empty()
     headers = tables.replay_headers(games, source.scan(tables.PLAYERS).collect())
     assert headers[new].teams() == fixture.teams()
 
