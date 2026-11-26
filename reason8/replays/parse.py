@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
 import subprocess
 import sys
@@ -34,6 +33,14 @@ from pathlib import Path
 from typing import Any
 
 from reason8.paths import data_dir, find_files, partitioned_path, require_partitioned
+from reason8.replays.codes import (
+    LUAUI_AI_ID,
+    MAPDRAW_ACTIONS,
+    TEAM_ACTIONS,
+    command_record,
+    round_number,
+    round_numbers,
+)
 from reason8.replays.replay import FORMAT
 from reason8.replays.sdfz import GAME_SPEED, RawCommandPacket, read_command_packets_file
 
@@ -69,128 +76,9 @@ INCLUDE_PACKETS = [
     "LUAMSG",  # needed for the UNITDEFS table and the faction picker; not kept
 ]
 
-# BAR custom commands (Beyond-All-Reason modules/customcommands.lua, Nov 2026).
-# The engine's own commands are named by the parser.
-BAR_CUSTOM_COMMANDS = {
-    13921: "FACTORY_GUARD",
-    13922: "AREA_GUARD",
-    13923: "STOP_PRODUCTION",
-    18200: "BLUEPRINT_PLACE",
-    18201: "BLUEPRINT_CREATE",
-    23000: "QUOTA_BUILD_TOGGLE",
-    30100: "AREA_MEX",
-    30101: "SELL_UNIT",
-    30102: "SHARE_UNIT",
-    31200: "CARRIER_SPAWN_ONOFF",
-    31210: "MORPH",
-    31300: "USER_FIRESTATE",
-    32102: "MANUAL_LAUNCH",
-    34569: "LAND_AT",
-    34571: "PRIORITY",
-    34922: "UNIT_SET_TARGET_NO_GROUND",
-    34923: "UNIT_SET_TARGET",
-    34924: "UNIT_CANCEL_TARGET",
-    34925: "UNIT_SET_TARGET_RECTANGLE",
-    37382: "WANT_CLOAK",
-    37383: "HOUND_WEAPON_TOGGLE",
-    37384: "SMART_TOGGLE",
-    39812: "RAW_MOVE",
-    39954: "AREA_ATTACK_GROUND",
-}
-
-# Engine command ids (rts/Sim/Units/CommandAI/Command.h), for nested INSERT commands.
-ENGINE_COMMANDS = {
-    0: "STOP",
-    1: "INSERT",
-    2: "REMOVE",
-    5: "WAIT",
-    6: "TIMEWAIT",
-    7: "DEATHWAIT",
-    8: "SQUADWAIT",
-    9: "GATHERWAIT",
-    10: "MOVE",
-    15: "PATROL",
-    16: "FIGHT",
-    20: "ATTACK",
-    21: "AREA_ATTACK",
-    25: "GUARD",
-    35: "GROUPSELECT",
-    36: "GROUPADD",
-    37: "GROUPCLEAR",
-    40: "REPAIR",
-    45: "FIRE_STATE",
-    50: "MOVE_STATE",
-    55: "SETBASE",
-    60: "INTERNAL",
-    65: "SELFD",
-    75: "LOAD_UNITS",
-    76: "LOAD_ONTO",
-    80: "UNLOAD_UNITS",
-    81: "UNLOAD_UNIT",
-    85: "ONOFF",
-    90: "RECLAIM",
-    95: "CLOAK",
-    100: "STOCKPILE",
-    105: "MANUALFIRE",
-    110: "RESTORE",
-    115: "REPEAT",
-    120: "TRAJECTORY",
-    125: "RESURRECT",
-    130: "CAPTURE",
-    135: "AUTOREPAIRLEVEL",
-    145: "IDLEMODE",
-    150: "FAILED",
-}
-
-# Command option bits (rts/Sim/Units/CommandAI/Command.h).
-OPTION_BITS = [
-    (4, "meta"),
-    (8, "internal"),
-    (16, "right"),
-    (32, "shift"),
-    (64, "ctrl"),
-    (128, "alt"),
-]
-
-MAPDRAW_ACTIONS = {0: "point", 1: "erase", 2: "line"}
-TEAM_ACTIONS = {
-    1: "giveaway",
-    2: "resign",
-    3: "join_team",
-    4: "team_died",
-    5: "ai_created",
-    6: "ai_destroyed",
-}
-LUAUI_AI_ID = 255  # AICOMMAND(S) with this aiId come from a player's LuaUI widget, not a bot
-
 
 class ParseError(Exception):
     pass
-
-
-def command_name(cmd_id: int) -> str:
-    if cmd_id < 0:
-        return "BUILD"
-    return ENGINE_COMMANDS.get(cmd_id) or BAR_CUSTOM_COMMANDS.get(cmd_id) or f"CMD_{cmd_id}"
-
-
-def option_names(bits: int) -> list[str]:
-    return [name for bit, name in OPTION_BITS if bits & bit]
-
-
-def _round_number(value: Any) -> Any:
-    """Round floats for compactness; command params are float32 anyway."""
-    if isinstance(value, float):
-        if math.isnan(value) or math.isinf(value):
-            return None
-        if value.is_integer():
-            return int(value)
-        return round(value, 2)
-    return value
-
-
-def _round_numbers(values: Any) -> list[Any]:
-    return [_round_number(value) for value in values]
 
 
 def run_parser(parser: Path, replay: Path, *, header_only: bool = False, timeout: float = 600):
@@ -206,24 +94,6 @@ def run_parser(parser: Path, replay: Path, *, header_only: bool = False, timeout
         )
         raise ParseError(f"sdfz-demo-parser: {message}")
     return process.stdout
-
-
-def _command_record(
-    command_id: int, options: int, params: list[float], unitdefs: list[str]
-) -> dict[str, Any]:
-    record: dict[str, Any] = {"cmd": command_name(command_id), "cmd_id": command_id}
-    if command_id < 0:
-        unitdef_index = -command_id
-        record["unit"] = unitdefs[unitdef_index] if unitdef_index < len(unitdefs) else None
-    option_labels = option_names(options)
-    if option_labels:
-        record["opts"] = option_labels
-    if command_id == 1 and len(params) >= 3:  # INSERT: [queuePos, cmdId, options, *params]
-        record["pos"] = _round_number(params[0])
-        record["inner"] = _command_record(int(params[1]), int(params[2]), params[3:], unitdefs)
-    else:
-        record["params"] = _round_numbers(params)
-    return record
 
 
 def compact(parsed: dict[str, Any], raw: list[RawCommandPacket], source: dict[str, Any]):
@@ -274,7 +144,7 @@ def compact(parsed: dict[str, Any], raw: list[RawCommandPacket], source: dict[st
                 packet_data["commands"] if name == "AICOMMANDS" else [packet_data["command"]]
             )
             if len(parsed_commands) != len(raw_packet.commands) or any(
-                _round_numbers(parsed_command["params"]) != _round_numbers(raw_command.params)
+                round_numbers(parsed_command["params"]) != round_numbers(raw_command.params)
                 for parsed_command, raw_command in zip(
                     parsed_commands, raw_packet.commands, strict=True
                 )
@@ -307,7 +177,7 @@ def compact(parsed: dict[str, Any], raw: list[RawCommandPacket], source: dict[st
                 if units is not None:
                     event["units"] = units
                 event.update(
-                    _command_record(
+                    command_record(
                         raw_command.cmd_id, raw_command.options, list(raw_command.params), unitdefs
                     )
                 )
@@ -332,8 +202,8 @@ def compact(parsed: dict[str, Any], raw: list[RawCommandPacket], source: dict[st
                     "player": packet_data["playerNum"],
                     "team": packet_data["teamId"],
                     "ready": packet_data["readyState"],
-                    "x": _round_number(packet_data["x"]),
-                    "z": _round_number(packet_data["z"]),
+                    "x": round_number(packet_data["x"]),
+                    "z": round_number(packet_data["z"]),
                 }
             )
         elif name == "CHAT":
@@ -371,8 +241,8 @@ def compact(parsed: dict[str, Any], raw: list[RawCommandPacket], source: dict[st
                     "player": packet_data["playerNum"],
                     "to_team": packet_data["shareTeam"],
                     "units": packet_data["shareUnits"],
-                    "metal": _round_number(packet_data["shareMetal"]),
-                    "energy": _round_number(packet_data["shareEnergy"]),
+                    "metal": round_number(packet_data["shareMetal"]),
+                    "energy": round_number(packet_data["shareEnergy"]),
                 }
             )
         elif name == "SETSHARE":
@@ -382,8 +252,8 @@ def compact(parsed: dict[str, Any], raw: list[RawCommandPacket], source: dict[st
                     "type": "setshare",
                     "player": packet_data["playerNum"],
                     "team": packet_data["teamId"],
-                    "metal": _round_number(packet_data["metalShareFraction"]),
-                    "energy": _round_number(packet_data["energyShareFraction"]),
+                    "metal": round_number(packet_data["metalShareFraction"]),
+                    "energy": round_number(packet_data["energyShareFraction"]),
                 }
             )
         elif name == "AISHARE":
@@ -395,8 +265,8 @@ def compact(parsed: dict[str, Any], raw: list[RawCommandPacket], source: dict[st
                     "ai": packet_data["aiId"],
                     "from_team": packet_data["sourceTeam"],
                     "to_team": packet_data["destTeam"],
-                    "metal": _round_number(packet_data["metal"]),
-                    "energy": _round_number(packet_data["energy"]),
+                    "metal": round_number(packet_data["metal"]),
+                    "energy": round_number(packet_data["energy"]),
                     "units": packet_data["unitIds"],
                 }
             )

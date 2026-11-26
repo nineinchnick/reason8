@@ -198,7 +198,7 @@ def _command(frame, player, team, command, *, via="COMMAND", units=None, **field
 def command_replay(*, started: bool = True) -> Replay:
     """A parsed replay with every kind of build order and the events around them.
 
-    Options are listed in the order the parser writes them (`reason8.replays.parse.OPTION_BITS`).
+    Options are listed in the order the parser writes them (`reason8.replays.codes.OPTION_BITS`).
 
     Two players share team 0, a bot plays team 1. ``started=False`` gives a game that never
     started: every frame is None.
