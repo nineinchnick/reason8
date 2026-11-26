@@ -44,6 +44,7 @@ import polars as pl
 from reason8.paths import (
     PARTITION_PREFIX,
     data_dir,
+    partition,
     partition_in_range,
     require_partitioned,
 )
@@ -673,16 +674,51 @@ class Source:
     converted: dict[str, dict[str, pl.DataFrame]] = field(default_factory=dict)
     unreadable: dict[str, str] = field(default_factory=dict)
 
-    def scan(self, table: str) -> pl.LazyFrame:
-        """A lazy frame of one table: the stored rows, then those of the converted replays."""
+    def scan(self, table: str, replays: Iterable[str] | None = None) -> pl.LazyFrame:
+        """A lazy frame of one table: the stored rows, then those of the converted replays.
+
+        With `replays`, only theirs, read from the files of their days only.
+        """
+        wanted = None if replays is None else set(replays)
+        names = self.stored if wanted is None else self.stored & wanted
+        files = self.files.get(table) or []
+        if wanted is not None:
+            days = {partition(name) for name in names}
+            files = [path for path in files if path.parent.name in days]
         frames = []
-        if self.files.get(table):
-            stored = pl.scan_parquet(self.files[table], hive_partitioning=False)
-            frames.append(stored.filter(pl.col("replay").is_in(sorted(self.stored))))
-        frames += [rows[table].lazy() for rows in self.converted.values() if table in rows]
+        if files:
+            stored = pl.scan_parquet(files, hive_partitioning=False)
+            frames.append(stored.filter(pl.col("replay").is_in(sorted(names))))
+        frames += [
+            rows[table].lazy()
+            for name, rows in self.converted.items()
+            if table in rows and (wanted is None or name in wanted)
+        ]
         if not frames:
             return pl.LazyFrame(schema=SCHEMAS[table])
         return pl.concat(frames)
+
+    def by_day(self) -> list[Source]:
+        """The source split into its days, oldest first: a pass can read each in a process."""
+        days: dict[str, set[str]] = defaultdict(set)
+        for name in [*self.stored, *self.converted, *self.unreadable]:
+            days[partition(name)].add(name)
+        return [
+            Source(
+                files={
+                    table: [path for path in paths if path.parent.name == day]
+                    for table, paths in self.files.items()
+                },
+                stored=frozenset(self.stored & names),
+                converted={
+                    name: self.converted[name] for name in sorted(names & set(self.converted))
+                },
+                unreadable={
+                    name: self.unreadable[name] for name in sorted(names & set(self.unreadable))
+                },
+            )
+            for day, names in sorted(days.items())
+        ]
 
 
 def open_source(
@@ -751,6 +787,21 @@ def open_source(
             continue
         source.converted[name] = {table: rows[table] for table in tables}
     return source
+
+
+def add_source_arguments(parser: argparse.ArgumentParser) -> None:
+    """The options of a pass that reads the replays with `open_source`."""
+    parser.add_argument(
+        "--parsed",
+        type=Path,
+        default=data_dir() / "parsed",
+        help="parsed replays, read for those the tables lack",
+    )
+    parser.add_argument(
+        "--tables", type=Path, default=data_dir() / AREA, help="the tables (reason8 tables)"
+    )
+    parser.add_argument("--since", type=date.fromisoformat, help="first day (YYYY-MM-DD)")
+    parser.add_argument("--until", type=date.fromisoformat, help="day after the last (YYYY-MM-DD)")
 
 
 # --- writing
