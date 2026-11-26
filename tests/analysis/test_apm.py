@@ -12,7 +12,6 @@ from reason8.analysis.apm import (
     game_apm,
     measure,
     most_in_window,
-    parse_skill,
     per_minute,
     player_actions,
     report,
@@ -128,13 +127,6 @@ def test_end_frames():
     ]
     ends = end_frames(make_replay(events, end_frame=1000, players=players))
     assert ends == {0: 500, 1: 1000, 2: 900, 3: 950}
-
-
-def test_parse_skill():
-    assert parse_skill("[45.67]") == 45.67
-    assert parse_skill("(-1.5)") == -1.5
-    assert parse_skill(None) is None
-    assert parse_skill(12) == 12.0
 
 
 def test_game_apm_rows():

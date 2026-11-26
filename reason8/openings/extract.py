@@ -9,14 +9,13 @@ docs/reference/replay-format.md). Where an opening ends for the dataset is
 
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from reason8.game.maps import MapMetadata
 from reason8.game.positions import replay_positions
-from reason8.replays.replay import GAME_SPEED, BuildOrder, Replay
+from reason8.replays.replay import GAME_SPEED, BuildOrder, Replay, parse_skill
 
 OPENING_SECONDS = 8 * 60
 FACTION_PREFIXES = ("arm", "cor", "leg")
@@ -90,7 +89,7 @@ def openings(
         for team, position in replay_positions(replay, map_list).items()
         if position.on_spot
     }
-    skills = {player["teamId"]: replay_skill(player.get("skill")) for player in replay.players}
+    skills = {player["teamId"]: parse_skill(player.get("skill")) for player in replay.players}
     return [
         Opening(
             match=match,
@@ -107,12 +106,6 @@ def openings(
         for team in replay.teams().values()
         if not team.is_ai
     ]
-
-
-def replay_skill(text: str | None) -> float | None:
-    """OpenSkill mu from the replay's skill string, e.g. ``"[20.5]"`` or ``"~(12.3)"``."""
-    found = re.search(r"\d+(?:\.\d+)?", text or "")
-    return float(found.group()) if found else None
 
 
 def unit_role(unit: str) -> str:

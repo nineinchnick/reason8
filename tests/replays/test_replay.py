@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from reason8.replays.replay import BuildOrder, iter_replays, load_replay
+from reason8.replays.replay import BuildOrder, iter_replays, load_replay, parse_skill
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "replay.json"
 
@@ -151,3 +151,10 @@ def test_rejects_other_formats(tmp_path):
     path.write_text(json.dumps({"format": "something-else"}))
     with pytest.raises(ValueError):
         load_replay(path)
+
+
+def test_parse_skill():
+    assert parse_skill("[45.67]") == 45.67
+    assert parse_skill("(-1.5)") == -1.5
+    assert parse_skill(None) is None
+    assert parse_skill(12) == 12.0
