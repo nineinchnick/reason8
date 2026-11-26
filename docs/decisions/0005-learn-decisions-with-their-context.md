@@ -65,11 +65,11 @@ resources and the buildings already standing.
   until a pass needs them.
 - **Every pass over the parsed replays reads the tables**: the position check,
   first contact, the opening dataset and the measurements of actions per
-  minute, the opening meta and the balance patches. A parsed replay that the
-  tables lack, or hold for an older parsed file, is converted from its JSON by
-  the pass itself, in memory, so that a result never depends on whether
-  `reason8 tables` has run yet. Only `reason8 tables` and `reason8 parse`
-  write the tables.
+  minute, reactions to idle units, the opening meta and the balance patches. A
+  parsed replay that the tables lack, or hold for an older parsed file, is
+  converted from its JSON by the pass itself, in memory, so that a result
+  never depends on whether `reason8 tables` has run yet. Only `reason8 tables`
+  and `reason8 parse` write the tables.
 - **State comes from re-simulating the replay.** Training data joins the
   orders with the re-simulated state, at least for the part of the game being
   learned.

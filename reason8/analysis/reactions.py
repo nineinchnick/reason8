@@ -11,11 +11,12 @@ idle to the next order is the player's reaction, and the bot waits as long (ADR 
 
 Going idle is only known from a re-simulated game: the state export writes an ``idle`` line
 when a factory or builder runs out of orders (format 4 and later, `reason8 headless batch`).
-The orders come from the parsed replay's commands (`reason8 replays parse`; games whose
-replay is not parsed are skipped): a ``COMMAND`` packet goes to the player's current
-selection, an ``AICOMMAND`` packet from the player's widgets to the units it lists, as in
-`reason8.analysis.apm`. The reaction to an idle event is the first command the unit's player
-gives it at or after that frame, if one comes within `HORIZON_SECONDS`.
+The orders come from the commands and selections of the parsed replay, read from its
+tables (`reason8.replays.tables.open_source`; games whose replay is not parsed are
+skipped): a ``COMMAND`` packet goes to the player's current selection, an ``AICOMMAND``
+packet from the player's widgets to the units it lists, as in `reason8.analysis.apm`. The
+reaction to an idle event is the first command the unit's player gives it at or after that
+frame, if one comes within `HORIZON_SECONDS`.
 
 Two reactions are kept per idle event: ``clicked`` (``COMMAND``: what the player did) and
 ``any`` (with the widgets' commands, some of which follow a click, some run on their own).
@@ -32,19 +33,28 @@ from __future__ import annotations
 
 import argparse
 import os
-from collections.abc import Mapping, Sequence
+from collections import defaultdict
+from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
+from datetime import date
 from pathlib import Path
 
 import polars as pl
 
-from reason8.analysis.apm import SKILL_BANDS, WIDGET_AI, parse_skill, skill_band
+from reason8.analysis.apm import (
+    EVENT_FIELDS,
+    SKILL_BANDS,
+    WIDGET_AI,
+    EventRow,
+    event_stream,
+    skill_band,
+)
 from reason8.game.unitdefs import UnitDef, game_unit_defs
 from reason8.headless.state import STATE_SUFFIX, read_records
 from reason8.markdown import table
-from reason8.paths import data_dir
-from reason8.replays.parse import output_path
-from reason8.replays.replay import GAME_SPEED, Replay, load_replay
+from reason8.paths import data_dir, partition, partition_in_range
+from reason8.replays import tables
+from reason8.replays.replay import GAME_SPEED, Replay, parse_skill
 
 HORIZON_SECONDS = 60
 #: The first state format with idle events.
@@ -65,22 +75,24 @@ PHASES = (("0:00-3:00", 0, 180), ("3:00-6:00", 180, 360), ("6:00-10:00", 360, 60
 QUANTILES = (0.25, 0.5, 0.75, 0.9)
 
 
-def unit_commands(replay: Replay) -> dict[int, list[tuple[int, str]]]:
-    """Unit id -> (frame, "clicked" or "widget") of every command a player gave it, in order."""
+def unit_commands(events: Iterable[EventRow]) -> dict[int, list[tuple[int, str]]]:
+    """Unit id -> (frame, "clicked" or "widget") of every command a player gave it, in order.
+
+    `events` are the selections and commands of a replay in stream order, as tuples of
+    `reason8.analysis.apm.EVENT_FIELDS`.
+    """
     selections: dict[int, Sequence[int]] = {}
     commands: dict[int, list[tuple[int, str]]] = {}
-    for event in replay.events:
-        player = event.get("player")
-        if event["type"] == "select":
-            selections[player] = event.get("units") or ()
+    for event_type, frame, player, via, ai, event_units, *_ in events:
+        if event_type == "select":
+            selections[player] = event_units or ()
             continue
-        frame = event.get("frame")
-        if event["type"] != "cmd" or frame is None or frame < 0:
+        if event_type != "cmd" or frame is None or frame < 0:
             continue
-        if event.get("via") == "COMMAND":
+        if via == "COMMAND":
             units, kind = selections.get(player, ()), "clicked"
-        elif event.get("ai") == WIDGET_AI:
-            units, kind = event.get("units") or (), "widget"
+        elif ai == WIDGET_AI:
+            units, kind = event_units or (), "widget"
         else:
             continue
         for unit in units:
@@ -120,15 +132,18 @@ def idle_records(state_path: Path) -> tuple[dict[str, str], list[dict]]:
     return header["unitdefs"], [record for record in records if record["t"] == "idle"]
 
 
-def game_reactions(state_path: Path, parsed_path: Path) -> list[dict] | None:
-    """The idle events of human players in one re-simulated game, with their reactions; None
-    if the game has idle events but its replay is not parsed."""
-    names, idle = idle_records(state_path)
-    if not idle:
-        return []
-    if not parsed_path.is_file():
-        return None
-    replay = load_replay(parsed_path)
+def game_reactions(
+    replay_name: str,
+    names: Mapping[str, str],
+    idle: Sequence[dict],
+    replay: Replay,
+    events: Iterable[EventRow],
+) -> list[dict]:
+    """The idle events of human players in one re-simulated game, with their reactions.
+
+    `names` and `idle` are the game's `idle_records`, `replay` its header
+    (`reason8.replays.tables.replay_headers`) and `events` its selections and commands.
+    """
     humans = {team.team_id for team in replay.teams().values() if not team.is_ai}
     skill_of = {
         player["teamId"]: parse_skill(player.get("skill"))
@@ -138,11 +153,11 @@ def game_reactions(state_path: Path, parsed_path: Path) -> list[dict] | None:
     idle = [event for event in idle if event["team"] in humans]
     rows = []
     for event, (clicked, any_kind) in zip(
-        idle, reactions(idle, unit_commands(replay)), strict=True
+        idle, reactions(idle, unit_commands(events)), strict=True
     ):
         rows.append(
             {
-                "replay": state_path.name.removesuffix(STATE_SUFFIX),
+                "replay": replay_name,
                 "team": event["team"],
                 "unit_id": event["u"],
                 "unit": names.get(str(event["d"])),
@@ -156,37 +171,90 @@ def game_reactions(state_path: Path, parsed_path: Path) -> list[dict] | None:
     return rows
 
 
-def _game(item: tuple[str, str]) -> list[dict] | None:
-    state_path, parsed_path = item
-    try:
-        return game_reactions(Path(state_path), Path(parsed_path))
-    except (OSError, ValueError, KeyError) as error:
-        print(f"{state_path}: {error}", flush=True)
-        return []
+def replay_name_of(state_path: Path) -> str:
+    return state_path.name.removesuffix(STATE_SUFFIX)
+
+
+def day_reactions(source: tables.Source, state_paths: Sequence[Path]) -> tuple[list[dict], int]:
+    """The rows of `game_reactions` for the state files of one day, and how many games with
+    idle events were skipped because their replay is not in the source."""
+    idle_of = {}
+    for state_path in state_paths:
+        try:
+            names, idle = idle_records(state_path)
+        except (OSError, ValueError, KeyError) as error:
+            print(f"{state_path}: {error}", flush=True)
+            continue
+        if idle:
+            idle_of[replay_name_of(state_path)] = names, idle
+    headers = tables.replay_headers(
+        source.scan(tables.GAMES, idle_of).collect(),
+        source.scan(tables.PLAYERS, idle_of).collect(),
+    )
+    stream = event_stream(source, sorted(headers)).collect()
+    events_of = {
+        name: list(zip(*(rows[field].to_list() for field in EVENT_FIELDS), strict=True))
+        for (name,), rows in stream.group_by("replay", maintain_order=True)
+    }
+    rows = []
+    for replay_name in sorted(headers):
+        names, idle = idle_of[replay_name]
+        rows += game_reactions(
+            replay_name, names, idle, headers[replay_name], events_of.get(replay_name, ())
+        )
+    return rows, len(idle_of) - len(headers)
 
 
 def measure(
-    state_dir: Path, parsed_dir: Path, unit_defs: Mapping[str, UnitDef], jobs: int
+    state_dir: Path,
+    parsed_dir: Path,
+    unit_defs: Mapping[str, UnitDef],
+    jobs: int,
+    *,
+    tables_dir: Path | None = None,
+    since: date | None = None,
+    until: date | None = None,
 ) -> pl.DataFrame:
     """The idle events of every state file with them (format 4 and later) whose replay is
-    parsed (`reason8 replays parse`); the games whose replay is not are skipped."""
-    items = [
-        (
-            str(state_path),
-            str(
-                output_path(parsed_dir, Path(state_path.name.removesuffix(STATE_SUFFIX) + ".sdfz"))
-            ),
-        )
-        for state_path in sorted(state_dir.glob(f"date=*/*{STATE_SUFFIX}"))
-    ]
+    parsed; the games whose replay is not are skipped.
+
+    The replays are read from their tables (`reason8.replays.tables.open_source`, by
+    default next to `parsed_dir`), a day per process.
+    """
+    state_paths_of: dict[str, list[Path]] = defaultdict(list)
+    for state_path in sorted(state_dir.glob(f"date=*/*{STATE_SUFFIX}")):
+        if partition_in_range(state_path.parent.name, since, until):
+            state_paths_of[partition(state_path.name)].append(state_path)
+    source = tables.open_source(
+        parsed_dir,
+        parsed_dir.parent / tables.AREA if tables_dir is None else tables_dir,
+        since=since,
+        until=until,
+        replays=[
+            replay_name_of(state_path)
+            for state_paths in state_paths_of.values()
+            for state_path in state_paths
+        ],
+        tables=(tables.GAMES, tables.PLAYERS, tables.COMMANDS, tables.SELECTIONS),
+    )
+    for name, error in source.unreadable.items():
+        print(f"{name}: {error}", flush=True)
+    sources = {
+        partition(next(iter(names))): day
+        for day in source.by_day()
+        if (names := day.stored | set(day.converted))
+    }
     rows = []
     unparsed = 0
-    with ProcessPoolExecutor(max_workers=jobs) as pool:
-        for game_rows in pool.map(_game, items, chunksize=4):
-            if game_rows is None:
-                unparsed += 1
-            else:
-                rows += game_rows
+    with ProcessPoolExecutor(max_workers=max(1, jobs)) as pool:
+        days = sorted(state_paths_of)
+        for day_rows, day_unparsed in pool.map(
+            day_reactions,
+            [sources.get(day, tables.Source({})) for day in days],
+            [state_paths_of[day] for day in days],
+        ):
+            rows += day_rows
+            unparsed += day_unparsed
     if unparsed:
         print(f"skipped {unparsed} games whose replay is not parsed", flush=True)
     frame = pl.DataFrame(rows, schema=IDLE_SCHEMA)
@@ -264,7 +332,7 @@ def out_path(out_dir: Path) -> Path:
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--state-dir", type=Path, help="default: <data dir>/state")
-    parser.add_argument("--parsed-dir", type=Path, help="default: <data dir>/parsed")
+    tables.add_source_arguments(parser)
     parser.add_argument("--out", type=Path, help="default: <data dir>/reactions")
     parser.add_argument("--data-dir", default="data/bar", help="content dir with the game")
     parser.add_argument(
@@ -284,9 +352,12 @@ def run(args: argparse.Namespace) -> int:
     unit_defs = game_unit_defs(Path(args.data_dir).resolve(), args.game)
     idle = measure(
         args.state_dir or data_dir() / "state",
-        args.parsed_dir or data_dir() / "parsed",
+        args.parsed,
         unit_defs,
         args.jobs,
+        tables_dir=args.tables,
+        since=args.since,
+        until=args.until,
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     idle.write_parquet(out_path(out_dir))
