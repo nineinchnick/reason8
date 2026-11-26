@@ -44,7 +44,7 @@ UNKNOWN = "<unknown>"
 class OpeningSteps:
     """One player's opening as a sequence of steps, with what is known before the game."""
 
-    match_id: int
+    match_id: int | str  # the dataset's match id; a replay's match name in the measurements
     faction: str | None
     map: str | None
     position: str | None
@@ -185,6 +185,21 @@ class NgramModel:
             probabilities = mixed / (total + distinct)
         self._cache[contexts] = probabilities
         return probabilities
+
+    def most_likely(self, opening: OpeningSteps, index: int) -> str | None:
+        """The unit counted most often after the most specific context seen in training.
+
+        This reads the counts by back-off instead of interpolating them: the first level
+        whose context was seen decides, ties go to the unit counted first. None when no
+        level has seen its context. It is the plain frequency baseline of the measurements
+        in docs/research/.
+        """
+        for level, table in zip(self.levels, self.tables, strict=True):
+            seen = table.get(self.context(level, opening, index))
+            if seen is not None:
+                indices, counts, _, _ = seen
+                return self.vocabulary[indices[int(np.argmax(counts))]]
+        return None
 
     def to_json(self) -> dict[str, Any]:
         return {
