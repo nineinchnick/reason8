@@ -48,7 +48,8 @@ from reason8.paths import (
     partition_in_range,
     require_partitioned,
 )
-from reason8.replays.parse import OPTION_BITS, PARSED_SUFFIX
+from reason8.replays.codes import OPTION_BITS
+from reason8.replays.parse import PARSED_SUFFIX
 from reason8.replays.replay import (
     CTRL_MULTIPLIER,
     FORMAT,

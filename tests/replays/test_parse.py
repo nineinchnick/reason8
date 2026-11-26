@@ -12,13 +12,12 @@ from pathlib import Path
 
 import pytest
 
+from reason8.replays.codes import command_name, option_names
 from reason8.replays.parse import (
     FORMAT,
     ParseError,
-    command_name,
     compact,
     failures_by,
-    option_names,
     output_path,
     summarize,
     write_json_zst,
