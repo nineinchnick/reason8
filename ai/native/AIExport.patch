@@ -1,0 +1,26 @@
+--- a/src/AIExport.cpp
++++ b/src/AIExport.cpp
+@@ -9,6 +9,7 @@
+ 
+ #include "circuit/CircuitAI.h"
+ #include "util/Profiler.h"
++#include "Governor.h"  // Reason8
+ 
+ #include <stdexcept>
+ #include <map>
+@@ -38,6 +39,7 @@
+ 	try {
+ 		circuit::CProfiler::GetInstance().InitNames(skirmishAIId);
+ 
++		innerCallback = reason8::InstallGovernor(skirmishAIId, innerCallback);  // Reason8
+ 		springai::OOAICallback* clb = springai::WrappOOAICallback::GetInstance(innerCallback, skirmishAIId);
+ 		circuit::CCircuitAI* ai = new circuit::CCircuitAI(clb);
+ 
+@@ -63,6 +65,7 @@
+ 
+ 		delete ai;
+ 		delete clb;
++		reason8::ReleaseGovernor(skirmishAIId);  // Reason8
+ 
+ 		circuit::CProfiler::GetInstance().ReleaseNames(skirmishAIId);
+ 
