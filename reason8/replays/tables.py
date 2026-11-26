@@ -19,7 +19,10 @@ converting only the replays that are new or changed. Every file is written to a 
 and renamed into place, ``games`` last, so a run that stops halfway leaves the day to be redone.
 
 Read the tables with `scan` (a lazy Polars frame with ``since``/``until``), and the build orders
-with `build_orders`, which returns what `Replay.build_orders` returns.
+with `build_orders`, which returns what `Replay.build_orders` returns. A pass over the parsed
+replays opens them with `open_source`, which adds the parsed replays that the tables lack by
+converting their JSON, and `replay_headers` makes a `Replay` of everything but the events
+from the games and players tables.
 """
 
 from __future__ import annotations
@@ -47,6 +50,7 @@ from reason8.paths import (
 from reason8.replays.parse import OPTION_BITS, PARSED_SUFFIX
 from reason8.replays.replay import (
     CTRL_MULTIPLIER,
+    FORMAT,
     SHIFT_MULTIPLIER,
     BuildOrder,
     Replay,
@@ -569,6 +573,184 @@ def teams_from(players: pl.DataFrame) -> dict[str, dict[int, Team]]:
 def options_dict(options: Iterable[Mapping[str, str | None]] | None) -> dict[str, str | None]:
     """A ``modoptions``/``mapoptions`` column value as the dict the JSON has."""
     return {option["name"]: option["value"] for option in options or ()}
+
+
+def _start_pos(row: Mapping[str, Any]) -> dict[str, float | None] | None:
+    if row["start_x"] is None:
+        return None
+    return {"x": row["start_x"], "y": row["start_y"], "z": row["start_z"]}
+
+
+def replay_headers(games: pl.DataFrame, players: pl.DataFrame) -> dict[str, Replay]:
+    """Replay -> a `Replay` of everything but its events, from rows of the games and players.
+
+    What the parsed document says about the game and its players: ``meta``, ``players``,
+    ``ais``, ``allyTeams``, ``modoptions``, ``mapoptions``, ``restrictions``, ``unitdefs`` and
+    ``source``, so that `Replay.teams()`, the positions of `reason8.game.positions` and the
+    like work as on the document. Names, ``spectators`` and ``statistics`` are not in the
+    tables, and ``events`` is left out: read the commands from their table. A player's
+    ``skillUncertainty`` is the float32 of the table.
+    """
+    by_replay: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(
+        lambda: {"players": [], "ais": []}
+    )
+    for row in players.sort("replay", "slot").iter_rows(named=True):
+        if row["is_ai"]:
+            record = {"aiId": row["ai_id"], "shortName": row["ai_short_name"]}
+            record["version"] = row["ai_version"]
+        else:
+            record = {"playerId": row["player_id"]}
+        record |= {
+            "teamId": row["team_id"],
+            "allyTeamId": row["ally_team_id"],
+            "userId": row["user_id"],
+            "faction": row["faction"],
+            "rank": row["rank"],
+            "skill": row["skill"],
+            "skillUncertainty": row["skill_uncertainty"],
+            "startPos": _start_pos(row),
+        }
+        by_replay[row["replay"]]["ais" if row["is_ai"] else "players"].append(record)
+    headers = {}
+    for row in games.iter_rows(named=True):
+        meta = {
+            "gameId": row["game_id"],
+            "engine": row["engine"],
+            "game": row["game"],
+            "map": row["map"],
+            "startTime": row["start_time"],
+            "durationMs": row["duration_ms"],
+            "fullDurationMs": row["full_duration_ms"],
+            "winningAllyTeamIds": row["winning_ally_teams"],
+            "startPosType": row["start_pos_type"],
+            "demoVersion": row["demo_version"],
+            "gameTime": row["game_time"],
+            "wallclockTime": row["wallclock_time"],
+            "startFrame": row["start_frame"],
+            "endFrame": row["end_frame"],
+            "serverMatchId": None if row["match_id"] is None else str(row["match_id"]),
+        }
+        ally_teams = []
+        for ally_team in row["ally_teams"] or ():
+            box = {side: ally_team[side] for side in ("left", "top", "right", "bottom")}
+            ally_teams.append(
+                {
+                    "allyTeamId": ally_team["ally_team_id"],
+                    "playerCount": ally_team["player_count"],
+                    "startBox": box if any(value is not None for value in box.values()) else None,
+                }
+            )
+        records = by_replay.get(row["replay"], {"players": [], "ais": []})
+        headers[row["replay"]] = Replay(
+            {
+                "format": FORMAT,
+                "source": {"bytes": row["sdfz_bytes"], "parser": row["parser"]},
+                "meta": meta,
+                "allyTeams": ally_teams,
+                "players": records["players"],
+                "ais": records["ais"],
+                "modoptions": options_dict(row["modoptions"]),
+                "mapoptions": options_dict(row["mapoptions"]),
+                "restrictions": options_dict(row["restrictions"]),
+                "unitdefs": row["unitdefs"],
+            }
+        )
+    return headers
+
+
+@dataclass
+class Source:
+    """The rows of the replays of some days, as `open_source` found them.
+
+    The rows of most replays come from the day files of the tables; those of the parsed
+    replays that the tables lack (new, changed, or in a day written by another version) were
+    converted from their JSON. `unreadable` holds the parsed replays that could not be read,
+    with the error.
+    """
+
+    files: dict[str, list[Path]]  # table -> the day files to read
+    stored: frozenset[str] = frozenset()  # the replays whose rows are read from those files
+    converted: dict[str, dict[str, pl.DataFrame]] = field(default_factory=dict)
+    unreadable: dict[str, str] = field(default_factory=dict)
+
+    def scan(self, table: str) -> pl.LazyFrame:
+        """A lazy frame of one table: the stored rows, then those of the converted replays."""
+        frames = []
+        if self.files.get(table):
+            stored = pl.scan_parquet(self.files[table], hive_partitioning=False)
+            frames.append(stored.filter(pl.col("replay").is_in(sorted(self.stored))))
+        frames += [rows[table].lazy() for rows in self.converted.values() if table in rows]
+        if not frames:
+            return pl.LazyFrame(schema=SCHEMAS[table])
+        return pl.concat(frames)
+
+
+def open_source(
+    parsed_dir: Path | None,
+    directory: Path | None = None,
+    *,
+    since: date | None = None,
+    until: date | None = None,
+    replays: Iterable[str] | None = None,
+    tables: Iterable[str] = TABLES,
+    log: Callable[[str], None] = lambda message: print(message, file=sys.stderr),
+) -> Source:
+    """The replays of the days ``since`` (inclusive) .. ``until`` (exclusive) for a pass.
+
+    These are the replays in the tables of ``directory`` and the parsed replays in
+    ``parsed_dir``, or only those of ``replays`` (names without ``.sdfz``). A parsed replay
+    that the tables lack or hold for an older parsed file is converted from its JSON here,
+    one at a time, and only its rows of ``tables`` are kept; `reason8 tables` stores them
+    instead, so that the next pass does not convert them again.
+    """
+    directory = directory or tables_dir()
+    tables = tuple(tables)
+    wanted = None if replays is None else frozenset(replays)
+    files: dict[str, list[Path]] = {table: [] for table in tables}
+    kept: set[str] = set()
+    to_convert: list[tuple[str, Path, int]] = []
+    stored_days: dict[str, dict[str, int] | None] = {}
+    partitions = sorted(
+        path
+        for path in directory.glob(PARTITION_PREFIX + "*")
+        if path.is_dir() and partition_in_range(path.name, since, until)
+    )
+    for partition_directory in partitions:
+        day = partition_directory.name.removeprefix(PARTITION_PREFIX)
+        stored = stored_replays(partition_directory, day)
+        stored_days[day] = stored
+        if stored is None:  # incomplete, or written by another version: read from the JSON
+            continue
+        # the replays the day's games table lists: a day being rewritten may hold more
+        kept |= {name for name in stored if wanted is None or name in wanted}
+        for table in tables:
+            files[table].append(partition_directory / table_name(day, table))
+    parsed_partitions = parsed_days(parsed_dir, since, until) if parsed_dir else []
+    for parsed_partition in parsed_partitions:
+        day = parsed_partition.name.removeprefix(PARTITION_PREFIX)
+        stored = stored_days.get(day) or {}
+        for path in sorted(parsed_partition.glob("*" + PARSED_SUFFIX)):
+            name = replay_key(path)
+            if wanted is not None and name not in wanted:
+                continue
+            size = path.stat().st_size
+            if stored.get(name) != size:
+                to_convert.append((name, path, size))
+                kept.discard(name)
+    source = Source(files, frozenset(kept))
+    if to_convert:
+        log(
+            f"{len(to_convert)} parsed replays are not in the tables or changed since: "
+            "reading them from the JSON (`reason8 tables` stores them)"
+        )
+    for name, path, size in to_convert:
+        try:
+            rows = replay_tables(load_replay(path), name, size)
+        except Exception as error:  # reported by the pass, as a replay it could not read
+            source.unreadable[name] = str(error)
+            continue
+        source.converted[name] = {table: rows[table] for table in tables}
+    return source
 
 
 # --- writing
