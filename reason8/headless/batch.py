@@ -7,10 +7,11 @@
 For every replay it fetches what the replay needs (`reason8 headless setup`), plays it
 with the state export widget (`reason8 headless run`) and writes the state to
 <out-dir>/date=<date>/<replay name>.jsonl.gz, in the date partition of the replay
-(`reason8.paths`). A replay whose state file is already there is skipped,
-so the command can be repeated after a failure. Content is fetched one replay at a time,
-because the downloads share one pool; the engines run --jobs at once. An engine needs 5
-to 6 GB of RAM (docs/research/state-extraction.md).
+(`reason8.paths`), with its Parquet tables next to it (`reason8 headless tables`). A
+replay whose state file is already there is not played again (only converted, when its
+tables are missing), so the command can be repeated after a failure. Content is fetched
+one replay at a time, because the downloads share one pool; the engines run --jobs at
+once. An engine needs 5 to 6 GB of RAM (docs/research/state-extraction.md).
 
 Prints one JSON object per replay as it finishes. A run that fails, times out or desyncs
 writes no state file, and the exit code is then non-zero.
@@ -27,7 +28,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
 from reason8.headless import run as headless_run
-from reason8.headless import setup
+from reason8.headless import setup, tables
 from reason8.headless.state import STATE_SUFFIX, state_path
 from reason8.paths import require_partitioned
 from reason8.replays import sdfz
@@ -86,6 +87,7 @@ def play(replay: Path, target: Path, args: argparse.Namespace) -> dict:
             ):
                 shutil.copyfileobj(source, packed)
             partial.rename(target)
+            result["tables"] = tables.convert(target)["bytes"]
         result["state_file"] = str(target) if result["ok"] else None
     return result
 
@@ -130,7 +132,20 @@ def run(args: argparse.Namespace) -> int:
         for replay in replays:
             target = state_path(args.out_dir, replay)
             if target.exists():
-                print(json.dumps({"target": replay.name, "ok": True, "skipped": True}), flush=True)
+                needs_tables = not tables.converted(target)
+                if needs_tables:
+                    tables.convert(target)
+                print(
+                    json.dumps(
+                        {
+                            "target": replay.name,
+                            "ok": True,
+                            "skipped": True,
+                            "converted": needs_tables,
+                        }
+                    ),
+                    flush=True,
+                )
                 continue
             failed = [] if args.no_fetch else fetch_content(args.data_dir, replay)
             if failed:
