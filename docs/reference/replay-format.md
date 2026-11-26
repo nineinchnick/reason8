@@ -424,9 +424,10 @@ in row groups of 16,384 rows.
 From these, `Replay.build_orders()` (with `count`, `queued`, `inserted` and
 `quota`), `Replay.teams()`, the action counting of `reason8.analysis.apm`
 (commands and selections in stream order, ends from `events`) and what the
-opening dataset, first contact and the position check take from a replay can
-be read without the JSON. The tests check the first three against the JSON on
-the fixture and on synthetic replays.
+opening dataset, first contact and the position check take from a replay are
+read without the JSON. The tests check them against the JSON on the fixture
+and on synthetic replays, and every pass over the parsed replays reads the
+tables ([measured below](#passes-over-the-tables)).
 
 Not in the tables:
 
@@ -561,6 +562,34 @@ uv run reason8 tables --jobs 8
 At the rate of the sample with 4 processes that is about 4.8 hours; on an
 otherwise idle machine with the default 8 processes about 1 to 1.5 hours. The
 tables will take about 55 GB next to the 70 GB of JSON.
+
+### Passes over the tables
+
+Every pass over the parsed replays was run on the same two weeks, from the
+JSON documents (before) and from the tables (after), on the same loaded
+machine (load average 12 to 22 from other work). The outputs are equal: the
+dataset's Parquet files row for row and its manifest but for `built_at` and
+the code version, the APM and first-contact tables row for row, and the
+reports byte for byte. Processes are those of the pass; a pass from the tables
+ran with `POLARS_MAX_THREADS=4`. `opening-shift` ran with 20 label shuffles
+instead of 1,000, which take more than an hour either way.
+
+| Pass                                 | Before (JSON)      | After (tables)     |
+| ------------------------------------ | ------------------ | ------------------ |
+| `dataset`                            | 288 s, 4 processes | 14 s, 1 process    |
+| `analysis apm`                       | 383 s, 4 processes | 325 s, 3 processes |
+| `maps check`                         | 986 s, 1 process   | 4.2 s, 1 process   |
+| `analysis map-meta`                  | 1,536 s, 1 process | 311 s, 1 process   |
+| `analysis opening-shift --rounds 20` | 5,337 s, 1 process | 4,807 s, 1 process |
+| `contact` (12 re-simulated games)    | 8.8 s, 1 process   | 2.4 s, 1 process   |
+
+- `map-meta` and `opening-shift` spend nearly all of their time in the
+  measurement itself (classifiers and label shuffles): loading the sample
+  takes 6.7 s and 4.1 s from the tables.
+- `analysis apm` gains least: putting the commands, selections and events back
+  in stream order takes about 0.13 s per replay in Python, and counting the
+  actions, which is per event, another 0.15 s. From the JSON a replay took
+  about 0.7 s.
 
 ### Earlier replays
 

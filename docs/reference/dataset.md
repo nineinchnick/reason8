@@ -237,7 +237,9 @@ The day is the first ten characters of the replay's file name; a file whose
 name doesn't start with a date (our own test games) goes to `date=unknown`.
 `reason8.paths.partition()` is the one place that knows this. Commands that
 read a directory find the files in every partition; `sync`, `parse`, `tables`
-and `dataset` take `--since` and `--until` (exclusive) to read only some days.
+and the passes over the parsed replays (`dataset`, `contact`, `maps check`,
+the `analysis` commands) take `--since` and `--until` (exclusive) to read only
+some days.
 
 Data files at the top of a partitioned directory (the earlier, flat layout)
 stop `download`, `parse`, `sync`, `headless batch` and `dataset` until they
