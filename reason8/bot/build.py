@@ -48,6 +48,7 @@ OPENINGS_NAME = "openings.json"
 BASE_NAME = "base.json"
 MANIFEST_NAME = "reason8_build.json"
 OPENING_TABLE = "reason8/opening_table.as"
+LIMITS_ONLY_NAME = "BARbLimited"
 
 # openings.json "tasks" values -> BARb's Task::BuildType (script/task.as). Types that
 # need more than a unit and a position (geothermal spots, pylons) are left out.
@@ -152,6 +153,16 @@ def opening_table(openings: dict) -> str:
         if reaction_rows
         else "const array<string> REACTIONS;\n"
     )
+    batch_rows = [
+        f'"{kind} {float(size)}"'
+        for kind, size in sorted((openings.get("batches") or {}).items())
+        if kind.isalpha()
+    ]
+    batches = (
+        "const array<string> BATCHES = {" + ",".join(f"\n\t{row}" for row in batch_rows) + "\n};\n"
+        if batch_rows
+        else "const array<string> BATCHES;\n"
+    )
     body = "".join(f"\n\t\t{entry}," for entry in entries).rstrip(",")
     openings_array = f"array<SOpening> = {{{body}\n\t}}" if entries else "array<SOpening>()"
     return (
@@ -161,6 +172,8 @@ def opening_table(openings: dict) -> str:
         "\n"
         '// Reaction delays: "<kind> <until second> <answered> <quantiles of seconds>".\n'
         + reactions
+        + '// Units started between two looks: "<kind> <mean>".\n'
+        + batches
         + "\n"
         "array<SOpening> MakeOpenings()\n"
         "{\n"
@@ -178,8 +191,14 @@ def assemble(
     source_dir: Path,
     profile: str,
     allow_base_drift: bool = False,
+    limits_only: bool = False,
 ) -> tuple[dict[str, bytes], dict]:
-    """(files of the AI folder by relative path, facts about the build)."""
+    """(files of the AI folder by relative path, facts about the build).
+
+    With `limits_only` the AI is stock BARb's decisions under Reason8's human-like limits
+    (ADR 0008) and no openings, installed under the short name `LIMITS_ONLY_NAME`: the fair
+    opponent for Reason8 (ADR 0003).
+    """
     files: dict[str, bytes] = {}
 
     # 1. the engine's BARb: everything but its own identity, configs and scripts
@@ -216,6 +235,13 @@ def assemble(
             + f". Carry the changes over and update {BASE_NAME} (or pass --allow-base-drift)."
         )
     openings = json.loads((source_dir / OPENINGS_NAME).read_text(encoding="utf-8"))
+    if limits_only:
+        openings = {**openings, "openings": []}
+        files["AIInfo.lua"] = re.sub(
+            r"(key\s*=\s*'shortName'\s*,\s*value\s*=\s*')[^']+'",
+            rf"\g<1>{LIMITS_ONLY_NAME}'",
+            files["AIInfo.lua"].decode("utf-8"),
+        ).encode("utf-8")
     files[f"script/{profile}/{OPENING_TABLE}"] = opening_table(openings).encode("utf-8")
 
     short_name, version = ai_identity(files["AIInfo.lua"].decode("utf-8"))
@@ -228,6 +254,7 @@ def assemble(
         "replaced": replaced,
         "base_drift": drifted,
         "openings": len(openings.get("openings", [])),
+        "limits_only": limits_only,
         "openings_sha256": sha256((source_dir / OPENINGS_NAME).read_bytes()),
     }
     return files, facts
@@ -243,6 +270,7 @@ def build(args: argparse.Namespace) -> dict:
         source_dir=Path(args.source).resolve(),
         profile=args.profile,
         allow_base_drift=args.allow_base_drift,
+        limits_only=args.limits_only,
     )
     facts = {"engine": engine_dir.name, "game": args.game, **facts}
 
@@ -274,6 +302,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--engine", help="engine version (default: the newest)")
     parser.add_argument("--profile", default="hard", help="BARb profile to build on")
     parser.add_argument("--source", default=str(DEFAULT_SOURCE), help="our AI files")
+    parser.add_argument(
+        "--limits-only",
+        action="store_true",
+        help=f"build {LIMITS_ONLY_NAME}: BARb's decisions under Reason8's limits, no openings",
+    )
     parser.add_argument(
         "--allow-base-drift",
         action="store_true",

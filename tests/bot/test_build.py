@@ -191,6 +191,14 @@ def test_assemble(tmp_path):
     assert facts["base_drift"] == []
 
 
+def test_assemble_limits_only(tmp_path):
+    stock_hash = hashlib.sha256(b"// stock factory\n").hexdigest()
+    files, facts = build.assemble(**make_inputs(tmp_path, stock_hash), limits_only=True)
+    assert facts["short_name"] == build.LIMITS_ONLY_NAME and facts["openings"] == 0
+    assert facts["limits_only"]
+    assert b"array<SOpening>()" in files["script/hard/reason8/opening_table.as"]
+
+
 def test_assemble_stops_when_the_stock_script_changed(tmp_path):
     inputs = make_inputs(tmp_path, "0" * 64)
     with pytest.raises(SystemExit, match="factory.as"):
