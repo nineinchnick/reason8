@@ -24,8 +24,8 @@ name in the bucket:
 A file is copied when the other side doesn't have it or has it with a different size; nothing is
 ever deleted on either side. Other files in these directories (``.part`` downloads, leftovers of
 earlier formats, files in the wrong partition) are not copied, and data files outside the date
-partitions (the earlier, flat layout) stop the sync until ``reason8 storage migrate-layout`` has
-moved them. The bookkeeping files (``manifest.parquet``, ``_index.jsonl``) are merged instead of
+partitions (the earlier, flat layout) stop the sync until they have been
+moved. The bookkeeping files (``manifest.parquet``, ``_index.jsonl``) are merged instead of
 copied, so rows written on different machines all survive: manifest rows by match, the later
 ``updated_at`` winning; index entries by replay file, the copied side winning. ``--match``
 (file names) and ``--since``/``--until`` (partitions; ``--until`` is exclusive) copy only some
@@ -143,10 +143,9 @@ def check_layout(area_name: str, area: Area, sizes: dict[str, int], side: str) -
         return
     flat = [path for path in sizes if "/" not in path and is_data_name(path, area)]
     if flat:
-        where = "local" if side == LOCAL_SIDE else "s3"
         raise LayoutError(
             f"{len(flat)} {area_name} files in the {side} are not in date partitions; move "
-            f"them with `reason8 storage migrate-layout {where} --apply`"
+            "them into their partitions"
         )
 
 

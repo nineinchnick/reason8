@@ -8,7 +8,7 @@ from types import ModuleType
 
 from reason8.analysis import apm, map_meta, opening_shift, reactions
 from reason8.bot import build, check, export, game
-from reason8.data import download, migrate, sync
+from reason8.data import download, sync
 from reason8.evaluation import games as evaluation_games
 from reason8.evaluation import openings as evaluation_openings
 from reason8.evaluation import report as evaluation_report
@@ -27,11 +27,6 @@ Command = tuple[str, ModuleType, str]
 COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
     ("download", download, "download replays of the selected matches"),
     ("sync", sync, "copy the data directory to or from the S3 bucket"),
-    (
-        "storage",
-        "the layout of the data directory and the S3 bucket",
-        [("migrate-layout", migrate, "move flat data files into the date partitions")],
-    ),
     ("parse", parse, "parse replays into compact JSON"),
     ("tables", replay_tables, "build the Parquet tables of the parsed replays"),
     ("header", sdfz, "print which engine, game and map a replay needs"),

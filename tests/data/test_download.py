@@ -123,7 +123,7 @@ def test_a_flat_layout_is_not_downloaded_again(tmp_path):
     queue = download_order(selection((1, 0, 0)), "newest")
     (tmp_path / queue["replay_file_name"][0]).write_bytes(b"flat")
     server = FakeServer()
-    with pytest.raises(LayoutError, match="migrate-layout"):
+    with pytest.raises(LayoutError, match="not in date partitions"):
         run_download(tmp_path, server, queue, 1)
     assert server.requests == []
 

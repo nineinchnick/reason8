@@ -178,7 +178,7 @@ def test_a_flat_layout_stops_the_sync(bucket, tmp_path):
     (parsed / "2026-11-01_b.json.zst").write_bytes(b"flat")
     with pytest.raises(LayoutError, match="data directory"):
         sync(bucket, tmp_path, "parsed", PUSH)
-    with pytest.raises(LayoutError, match="migrate-layout local"):
+    with pytest.raises(LayoutError, match="data directory"):
         sync(bucket, tmp_path, "parsed", PULL)
 
 

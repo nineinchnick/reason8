@@ -89,7 +89,7 @@ be rebuilt from it.
 - Commands that read a directory find the files in every partition; `sync`,
   `parse`, `tables` and `dataset` take `--since` and `--until` to work on some
   days only. Data files outside the partitions stop the commands that write or
-  copy them, until `reason8 storage migrate-layout` has moved them.
+  copy them, until they are moved into their partitions.
 - `reason8 sync push|pull` copies files that are missing or differ in size,
   merges the bookkeeping files (`manifest.parquet`, `_index.jsonl`), and never
   deletes anything on either side.

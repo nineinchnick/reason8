@@ -84,4 +84,4 @@ def test_the_cli_reports_a_flat_layout(tmp_path, capsys):
     (tmp_path / "2026-11-01_flat.jsonl.gz").write_bytes(b"")
     arguments = ["headless", "batch", "--data-dir", str(tmp_path), "--out-dir", str(tmp_path)]
     assert cli.main(arguments) == 2
-    assert "migrate-layout" in capsys.readouterr().err
+    assert "not in date partitions" in capsys.readouterr().err
