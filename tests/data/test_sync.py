@@ -9,7 +9,8 @@ from reason8.data.download import MANIFEST_NAME, manifest_bytes, merge_manifests
 from reason8.data.storage import Bucket, configured_bucket
 from reason8.data.sync import PULL, PUSH, sync_area
 from reason8.paths import LayoutError, partitioned_name
-from reason8.replays.parse import INDEX_NAME, index_text, merge_indexes, parse_index
+from reason8.replays.parse import index_text, merge_indexes, parse_index
+from reason8.replays.tables import INDEX_NAME
 
 NEW = "2026-11-01_10-00-00-000_new.sdfz"
 SAME = "2026-11-01_11-00-00-000_same.sdfz"
@@ -109,28 +110,28 @@ def test_push_copies_new_and_changed_files_and_deletes_nothing(bucket, tmp_path)
 
 
 def test_pull_copies_missing_files_and_deletes_nothing(bucket, tmp_path):
-    first, second = "2026-11-01_a.json.zst", "2026-11-02_b.json.zst"
-    put(bucket, f"parsed/{partitioned_name(first)}", b"parsed a")
-    put(bucket, f"parsed/{partitioned_name(second)}", b"parsed b")
-    put(bucket, "parsed/date=2026-11-01/2026-11-01_old.json.gz", b"earlier format")
-    put(bucket, "parsed/date=2026-11-01/nested/2026-11-01_c.json.zst", b"in a subdirectory")
+    first, second = "2026-11-01.games.parquet", "2026-11-02.games.parquet"
+    put(bucket, f"tables/{partitioned_name(first)}", b"games a")
+    put(bucket, f"tables/{partitioned_name(second)}", b"games b")
+    put(bucket, "tables/date=2026-11-01/2026-11-01_old.json.zst", b"earlier format")
+    put(bucket, "tables/date=2026-11-01/nested/2026-11-01.chat.parquet", b"in a subdirectory")
     put(bucket, f"replays/{partitioned_name('2026-11-01_a.sdfz')}", b"another area")
-    parsed = tmp_path / "parsed"
-    local_only = write(parsed, "2026-11-01_local.json.zst", b"kept")
+    tables_dir = tmp_path / "tables"
+    local_only = write(tables_dir, "2026-11-01.players.parquet", b"kept")
 
-    summary = sync(bucket, tmp_path, "parsed", PULL, jobs=2)
+    summary = sync(bucket, tmp_path, "tables", PULL, jobs=2)
 
     assert (summary.files, summary.copied) == (2, 2)
-    assert sorted(path.relative_to(parsed).as_posix() for path in parsed.rglob("*")) == [
+    assert sorted(path.relative_to(tables_dir).as_posix() for path in tables_dir.rglob("*")) == [
         "date=2026-11-01",
         f"date=2026-11-01/{first}",
-        "date=2026-11-01/2026-11-01_local.json.zst",
+        "date=2026-11-01/2026-11-01.players.parquet",
         "date=2026-11-02",
         f"date=2026-11-02/{second}",
     ]
-    assert (parsed / partitioned_name(first)).read_bytes() == b"parsed a"
+    assert (tables_dir / partitioned_name(first)).read_bytes() == b"games a"
     assert local_only.read_bytes() == b"kept"
-    assert sync(bucket, tmp_path, "parsed", PULL).copied == 0
+    assert sync(bucket, tmp_path, "tables", PULL).copied == 0
 
 
 def test_match_and_dry_run(bucket, tmp_path):
@@ -172,14 +173,14 @@ def test_a_flat_layout_stops_the_sync(bucket, tmp_path):
         sync(bucket, tmp_path, "replays", PULL)
     assert not (tmp_path / "replays").exists()
 
-    put(bucket, "parsed/date=2026-11-01/2026-11-01_a.json.zst", b"partitioned")
-    parsed = tmp_path / "parsed"
-    parsed.mkdir()
-    (parsed / "2026-11-01_b.json.zst").write_bytes(b"flat")
+    put(bucket, "tables/date=2026-11-01/2026-11-01.games.parquet", b"partitioned")
+    tables_dir = tmp_path / "tables"
+    tables_dir.mkdir()
+    (tables_dir / "2026-11-01.chat.parquet").write_bytes(b"flat")
     with pytest.raises(LayoutError, match="data directory"):
-        sync(bucket, tmp_path, "parsed", PUSH)
+        sync(bucket, tmp_path, "tables", PUSH)
     with pytest.raises(LayoutError, match="data directory"):
-        sync(bucket, tmp_path, "parsed", PULL)
+        sync(bucket, tmp_path, "tables", PULL)
 
 
 def test_manifests_are_merged_both_ways(bucket, tmp_path):
@@ -242,12 +243,12 @@ def test_merge_indexes_prefers_the_source_and_keeps_the_rest():
 
 
 def test_index_is_merged_on_push(bucket, tmp_path):
-    parsed = tmp_path / "parsed"
-    parsed.mkdir()
-    (parsed / INDEX_NAME).write_text(index_text({"a.sdfz": {"file": "a.sdfz", "status": "ok"}}))
-    put(bucket, f"parsed/{INDEX_NAME}", index_text({"b.sdfz": {"file": "b.sdfz"}}).encode())
-    assert sync(bucket, tmp_path, "parsed", PUSH).merged == [INDEX_NAME]
-    assert set(parse_index(bucket.read(f"parsed/{INDEX_NAME}").decode())) == {"a.sdfz", "b.sdfz"}
+    tables_dir = tmp_path / "tables"
+    tables_dir.mkdir()
+    (tables_dir / INDEX_NAME).write_text(index_text({"a.sdfz": {"file": "a.sdfz", "status": "ok"}}))
+    put(bucket, f"tables/{INDEX_NAME}", index_text({"b.sdfz": {"file": "b.sdfz"}}).encode())
+    assert sync(bucket, tmp_path, "tables", PUSH).merged == [INDEX_NAME]
+    assert set(parse_index(bucket.read(f"tables/{INDEX_NAME}").decode())) == {"a.sdfz", "b.sdfz"}
 
 
 def test_cli_sync(bucket, tmp_path, monkeypatch, capsys):

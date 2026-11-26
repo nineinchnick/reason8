@@ -4,7 +4,7 @@ Usage::
 
     export REASON8_S3_URI=s3://<bucket>            # or pass --s3-uri
     uv run reason8 sync push                       # every area to the bucket
-    uv run reason8 sync pull replays parsed        # some areas from the bucket
+    uv run reason8 sync pull replays tables        # some areas from the bucket
     uv run reason8 sync pull replays --since 2026-11-01 --until 2026-11-08 --dry-run
     uv run reason8 sync pull replays --match '*Rosetta*'
 
@@ -14,10 +14,9 @@ name in the bucket:
 
 ``replays``
     raw ``.sdfz`` replays in daily partitions (``date=YYYY-MM-DD/``), and ``manifest.parquet``;
-``parsed``
-    parsed ``.json.zst`` replays in daily partitions, and ``_index.jsonl``;
 ``tables``
-    the Parquet tables of the parsed replays (``reason8 tables``) in daily partitions;
+    the Parquet tables of the parsed replays (``reason8 parse``) in daily partitions, and
+    ``_index.jsonl``;
 ``matches``
     the cached match dumps (``.parquet``) and other downloaded ``.json``.
 
@@ -71,10 +70,9 @@ AREAS = {
     download.REPLAYS_DIRECTORY: Area(
         ("*.sdfz",), {download.MANIFEST_NAME: download.merge_manifests}, partitioned=True
     ),
-    "parsed": Area(
-        ("*" + parse.PARSED_SUFFIX,), {parse.INDEX_NAME: parse.merge_indexes}, partitioned=True
+    tables.AREA: Area(
+        ("*" + tables.SUFFIX,), {tables.INDEX_NAME: parse.merge_indexes}, partitioned=True
     ),
-    tables.AREA: Area(("*" + tables.SUFFIX,), partitioned=True),
     "matches": Area(("*.parquet", "*.json")),
 }
 

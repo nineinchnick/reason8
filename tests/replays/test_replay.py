@@ -1,12 +1,11 @@
 import json
 import re
 from compression import zstd
-from datetime import date
 from pathlib import Path
 
 import pytest
 
-from reason8.replays.replay import BuildOrder, iter_replays, load_replay, parse_skill
+from reason8.replays.replay import BuildOrder, load_replay, parse_skill
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "replay.json"
 
@@ -128,22 +127,6 @@ def test_load_zstd(tmp_path):
     path = tmp_path / "r.json.zst"
     path.write_bytes(zstd.compress(FIXTURE.read_bytes()))
     assert load_replay(path).meta["map"] == "Supreme Isthmus v2.1"
-
-
-def test_iter_replays_reads_zstd_files(tmp_path):
-    (tmp_path / "a.json.zst").write_bytes(zstd.compress(FIXTURE.read_bytes()))
-    (tmp_path / "_index.jsonl").write_text("")
-    assert [replay.meta["map"] for replay in iter_replays(tmp_path)] == ["Supreme Isthmus v2.1"]
-
-
-def test_iter_replays_reads_the_date_partitions(tmp_path):
-    for day in ("2026-11-01", "2026-11-02"):
-        (tmp_path / f"date={day}").mkdir()
-        path = tmp_path / f"date={day}" / f"{day}_10-00-00-000_Map_1.json.zst"
-        path.write_bytes(zstd.compress(FIXTURE.read_bytes()))
-    assert len(list(iter_replays(tmp_path))) == 2
-    assert len(list(iter_replays(tmp_path, since=date(2026, 11, 2)))) == 1
-    assert len(list(iter_replays(tmp_path, until=date(2026, 11, 2)))) == 1
 
 
 def test_rejects_other_formats(tmp_path):

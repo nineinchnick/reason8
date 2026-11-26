@@ -1,6 +1,11 @@
 """Make the small, anonymised test fixture from one parsed replay.
 
-    uv run reason8 make-fixture data/parsed/<replay>.json.zst tests/fixtures/replay.json
+    uv run reason8 make-fixture <replay> tests/fixtures/replay.json
+
+The replay (its file name, with or without ``.sdfz``) is read from the tables
+(`reason8.replays.tables.replay_documents`); the fixture is its parsed document, as JSON,
+so that the tests can read it with `reason8.replays.replay.load_replay` and a reader can
+see what they test.
 
 Keeps everything about the game except identities, and only a slice of events:
 - for a few teams, the build-related commands of the first minutes (plus their
@@ -16,9 +21,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
+from datetime import timedelta
 from pathlib import Path
 
-from reason8.replays.replay import GAME_SPEED, load_replay
+from reason8.paths import data_dir, file_date
+from reason8.replays import tables
+from reason8.replays.replay import GAME_SPEED
 
 BUILD_RELATED = {"BUILD", "INSERT", "REMOVE", "STOP", "WAIT", "REPEAT"}
 FACTORY_SETTINGS = {"REPEAT", "QUOTA_BUILD_TOGGLE", "FACTORY_GUARD", "STOP_PRODUCTION"}
@@ -121,14 +130,25 @@ def dump(document: dict, path: Path) -> None:
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("source", type=Path, help="a parsed replay (.json.zst)")
+    parser.add_argument("replay", help="the file name of a parsed replay")
+    parser.add_argument(
+        "--tables", type=Path, default=data_dir() / tables.AREA, help="the tables it is in"
+    )
     parser.add_argument("dest", type=Path, help="the fixture to write (.json)")
     parser.add_argument("--teams", type=int, default=2)
     parser.add_argument("--minutes", type=float, default=3)
 
 
 def run(args: argparse.Namespace) -> int:
-    document = load_replay(args.source).doc
+    name = args.replay.removesuffix(".sdfz")
+    day = file_date(name)
+    until = day + timedelta(days=1) if day else None
+    source = tables.open_source(args.tables, since=day, until=until, replays=[name])
+    if name not in source.stored:
+        print(f"{name} is not in the tables of {args.tables}", file=sys.stderr)
+        return 1
+    frames = {table: source.scan(table, [name]).collect() for table in tables.TABLES}
+    document = tables.replay_documents(frames)[name]
     document["events"] = select_events(document, args.teams, int(args.minutes * 60 * GAME_SPEED))
     anonymise(document)
     document["source"]["trimmed"] = (

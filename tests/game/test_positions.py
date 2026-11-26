@@ -234,7 +234,6 @@ def test_check_reports_setup_and_distances():
 
 
 def test_game_headers_read_the_games_from_the_tables(tmp_path):
-    parsed = tmp_path / "parsed"
     replays = {
         "2026-11-01_00-00-00-000_a": game(),
         "2026-11-01_01-00-00-000_b": game({0: TOP_RIGHT, 1: [(4300.0, 6000.0), BOTTOM_LEFT[1]]}),
@@ -244,17 +243,15 @@ def test_game_headers_read_the_games_from_the_tables(tmp_path):
     with_ai = game()
     with_ai.doc["ais"] = [{"aiId": 0, "teamId": 9, "allyTeamId": 1, "shortName": "BARb"}]
     replays["2026-11-02_02-00-00-000_e"] = with_ai
-    for name, replay in replays.items():
-        synthetic.write_parsed(parsed, name, replay)
-    out = synthetic.write_tables(parsed)
-    # parsed after the tables were written: read from its JSON
+    out = synthetic.write_tables(tmp_path / "tables", replays)
+    # parsed after the others
     late = "2026-11-02_03-00-00-000_f"
     replays[late] = game()
-    synthetic.write_parsed(parsed, late, replays[late])
+    synthetic.write_tables(out, {late: replays[late]})
 
-    headers = game_headers(tables.open_source(parsed, out), [synthetic.MAP])
+    headers = game_headers(tables.open_source(out), [synthetic.MAP])
     kept = [name for name in replays if name[-1] in "abcf"]
     assert [header.teams() for header in headers] == [replays[name].teams() for name in kept]
     assert check(headers, MAP_LIST) == check([replays[name] for name in kept], MAP_LIST)
-    source = tables.open_source(parsed, out, since=date(2026, 11, 2))
+    source = tables.open_source(out, since=date(2026, 11, 2))
     assert len(game_headers(source, [synthetic.MAP])) == 2

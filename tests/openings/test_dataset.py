@@ -1,7 +1,6 @@
 import copy
 import json
 from collections import Counter
-from compression import zstd
 from datetime import datetime
 from pathlib import Path
 
@@ -14,7 +13,6 @@ from reason8.openings.dataset import (
     REMOVED_UNIT,
     SPLITS,
     UNIT_TWEAKS,
-    UNREADABLE,
     UNTIL_CONTACT,
     WATER_LEVEL,
     WHOLE_WINDOW,
@@ -31,7 +29,6 @@ from reason8.openings.dataset import (
 )
 from reason8.openings.extract import opening_orders
 from reason8.replays import widgets
-from reason8.replays.parse import output_path
 from reason8.replays.replay import Replay, load_replay
 from tests import synthetic
 
@@ -161,16 +158,7 @@ def test_ordered_faction_and_removed_units():
     assert removed_units(["armmex"], ["armmex"]) == []
 
 
-def write_parsed(directory: Path, name: str, document: dict) -> None:
-    data = json.dumps(document).encode()
-    path = output_path(directory, Path(f"{name}.sdfz"))
-    path.parent.mkdir(exist_ok=True)
-    path.write_bytes(zstd.compress(data))
-
-
 def test_build_dataset(tmp_path):
-    parsed = tmp_path / "parsed"
-    parsed.mkdir()
     document = fixture_document()
     # a player who picked Random, and one who orders a unit the newest build does not have
     document["players"][0]["faction"] = "Random"
@@ -185,26 +173,15 @@ def test_build_dataset(tmp_path):
             break
     games = {}
     match_ids = []
-    for index in range(13):
+    parsed = {}
+    for index in range(12):
         match_id = 1000 + index
         name = f"game{index}"
-        if index == 0:
-            write_parsed(parsed, name, tweaked)
-        elif index == 1:
-            write_parsed(parsed, name, older)
-        elif index < 6:
-            write_parsed(parsed, name, document)
-        elif index == 6:
-            # the replays parsed so far are in the tables, the later ones only parsed
-            synthetic.write_tables(parsed)
-            write_parsed(parsed, name, document)
-        elif index < 11:
-            write_parsed(parsed, name, document)
-        elif index == 12:
-            output_path(parsed, Path(f"{name}.sdfz")).write_bytes(b"not zstd")
-        # game 11 is not parsed
+        if index < 11:  # game 11 is not parsed
+            parsed[name] = tweaked if index == 0 else older if index == 1 else document
         games[match_id] = name
         match_ids.append(match_id)
+    out_tables = synthetic.write_tables(tmp_path / "tables", parsed)
     selection = pl.DataFrame(
         {
             "match_id": match_ids,
@@ -268,14 +245,15 @@ def test_build_dataset(tmp_path):
         schema=widgets.REPORT_SCHEMA,
     ).write_parquet(widgets_dir / widgets.REPORTS_FILE)
     settings["widgets_dir"] = widgets_dir
-    manifest = build_dataset(parsed, out, selection, match_players, **settings)
+    settings["tables_dir"] = out_tables
+    manifest = build_dataset(out, selection, match_players, **settings)
 
     assert manifest["selection"] == {
         "since": "2026-05-23",
         "until": "2026-11-22",
         "maps": [document["meta"]["map"]],
-        "games": 13,
-        "parsed": 12,
+        "games": 12,
+        "parsed": 11,
     }
     assert manifest["opening"] == {
         "definition": "docs/decisions/0012-end-openings-at-first-contact.md",
@@ -293,14 +271,13 @@ def test_build_dataset(tmp_path):
         BY_POSITION: 10,
         MEASURED: 2,
     }
-    assert manifest["counts"]["games_by_status"] == {INCLUDED: 10, UNIT_TWEAKS: 1, UNREADABLE: 1}
+    assert manifest["counts"]["games_by_status"] == {INCLUDED: 10, UNIT_TWEAKS: 1}
     assert manifest["counts"]["openings_by_status"] == {INCLUDED: 159, REMOVED_UNIT: 1}
     assert manifest["vocabulary"]["arm cor"]["build"] == 32018
     assert manifest["code"]["commit"]
 
     games_frame = pl.read_parquet(out / "games.parquet")
-    assert games_frame.height == 12
-    assert games_frame.filter(pl.col("status") == UNREADABLE)["match_id"].to_list() == [1012]
+    assert games_frame.height == 11
     assert games_frame["replay_file_name"].to_list()[0] == "game0.sdfz"
     openings_frame = pl.read_parquet(out / "openings.parquet")
     assert openings_frame.height == 160
@@ -365,12 +342,12 @@ def test_build_dataset(tmp_path):
     assert "Supreme Isthmus" in report
 
     # building again gives the same rows
-    again = build_dataset(parsed, out, selection, match_players, **settings)
+    again = build_dataset(out, selection, match_players, **settings)
     assert again["counts"] == manifest["counts"]
 
     # the whole opening window, as before openings ended at first contact
     window = build_dataset(
-        parsed, tmp_path / "window", selection, match_players, cutoff=WHOLE_WINDOW, **settings
+        tmp_path / "window", selection, match_players, cutoff=WHOLE_WINDOW, **settings
     )
     assert window["opening"]["cutoff"] == WHOLE_WINDOW
     assert window["opening"]["measured_games"] == 0

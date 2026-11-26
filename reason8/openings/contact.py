@@ -277,7 +277,6 @@ def opening_order_frames(commands: pl.LazyFrame) -> dict[str, dict[int, list[int
 
 def measure(
     state_dir: Path,
-    parsed_dir: Path,
     map_list: Mapping[str, MapMetadata] | None = None,
     *,
     tables_dir: Path | None = None,
@@ -286,16 +285,16 @@ def measure(
 ) -> pl.DataFrame:
     """The first contact of every player of every complete state file in `state_dir`.
 
-    The replays are read from their tables (`reason8.replays.tables.open_source`, by
-    default next to `parsed_dir`); ``since`` and ``until`` limit both to some days.
+    The replays are read from the tables in `tables_dir` (by default those of the data
+    directory, `reason8.replays.tables.open_source`); ``since`` and ``until`` limit both to
+    some days.
     """
     map_list = load_map_list() if map_list is None else map_list
     games = {}
     for path in find_files(state_dir, "*" + STATE_SUFFIX, since=since, until=until):
         games[replay_name(path)] = (path, read_fights(path))
     source = tables.open_source(
-        parsed_dir,
-        parsed_dir.parent / tables.AREA if tables_dir is None else tables_dir,
+        tables_dir,
         since=since,
         until=until,
         replays=games,
@@ -630,9 +629,7 @@ def run(args: argparse.Namespace) -> int:
     if args.report:
         print(report(pl.read_parquet(args.out)))
         return 0
-    table = measure(
-        args.state, args.parsed, tables_dir=args.tables, since=args.since, until=args.until
-    )
+    table = measure(args.state, tables_dir=args.tables, since=args.since, until=args.until)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     table.write_parquet(args.out)
     print(f"{table['replay'].n_unique()} games, {table.height} players -> {args.out}")

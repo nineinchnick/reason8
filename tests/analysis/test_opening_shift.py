@@ -96,22 +96,19 @@ def test_group_of():
 def test_load_sample_reads_the_sample_from_the_tables(tmp_path, monkeypatch):
     fixture = Path(__file__).parents[1] / "fixtures" / "replay.json"
     replay = Replay(synthetic.with_own_starts_recommended(load_replay(fixture).doc))
-    parsed = tmp_path / "parsed"
+    out = tmp_path / "tables"
     names = [f"2026-11-0{day}_10-00-00-000_x" for day in (1, 2, 3, 4)]
-    synthetic.write_parsed(parsed, names[0], replay)
-    synthetic.write_tables(parsed)
-    synthetic.write_parsed(parsed, names[1], replay)  # not in the tables yet
-    synthetic.write_parsed(parsed, names[2], replay)  # a build of no group
-    # names[3] is not parsed
+    # names[2] is a build of no group, names[3] is not parsed
+    synthetic.write_tables(out, dict.fromkeys(names[:3], replay))
     builds = {names[0]: 32018, names[1]: 31000, names[2]: 30000, names[3]: 32018}
     monkeypatch.setattr(
         opening_shift, "sample_matches", lambda: {f"{n}.sdfz": b for n, b in builds.items()}
     )
-    found, matches = opening_shift.load_sample(parsed)
+    found, matches = opening_shift.load_sample(tables_dir=out)
     expected = openings(replay)
     assert found == expected + expected
     assert matches == {
         expected[0].match: opening_shift.SampleMatch(31000, {"naval_balance_tweaks": "1"})
     }
-    found, _ = opening_shift.load_sample(parsed, until=date(2026, 11, 2))
+    found, _ = opening_shift.load_sample(tables_dir=out, until=date(2026, 11, 2))
     assert found == expected

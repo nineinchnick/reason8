@@ -9,7 +9,7 @@ Usage::
     uv run reason8 dataset --stats    # the tables of docs/reference/openings-dataset.md
 
 The games are the training slice (`reason8.data.matches.select_matches()` over the pinned
-window of docs/reference/dataset.md) whose replays are parsed in ``<data dir>/parsed/``;
+window of docs/reference/dataset.md) whose replays are parsed into ``<data dir>/tables/``;
 ``--since`` and ``--until`` narrow the window to the date partitions of those days. Building
 again reads whatever is parsed by then and rewrites the dataset: the split of a game
 depends only on its match id, so games never move between splits as more replays are
@@ -81,10 +81,8 @@ from reason8.paths import (
     data_dir,
     partition,
     partition_in_range,
-    require_partitioned,
 )
 from reason8.replays import tables, widgets
-from reason8.replays.parse import PARSED_SUFFIX
 from reason8.replays.replay import GAME_SPEED, Replay
 
 NAME = "openings_v2"
@@ -112,7 +110,6 @@ NOT_A_RELEASE = "not a released game version"
 UNIT_TWEAKS = "custom unit tweaks or stat multipliers"
 WATER_LEVEL = "changed water level"
 WRONG_SHAPE = "not two teams of 8"
-UNREADABLE = "unreadable replay"
 # Why an opening is dropped (openings.parquet, column `status`).
 REMOVED_UNIT = "orders a removed unit"
 
@@ -514,7 +511,6 @@ PLAYER_COLUMNS_ON_ROWS = (
 
 
 def build_dataset(
-    parsed_dir: Path,
     out_dir: Path,
     selection: pl.DataFrame,
     match_players: pl.LazyFrame | pl.DataFrame,
@@ -560,8 +556,7 @@ def build_dataset(
         for match_id, file_name in selection.select("match_id", "replay_file_name").iter_rows()
     }
     source = tables.open_source(
-        parsed_dir,
-        parsed_dir.parent / tables.AREA if tables_dir is None else tables_dir,
+        tables_dir,
         since=since,
         until=until,
         replays=names.values(),
@@ -569,11 +564,7 @@ def build_dataset(
     )
     stored_games = source.scan(tables.GAMES).collect()
     headers = tables.replay_headers(stored_games, source.scan(tables.PLAYERS).collect())
-    tasks = sorted(
-        (match_id, name)
-        for match_id, name in names.items()
-        if name in headers or name in source.unreadable
-    )
+    tasks = sorted((match_id, name) for match_id, name in names.items() if name in headers)
 
     work_dir = out_dir.with_name(out_dir.name + ".building")
     if work_dir.exists():
@@ -585,17 +576,6 @@ def build_dataset(
     for start in range(0, len(tasks), _GAMES_PER_PART):
         players: list[dict[str, Any]] = []
         for match_id, name in tasks[start : start + _GAMES_PER_PART]:
-            if name in source.unreadable:
-                error = source.unreadable[name]
-                games.append(
-                    {
-                        "match_id": match_id,
-                        "split": split_of(match_id),
-                        "status": UNREADABLE,
-                        "error": error,
-                    }
-                )
-                continue
             extract = game_and_players(
                 headers[name],
                 match_id,
@@ -1139,9 +1119,7 @@ def run(args: argparse.Namespace) -> int:
     if not load_map_list():
         print("no map list: run `reason8 maps fetch` first", file=sys.stderr)
         return 1
-    require_partitioned(args.parsed, "*" + PARSED_SUFFIX)
     manifest = build_dataset(
-        args.parsed,
         args.out,
         slice_selection(),
         matches.scan_dump("match_players"),

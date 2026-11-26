@@ -1,28 +1,26 @@
-"""Parquet tables of the parsed replays: commands, games, players and a few other events.
+"""The parsed replays, as Parquet tables: the one copy of everything the parser keeps.
 
-Usage::
+`reason8 parse` (`reason8.replays.parse`) turns each replay into rows of these tables and
+writes them, a file per table and day, into the ``tables`` area of the data directory:
+``tables/date=YYYY-MM-DD/YYYY-MM-DD.<table>.parquet``. The tables, their rows and how they join
+are described in docs/reference/replay-format.md#tables; the decision to keep only them is
+ADR 0005. Player and spectator names are left out; nothing else the parser keeps is.
 
-    uv run reason8 tables                     # data/parsed/date=* -> data/tables/date=*
-    uv run reason8 tables --since 2026-11-01 --until 2026-11-08 --jobs 4
-    uv run reason8 tables --force             # rebuild days that are up to date
+`replay_tables` turns one parsed document (`reason8.replays.replay.Replay`) into its rows, and
+refuses a document with a field it has no column for, so that nothing is dropped unnoticed.
+`replay_documents` gives the documents back from the rows (without the names), and
+`replay_headers` the part of them that the games and players tables hold, for the passes that
+read a game's setup through `Replay`.
 
-The parsed JSON documents (`reason8.replays.parse`) stay the archival copy; these tables are
-derived from them, without parsing the replays again, so that a pass over many games reads the
-columns it needs instead of decoding whole documents (see docs/reference/replay-format.md#tables
-and ADR 0005). `reason8 parse` keeps them current for the replays it parses.
+A pass reads the tables of some days with `open_source` (or one table with `scan`). Every
+file holds the layout `VERSION` in its metadata; a day whose files hold another one is not
+read, and is rebuilt when its replays are parsed again.
 
-Each day of the parsed area (``parsed/date=YYYY-MM-DD/``) becomes one file per table in the same
-partition of the ``tables`` area: ``tables/date=YYYY-MM-DD/YYYY-MM-DD.<table>.parquet``. A day is
-up to date when its ``games`` table lists exactly the parsed files of that day with their sizes,
-and is written by the current version of this module; other days are brought up to date by
-converting only the replays that are new or changed. Every file is written to a temporary name
-and renamed into place, ``games`` last, so a run that stops halfway leaves the day to be redone.
-
-Read the tables with `scan` (a lazy Polars frame with ``since``/``until``), and the build orders
-with `build_orders`, which returns what `Replay.build_orders` returns. A pass over the parsed
-replays opens them with `open_source`, which adds the parsed replays that the tables lack by
-converting their JSON, and `replay_headers` makes a `Replay` of everything but the events
-from the games and players tables.
+Writing: the rows of each replay are staged in ``tables/_staging/<day>/`` until the day's
+replays are done (`update_days`); then every table of the day is streamed into a temporary
+file and renamed into place, ``games`` last, from the staged rows and the rows already there.
+A run that stops halfway leaves the day as it was, or with some tables ahead of ``games``,
+which lists what the day holds.
 """
 
 from __future__ import annotations
@@ -32,7 +30,7 @@ import os
 import sys
 import time
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from dataclasses import dataclass, field
 from datetime import date
@@ -41,15 +39,8 @@ from typing import Any
 
 import polars as pl
 
-from reason8.paths import (
-    PARTITION_PREFIX,
-    data_dir,
-    partition,
-    partition_in_range,
-    require_partitioned,
-)
-from reason8.replays.codes import OPTION_BITS
-from reason8.replays.parse import PARSED_SUFFIX
+from reason8.paths import PARTITION_PREFIX, data_dir, partition, partition_in_range
+from reason8.replays.codes import OPTION_BITS, command_record
 from reason8.replays.replay import (
     CTRL_MULTIPLIER,
     FORMAT,
@@ -57,13 +48,12 @@ from reason8.replays.replay import (
     BuildOrder,
     Replay,
     Team,
-    load_replay,
 )
 
 #: The area of the data directory the tables are kept in.
 AREA = "tables"
-#: Written into every file; a day written by another version is rebuilt.
-VERSION = "reason8.tables/1"
+#: Written into every file; a day written with another layout is not read, and rebuilt.
+VERSION = "reason8.tables/2"
 VERSION_KEY = "reason8"
 SUFFIX = ".parquet"
 #: Rows of single replays wait here (``<area>/_staging/<day>/``) until their day is written.
@@ -71,84 +61,118 @@ STAGING = "_staging"
 #: Row groups of about two minutes of an 8v8 game, so a scan of the opening skips the rest.
 ROW_GROUP_SIZE = 16_384
 ZSTD_LEVEL = 9
+#: The bookkeeping file of `reason8 parse`: one line per replay it tried, failures included.
+INDEX_NAME = "_index.jsonl"
 
+GAMES = "games"
+PLAYERS = "players"
 COMMANDS = "commands"
 SELECTIONS = "selections"
 EVENTS = "events"
-PLAYERS = "players"
-GAMES = "games"
+CHAT = "chat"
+DRAWINGS = "drawings"
+START_PICKS = "start_picks"
+SHARES = "shares"
+TEAM_STATISTICS = "team_statistics"
+PLAYER_STATISTICS = "player_statistics"
 #: Written in this order: `GAMES` records what a day holds, so it goes last.
-TABLES = (COMMANDS, SELECTIONS, EVENTS, PLAYERS, GAMES)
+TABLES = (
+    COMMANDS,
+    SELECTIONS,
+    EVENTS,
+    CHAT,
+    DRAWINGS,
+    START_PICKS,
+    SHARES,
+    TEAM_STATISTICS,
+    PLAYER_STATISTICS,
+    PLAYERS,
+    GAMES,
+)
+#: The tables with a row per event of the replay's stream, ordered by ``seq``.
+EVENT_TABLES = (COMMANDS, SELECTIONS, EVENTS, CHAT, DRAWINGS, START_PICKS, SHARES)
 
 VIA = pl.Enum(["COMMAND", "AICOMMAND", "AICOMMANDS"])
-#: The events other than commands and selections that get a row in `EVENTS`.
+ROLES = ("player", "ai", "spectator")
+#: The event types of `EVENTS`; the other types have a table of their own.
 EVENT_TYPES = ("start", "gameover", "team", "playerleft", "pause", "quit")
+SHARE_TYPES = ("share", "setshare", "aishare")
+#: The table of each event type.
+EVENT_TABLE = {
+    "cmd": COMMANDS,
+    "select": SELECTIONS,
+    "chat": CHAT,
+    "mapdraw": DRAWINGS,
+    "startpos": START_PICKS,
+    **dict.fromkeys(EVENT_TYPES, EVENTS),
+    **dict.fromkeys(SHARE_TYPES, SHARES),
+}
 OPTION = {name: bit for bit, name in OPTION_BITS}
 SHIFT, CTRL, RIGHT, INTERNAL = OPTION["shift"], OPTION["ctrl"], OPTION["right"], OPTION["internal"]
 NAMED_VALUE = pl.Struct({"name": pl.String, "value": pl.String})
 
+#: ``teamStats`` fields of the parsed document -> columns of `TEAM_STATISTICS`.
+TEAM_STATISTICS_FIELDS = {
+    "frame": "frame",
+    "metalUsed": "metal_used",
+    "energyUsed": "energy_used",
+    "metalProduced": "metal_produced",
+    "energyProduced": "energy_produced",
+    "metalExcess": "metal_excess",
+    "energyExcess": "energy_excess",
+    "metalReceived": "metal_received",
+    "energyReceived": "energy_received",
+    "metalSent": "metal_sent",
+    "energySent": "energy_sent",
+    "damageDealt": "damage_dealt",
+    "damageReceived": "damage_received",
+    "unitsProduced": "units_produced",
+    "unitsDied": "units_died",
+    "unitsReceived": "units_received",
+    "unitsSent": "units_sent",
+    "unitsCaptured": "units_captured",
+    "unitsOutCaptured": "units_out_captured",
+    "unitsKilled": "units_killed",
+}
+#: The columns of `TEAM_STATISTICS` that hold whole numbers.
+TEAM_STATISTICS_COUNTS = frozenset(
+    column
+    for column in TEAM_STATISTICS_FIELDS.values()
+    if column == "frame" or column.startswith("units")
+)
+#: ``playerStats`` fields of the parsed document -> columns of `PLAYER_STATISTICS`.
+PLAYER_STATISTICS_FIELDS = {
+    "playerId": "player_id",
+    "numCommands": "num_commands",
+    "unitCommands": "unit_commands",
+    "mousePixels": "mouse_pixels",
+    "mouseClicks": "mouse_clicks",
+    "keyPresses": "key_presses",
+}
+#: ``meta`` fields of the parsed document -> columns of `GAMES`.
+META_FIELDS = {
+    "gameId": "game_id",
+    "engine": "engine",
+    "game": "game",
+    "map": "map",
+    "startTime": "start_time",
+    "durationMs": "duration_ms",
+    "fullDurationMs": "full_duration_ms",
+    "winningAllyTeamIds": "winning_ally_teams",
+    "startPosType": "start_pos_type",
+    "demoVersion": "demo_version",
+    "gameTime": "game_time",
+    "wallclockTime": "wallclock_time",
+    "startFrame": "start_frame",
+    "endFrame": "end_frame",
+    "serverMatchId": "match_id",
+}
+START_BOX = ("left", "top", "right", "bottom")
+
 SCHEMAS: dict[str, dict[str, pl.DataType]] = {
-    COMMANDS: {
-        "replay": pl.String(),  # the replay file name without .sdfz; rows in stream order
-        "frame": pl.Int32(),
-        "player": pl.Int16(),
-        "team": pl.Int16(),
-        "via": VIA,
-        "ai": pl.Int16(),  # 255: a LuaUI widget of the player
-        "units": pl.List(pl.Int32()),  # null for COMMAND: the player's current selection
-        "command": pl.String(),  # for an INSERT, the inserted command
-        "command_id": pl.Int32(),
-        "unit": pl.String(),  # BUILD: the unit ordered
-        "options": pl.UInt8(),  # bits of OPTION_BITS
-        "params": pl.List(pl.Float32()),
-        "x": pl.Float32(),  # BUILD of a structure: params[0], params[2] and params[3]
-        "z": pl.Float32(),
-        "facing": pl.Int8(),
-        "inserted": pl.Boolean(),  # from an INSERT: the columns above describe what it inserts
-        "insert_options": pl.UInt8(),  # the INSERT's own options
-        "insert_position": pl.Float64(),  # queue index with alt, otherwise a command tag
-    },
-    SELECTIONS: {
-        "replay": pl.String(),
-        "seq": pl.Int32(),  # index of the event in the replay's events
-        "commands_before": pl.Int32(),  # commands of the replay that came before it
-        "frame": pl.Int32(),
-        "player": pl.Int16(),
-        "units": pl.List(pl.Int32()),
-    },
-    EVENTS: {
-        "replay": pl.String(),
-        "seq": pl.Int32(),
-        "commands_before": pl.Int32(),
-        "frame": pl.Int32(),
-        "type": pl.Enum(list(EVENT_TYPES)),
-        "player": pl.Int16(),
-        "action": pl.String(),  # team: giveaway, resign, join_team, team_died, ...
-        "param": pl.Int32(),  # team: its param; playerleft: the reason; pause: 1 or 0
-    },
-    PLAYERS: {
-        "replay": pl.String(),
-        "slot": pl.Int16(),  # order in the document: players first, then AIs
-        "team_id": pl.Int16(),
-        "ally_team_id": pl.Int16(),
-        "player_id": pl.Int16(),  # null for an AI
-        "ai_id": pl.Int16(),  # null for a player
-        "is_ai": pl.Boolean(),
-        "user_id": pl.Int64(),  # for the join with the match dumps; names are not kept
-        "faction": pl.String(),
-        "rank": pl.Int8(),
-        "skill": pl.String(),  # as the replay writes it, e.g. "[45.67]"
-        "skill_uncertainty": pl.Float32(),
-        "start_x": pl.Float64(),
-        "start_y": pl.Float64(),
-        "start_z": pl.Float64(),
-        "ai_short_name": pl.String(),
-        "ai_version": pl.String(),
-    },
     GAMES: {
-        "replay": pl.String(),
-        "parsed_bytes": pl.Int64(),  # size of the .json.zst the rows come from
-        "sdfz_bytes": pl.Int64(),
+        "replay": pl.String(),  # the replay's file name without .sdfz: the key of every table
+        "sdfz_bytes": pl.Int64(),  # size of the replay file the rows come from
         "parser": pl.String(),
         "match_id": pl.Int64(),  # meta.serverMatchId
         "game_id": pl.String(),
@@ -170,19 +194,222 @@ SCHEMAS: dict[str, dict[str, pl.DataType]] = {
                 {
                     "ally_team_id": pl.Int16(),
                     "player_count": pl.Int16(),
-                    "left": pl.Float64(),
-                    "top": pl.Float64(),
-                    "right": pl.Float64(),
-                    "bottom": pl.Float64(),
+                    **{side: pl.Float64() for side in START_BOX},  # the start box
                 }
             )
         ),
         "modoptions": pl.List(NAMED_VALUE),
         "mapoptions": pl.List(NAMED_VALUE),
         "restrictions": pl.List(NAMED_VALUE),
-        "unitdefs": pl.List(pl.String()),
+        "unitdefs": pl.List(pl.String()),  # unit names by the index BUILD commands use
+        # the end-of-game statistics: the teams they list (null: the replay has none) and
+        # the winners they name; their rows are in TEAM_STATISTICS and PLAYER_STATISTICS
+        "statistics_teams": pl.List(pl.Int16()),
+        "statistics_winning_ally_teams": pl.List(pl.Int16()),
+    },
+    PLAYERS: {
+        "replay": pl.String(),
+        "slot": pl.Int16(),  # order in the replay: players, then AIs, then spectators
+        "role": pl.Enum(list(ROLES)),
+        "player_id": pl.Int16(),  # null for an AI; what the events' `player` refers to
+        "ai_id": pl.Int16(),  # null but for an AI
+        "team_id": pl.Int16(),  # null for a spectator
+        "ally_team_id": pl.Int16(),  # null for a spectator
+        "user_id": pl.Int64(),  # for the join with the match dumps; names are not kept
+        "faction": pl.String(),
+        "rank": pl.Int8(),
+        "skill": pl.String(),  # as the replay writes it, e.g. "[45.67]"
+        "skill_uncertainty": pl.Float64(),
+        "start_x": pl.Float64(),  # where the team started
+        "start_y": pl.Float64(),
+        "start_z": pl.Float64(),
+        "ai_name": pl.String(),  # an AI's name in the lobby, e.g. "BARb(1)"
+        "ai_short_name": pl.String(),
+        "ai_version": pl.String(),
+    },
+    COMMANDS: {
+        "replay": pl.String(),
+        "seq": pl.Int32(),  # position in the replay's event stream, shared by EVENT_TABLES
+        "frame": pl.Int32(),  # game frame (30 a second) from the start; null before it
+        "player": pl.Int16(),  # the player who sent the packet
+        "team": pl.Int16(),
+        "via": VIA,
+        "ai": pl.Int16(),  # 255: a LuaUI widget of the player
+        "units": pl.List(pl.Int32()),  # null for COMMAND: the player's current selection
+        "command": pl.String(),  # for an INSERT, the inserted command
+        "command_id": pl.Int32(),
+        "unit": pl.String(),  # BUILD: the unit ordered
+        "options": pl.UInt8(),  # bits of OPTION_BITS
+        "params": pl.List(pl.Float32()),
+        "x": pl.Float32(),  # BUILD of a structure: params[0], params[2] and params[3]
+        "z": pl.Float32(),
+        "facing": pl.Int8(),
+        "inserted": pl.Boolean(),  # from an INSERT: the columns above describe what it inserts
+        "insert_options": pl.UInt8(),  # the INSERT's own options
+        "insert_position": pl.Float64(),  # queue index with alt, otherwise a command tag
+    },
+    SELECTIONS: {
+        "replay": pl.String(),
+        "seq": pl.Int32(),
+        "frame": pl.Int32(),
+        "player": pl.Int16(),
+        "units": pl.List(pl.Int32()),  # the player's new selection
+    },
+    EVENTS: {
+        "replay": pl.String(),
+        "seq": pl.Int32(),
+        "frame": pl.Int32(),
+        "type": pl.Enum(list(EVENT_TYPES)),
+        "player": pl.Int16(),  # null for start and quit
+        "action": pl.String(),  # team: giveaway, resign, join_team, team_died, ...
+        "param": pl.Int32(),  # team: the action's parameter, e.g. the team that died
+        "reason": pl.Int16(),  # playerleft: 0 lost connection, 1 left, 2 kicked
+        "paused": pl.Boolean(),  # pause
+        "winners": pl.List(pl.Int16()),  # gameover: the winning ally teams
+    },
+    CHAT: {
+        "replay": pl.String(),
+        "seq": pl.Int32(),
+        "frame": pl.Int32(),
+        "player": pl.Int16(),
+        "to": pl.Int16(),  # a player id, or 252 allies, 253 spectators, 254 everyone
+        "message": pl.String(),
+    },
+    DRAWINGS: {
+        "replay": pl.String(),
+        "seq": pl.Int32(),
+        "frame": pl.Int32(),
+        "player": pl.Int16(),
+        "action": pl.String(),  # point, erase or line
+        "x": pl.Int32(),
+        "z": pl.Int32(),
+        "x2": pl.Int32(),  # line: the other end
+        "z2": pl.Int32(),
+        "label": pl.String(),  # point: its text
+        "from_lua": pl.Boolean(),  # drawn by a widget
+    },
+    START_PICKS: {
+        "replay": pl.String(),
+        "seq": pl.Int32(),
+        "frame": pl.Int32(),  # null: before the game started
+        "player": pl.Int16(),
+        "team": pl.Int16(),
+        "ready": pl.Int8(),
+        "x": pl.Float64(),
+        "z": pl.Float64(),
+    },
+    SHARES: {
+        "replay": pl.String(),
+        "seq": pl.Int32(),
+        "frame": pl.Int32(),
+        "type": pl.Enum(list(SHARE_TYPES)),
+        "player": pl.Int16(),
+        "ai": pl.Int16(),  # aishare: the AI giving
+        "team": pl.Int16(),  # setshare: the team whose share levels are set
+        "from_team": pl.Int16(),  # aishare
+        "to_team": pl.Int16(),  # share, aishare
+        "selected_units": pl.Boolean(),  # share: the player's selected units go too
+        "units": pl.List(pl.Int32()),  # aishare: the units given
+        "metal": pl.Float64(),  # share, aishare: the amount given; setshare: the share level
+        "energy": pl.Float64(),
+    },
+    TEAM_STATISTICS: {
+        "replay": pl.String(),
+        "team_id": pl.Int16(),
+        **{
+            column: pl.Int32() if column in TEAM_STATISTICS_COUNTS else pl.Float64()
+            for column in TEAM_STATISTICS_FIELDS.values()
+        },
+    },
+    PLAYER_STATISTICS: {
+        "replay": pl.String(),
+        **{
+            column: pl.Int16() if column == "player_id" else pl.Int64()
+            for column in PLAYER_STATISTICS_FIELDS.values()
+        },
     },
 }
+
+#: The fields each part of the parsed document may have, all of which the tables hold but
+#: the names of players and spectators.
+FIELDS: dict[str, frozenset[str]] = {
+    "document": frozenset(
+        {
+            "format",
+            "source",
+            "meta",
+            "allyTeams",
+            "players",
+            "ais",
+            "spectators",
+            "modoptions",
+            "mapoptions",
+            "restrictions",
+            "unitdefs",
+            "statistics",
+            "events",
+        }
+    ),
+    # trimmed: a note of the test fixture (`reason8 make-fixture`) only, not kept
+    "source": frozenset({"file", "bytes", "parser", "trimmed"}),
+    "meta": frozenset(META_FIELDS),
+    "allyTeams": frozenset({"allyTeamId", "playerCount", "startBox"}),
+    "startBox": frozenset(START_BOX),
+    "players": frozenset(
+        {
+            "playerId",
+            "teamId",
+            "allyTeamId",
+            "name",
+            "userId",
+            "faction",
+            "rank",
+            "skill",
+            "skillUncertainty",
+            "startPos",
+        }
+    ),
+    "ais": frozenset(
+        {"aiId", "teamId", "allyTeamId", "name", "shortName", "version", "faction", "startPos"}
+    ),
+    "spectators": frozenset({"playerId", "name", "userId"}),
+    "startPos": frozenset({"x", "y", "z"}),
+    "statistics": frozenset({"winningAllyTeamIds", "playerStats", "teamStats"}),
+    "teamStats": frozenset(TEAM_STATISTICS_FIELDS),
+    "playerStats": frozenset(PLAYER_STATISTICS_FIELDS),
+    "cmd": frozenset(
+        {"frame", "type", "player", "via", "ai", "team", "units"}
+        | {"cmd", "cmd_id", "unit", "opts", "params", "pos", "inner"}
+    ),
+    "command": frozenset({"cmd", "cmd_id", "unit", "opts", "params", "pos", "inner"}),
+    "select": frozenset({"frame", "type", "player", "units"}),
+    "start": frozenset({"frame", "type"}),
+    "quit": frozenset({"frame", "type"}),
+    "gameover": frozenset({"frame", "type", "player", "winners"}),
+    "playerleft": frozenset({"frame", "type", "player", "reason"}),
+    "team": frozenset({"frame", "type", "player", "action", "param"}),
+    "pause": frozenset({"frame", "type", "player", "paused"}),
+    "chat": frozenset({"frame", "type", "player", "to", "message"}),
+    "mapdraw": frozenset(
+        {"frame", "type", "player", "action", "x", "z", "x2", "z2", "label", "from_lua"}
+    ),
+    "startpos": frozenset({"frame", "type", "player", "team", "ready", "x", "z"}),
+    "share": frozenset({"frame", "type", "player", "to_team", "units", "metal", "energy"}),
+    "setshare": frozenset({"frame", "type", "player", "team", "metal", "energy"}),
+    "aishare": frozenset(
+        {"frame", "type", "player", "ai", "from_team", "to_team", "metal", "energy", "units"}
+    ),
+}
+
+
+class UnknownField(ValueError):
+    """The parsed document has a field the tables have no column for."""
+
+
+def _check(part: str, record: Mapping[str, Any] | None) -> None:
+    if record and not record.keys() <= FIELDS[part]:
+        unknown = sorted(set(record) - FIELDS[part])
+        raise UnknownField(f"{part} has fields the tables do not hold: {unknown}")
 
 
 # --- from a parsed replay to rows
@@ -203,6 +430,7 @@ def raw_params(command: Mapping[str, Any]) -> list[Any]:
     """The parameters of a command (None for NaN); for an INSERT, as the replay holds them."""
     if "inner" in command:
         inner = command["inner"]
+        _check("command", inner)
         return [
             command.get("pos"),
             inner.get("cmd_id"),
@@ -222,6 +450,10 @@ def _integer(value: Any) -> int | None:
     return int(value)
 
 
+def _float(value: Any) -> float | None:
+    return None if value is None else float(value)
+
+
 def _string(value: Any) -> str | None:
     return None if value is None else str(value)
 
@@ -230,155 +462,209 @@ def _named_values(values: Mapping[str, Any] | None) -> list[dict[str, str | None
     return [{"name": str(name), "value": _string(value)} for name, value in (values or {}).items()]
 
 
-def _skill_uncertainty(value: Any) -> float | None:
-    try:
-        return None if value is None else float(value)
-    except ValueError:
-        return None
+def _event_row(kind: str, event: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+    """The table of an event other than a command, and its columns but ``replay`` and ``seq``."""
+    if kind not in EVENT_TABLE:
+        raise UnknownField(f"events of type {kind!r} have no table")
+    _check(kind, event)
+    table = EVENT_TABLE[kind]
+    row: dict[str, Any] = {"frame": event.get("frame")}
+    if table == SELECTIONS:
+        return table, row | {"player": event.get("player"), "units": event.get("units")}
+    if table == EVENTS:
+        action = event.get("action")
+        return table, row | {
+            "type": kind,
+            "player": event.get("player"),
+            "action": _string(action),
+            "param": event.get("param"),
+            "reason": event.get("reason"),
+            "paused": event.get("paused"),
+            "winners": event.get("winners"),
+        }
+    if table == CHAT:
+        return table, row | {key: event.get(key) for key in ("player", "to", "message")}
+    if table == DRAWINGS:
+        return table, row | {
+            "player": event.get("player"),
+            "action": _string(event.get("action")),
+            **{key: event.get(key) for key in ("x", "z", "x2", "z2", "label")},
+            "from_lua": bool(event.get("from_lua")),
+        }
+    if table == START_PICKS:
+        return table, row | {
+            "player": event.get("player"),
+            "team": event.get("team"),
+            "ready": event.get("ready"),
+            "x": _float(event.get("x")),
+            "z": _float(event.get("z")),
+        }
+    return table, row | {  # SHARES
+        "type": kind,
+        **{key: event.get(key) for key in ("player", "ai", "team", "from_team", "to_team")},
+        "selected_units": event.get("units") if kind == "share" else None,
+        "units": event.get("units") if kind == "aishare" else None,
+        "metal": _float(event.get("metal")),
+        "energy": _float(event.get("energy")),
+    }
 
 
-def replay_tables(
-    replay: Replay, name: str, parsed_bytes: int | None = None
-) -> dict[str, pl.DataFrame]:
-    """The rows of one parsed replay in every table, ``name`` being its key (``replay``)."""
+def _command_row(seq: int, event: Mapping[str, Any]) -> tuple[Any, ...]:
+    """The columns of `COMMANDS` but ``replay`` for a command event."""
+    if not event.keys() <= FIELDS["cmd"]:
+        _check("cmd", event)
+    command = event
+    inserted = event.get("cmd") == "INSERT" and "inner" in event
+    if inserted:
+        command = event["inner"]
+        _check("command", command)
+    params = raw_params(command)
+    build = command.get("cmd") == "BUILD" and len(params) >= 3
+    return (
+        seq,
+        event.get("frame"),
+        event.get("player"),
+        event.get("team"),
+        event.get("via"),
+        event.get("ai"),
+        event.get("units"),
+        command.get("cmd"),
+        command.get("cmd_id"),
+        command.get("unit"),
+        option_bits(command.get("opts")),
+        params,
+        _number(params[0]) if build else None,
+        _number(params[2]) if build else None,
+        int(params[3]) if build and len(params) > 3 else None,
+        inserted,
+        option_bits(event.get("opts")) if inserted else None,
+        _number(event.get("pos")) if inserted else None,
+    )
+
+
+def _person_row(role: str, record: Mapping[str, Any]) -> dict[str, Any]:
+    """The columns of `PLAYERS` but ``replay`` and ``slot`` for a player, AI or spectator."""
+    _check({"player": "players", "ai": "ais", "spectator": "spectators"}[role], record)
+    start = record.get("startPos")
+    _check("startPos", start)
+    is_ai = role == "ai"
+    return {
+        "role": role,
+        "player_id": None if is_ai else record.get("playerId"),
+        "ai_id": record.get("aiId") if is_ai else None,
+        "team_id": record.get("teamId"),
+        "ally_team_id": record.get("allyTeamId"),
+        "user_id": _integer(record.get("userId")),
+        "faction": record.get("faction"),
+        "rank": record.get("rank"),
+        "skill": _string(record.get("skill")),
+        "skill_uncertainty": _float(record.get("skillUncertainty")),
+        **{f"start_{key}": _float(start.get(key)) if start else None for key in ("x", "y", "z")},
+        "ai_name": record.get("name") if is_ai else None,
+        "ai_short_name": record.get("shortName") if is_ai else None,
+        "ai_version": record.get("version") if is_ai else None,
+    }
+
+
+def _game_row(document: Mapping[str, Any]) -> dict[str, Any]:
+    """The columns of `GAMES` but ``replay``."""
+    meta = document.get("meta") or {}
+    _check("meta", meta)
+    source = document.get("source") or {}
+    _check("source", source)
+    ally_teams = []
+    for ally_team in document.get("allyTeams") or ():
+        _check("allyTeams", ally_team)
+        box = ally_team.get("startBox")
+        _check("startBox", box)
+        ally_teams.append(
+            {
+                "ally_team_id": ally_team.get("allyTeamId"),
+                "player_count": ally_team.get("playerCount"),
+                **{side: _float((box or {}).get(side)) for side in START_BOX},
+            }
+        )
+    statistics = document.get("statistics")
+    _check("statistics", statistics)
+    return (
+        {"sdfz_bytes": source.get("bytes"), "parser": source.get("parser")}
+        | {column: meta.get(key) for key, column in META_FIELDS.items()}
+        | {
+            "match_id": _integer(meta.get("serverMatchId")),
+            "ally_teams": ally_teams,
+            "modoptions": _named_values(document.get("modoptions")),
+            "mapoptions": _named_values(document.get("mapoptions")),
+            "restrictions": _named_values(document.get("restrictions")),
+            "unitdefs": document.get("unitdefs"),
+            "statistics_teams": None
+            if statistics is None
+            else [int(team) for team in statistics.get("teamStats") or {}],
+            "statistics_winning_ally_teams": (statistics or {}).get("winningAllyTeamIds"),
+        }
+    )
+
+
+def replay_tables(replay: Replay | Mapping[str, Any], name: str) -> dict[str, pl.DataFrame]:
+    """The rows of one parsed replay in every table, ``name`` being its key (``replay``).
+
+    Raises `UnknownField` for a field of the document that no column holds (names aside),
+    and a `TypeError` for a value its column cannot hold exactly.
+    """
+    document = replay.doc if isinstance(replay, Replay) else replay
+    _check("document", document)
     columns: dict[str, dict[str, list[Any]]] = {
         table: {column: [] for column in schema} for table, schema in SCHEMAS.items()
     }
-    selections, events = columns[SELECTIONS], columns[EVENTS]
+
+    def add(table: str, values: Mapping[str, Any]) -> None:
+        table_columns = columns[table]
+        table_columns["replay"].append(name)
+        for column, value in values.items():
+            table_columns[column].append(value)
+
     command_rows: list[tuple[Any, ...]] = []
-    for seq, event in enumerate(replay.events):
+    for seq, event in enumerate(document.get("events") or ()):
         kind = event["type"]
         if kind == "cmd":
-            command = event
-            inserted = event.get("cmd") == "INSERT" and "inner" in event
-            if inserted:
-                command = event["inner"]
-            params = raw_params(command)
-            build = command.get("cmd") == "BUILD" and len(params) >= 3
-            command_rows.append(
-                (
-                    event.get("frame"),
-                    event.get("player"),
-                    event.get("team"),
-                    event.get("via"),
-                    event.get("ai"),
-                    event.get("units"),
-                    command.get("cmd"),
-                    command.get("cmd_id"),
-                    command.get("unit"),
-                    option_bits(command.get("opts")),
-                    params,
-                    _number(params[0]) if build else None,
-                    _number(params[2]) if build else None,
-                    int(params[3]) if build and len(params) > 3 else None,
-                    inserted,
-                    option_bits(event.get("opts")) if inserted else None,
-                    _number(event.get("pos")) if inserted else None,
-                )
-            )
-        elif kind == "select":
-            for column, value in (
-                ("replay", name),
-                ("seq", seq),
-                ("commands_before", len(command_rows)),
-                ("frame", event.get("frame")),
-                ("player", event.get("player")),
-                ("units", event.get("units")),
-            ):
-                selections[column].append(value)
-        elif kind in EVENT_TYPES:
-            if kind == "pause":
-                param = int(bool(event.get("paused")))
-            elif kind == "playerleft":
-                param = event.get("reason")
-            else:
-                param = event.get("param")
-            action = event.get("action")
-            for column, value in (
-                ("replay", name),
-                ("seq", seq),
-                ("commands_before", len(command_rows)),
-                ("frame", event.get("frame")),
-                ("type", kind),
-                ("player", event.get("player")),
-                ("action", None if action is None else str(action)),
-                ("param", param),
-            ):
-                events[column].append(value)
-
+            command_rows.append(_command_row(seq, event))
+        else:
+            table, row = _event_row(kind, event)
+            add(table, {"seq": seq} | row)
     command_columns = list(SCHEMAS[COMMANDS])[1:]
     transposed = zip(*command_rows, strict=True) if command_rows else [()] * len(command_columns)
     columns[COMMANDS] = {"replay": [name] * len(command_rows)} | {
         column: list(values) for column, values in zip(command_columns, transposed, strict=True)
     }
-    players = columns[PLAYERS]
-    for slot, (record, is_ai) in enumerate(
-        [(player, False) for player in replay.players] + [(ai, True) for ai in replay.ais]
-    ):
-        start = record.get("startPos") or {}
-        values = {
-            "replay": name,
-            "slot": slot,
-            "team_id": record.get("teamId"),
-            "ally_team_id": record.get("allyTeamId"),
-            "player_id": None if is_ai else record.get("playerId"),
-            "ai_id": record.get("aiId") if is_ai else None,
-            "is_ai": is_ai,
-            "user_id": _integer(record.get("userId")),
-            "faction": record.get("faction"),
-            "rank": record.get("rank"),
-            "skill": _string(record.get("skill")),
-            "skill_uncertainty": _skill_uncertainty(record.get("skillUncertainty")),
-            "start_x": start.get("x") if record.get("startPos") else None,
-            "start_y": start.get("y"),
-            "start_z": start.get("z") if record.get("startPos") else None,
-            "ai_short_name": record.get("shortName") if is_ai else None,
-            "ai_version": record.get("version") if is_ai else None,
-        }
-        for column, value in values.items():
-            players[column].append(value)
 
-    meta = replay.meta
-    document = replay.doc
-    source = document.get("source") or {}
-    game = {
-        "replay": name,
-        "parsed_bytes": parsed_bytes,
-        "sdfz_bytes": source.get("bytes"),
-        "parser": source.get("parser"),
-        "match_id": _integer(meta.get("serverMatchId")),
-        "game_id": meta.get("gameId"),
-        "engine": meta.get("engine"),
-        "game": meta.get("game"),
-        "map": meta.get("map"),
-        "start_time": meta.get("startTime"),
-        "duration_ms": meta.get("durationMs"),
-        "full_duration_ms": meta.get("fullDurationMs"),
-        "winning_ally_teams": meta.get("winningAllyTeamIds"),
-        "start_pos_type": meta.get("startPosType"),
-        "demo_version": meta.get("demoVersion"),
-        "game_time": meta.get("gameTime"),
-        "wallclock_time": meta.get("wallclockTime"),
-        "start_frame": meta.get("startFrame"),
-        "end_frame": meta.get("endFrame"),
-        "ally_teams": [
-            {
-                "ally_team_id": ally_team.get("allyTeamId"),
-                "player_count": ally_team.get("playerCount"),
-                **{
-                    side: (ally_team.get("startBox") or {}).get(side)
-                    for side in ("left", "top", "right", "bottom")
+    people = (
+        [("player", record) for record in document.get("players") or ()]
+        + [("ai", record) for record in document.get("ais") or ()]
+        + [("spectator", record) for record in document.get("spectators") or ()]
+    )
+    for slot, (role, record) in enumerate(people):
+        add(PLAYERS, {"slot": slot} | _person_row(role, record))
+
+    statistics = document.get("statistics") or {}
+    for team_id, samples in (statistics.get("teamStats") or {}).items():
+        for sample in samples:
+            _check("teamStats", sample)
+            add(
+                TEAM_STATISTICS,
+                {"team_id": int(team_id)}
+                | {
+                    column: sample.get(key)
+                    if column in TEAM_STATISTICS_COUNTS
+                    else _float(sample.get(key))
+                    for key, column in TEAM_STATISTICS_FIELDS.items()
                 },
-            }
-            for ally_team in document.get("allyTeams") or []
-        ],
-        "modoptions": _named_values(document.get("modoptions")),
-        "mapoptions": _named_values(document.get("mapoptions")),
-        "restrictions": _named_values(document.get("restrictions")),
-        "unitdefs": document.get("unitdefs"),
-    }
-    for column, value in game.items():
-        columns[GAMES][column].append(value)
+            )
+    for sample in statistics.get("playerStats") or ():
+        _check("playerStats", sample)
+        add(
+            PLAYER_STATISTICS,
+            {column: sample.get(key) for key, column in PLAYER_STATISTICS_FIELDS.items()},
+        )
+    add(GAMES, _game_row(document))
     return {
         table: pl.DataFrame(
             [
@@ -391,9 +677,12 @@ def replay_tables(
 
 
 def _series(name: str, values: list[Any], dtype: pl.DataType) -> pl.Series:
-    """A column from Python values; lists of numbers are built in bulk, which is much faster."""
+    """A column from Python values; lists of numbers are built in bulk, which is much faster.
+
+    A value the column cannot hold exactly raises a `TypeError` instead of becoming null.
+    """
     if not (isinstance(dtype, pl.List) and dtype.inner.is_numeric()) or len(values) < 2:
-        return pl.Series(name, values, dtype=dtype, strict=False)
+        return pl.Series(name, values, dtype=dtype, strict=True)
     rows: list[int] = []
     flat: list[Any] = []
     for row, value in enumerate(values):
@@ -404,7 +693,7 @@ def _series(name: str, values: list[Any], dtype: pl.DataType) -> pl.Series:
         pl.DataFrame(
             {
                 "row": pl.Series(rows, dtype=pl.UInt32),
-                "value": pl.Series(flat, dtype=dtype.inner, strict=False),
+                "value": pl.Series(flat, dtype=dtype.inner, strict=True),
             }
         )
         .group_by("row", maintain_order=True)
@@ -423,6 +712,252 @@ def _series(name: str, values: list[Any], dtype: pl.DataType) -> pl.Series:
         )
         .to_series()
     )
+
+
+# --- from rows back to the parsed documents
+
+
+def _json_number(value: float | None) -> int | float | None:
+    """A number as the parsed document writes it: whole numbers as integers."""
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
+def _round(value: float | None) -> float | None:
+    """A float32 parameter back to the value the JSON keeps (2 decimals)."""
+    return None if value is None else round(value, 2)
+
+
+def _action(value: str | None) -> str | int | None:
+    """An action as the document has it: its name, or the number of one without a name."""
+    if value is not None and value.lstrip("-").isdigit():
+        return int(value)
+    return value
+
+
+def options_dict(options: Iterable[Mapping[str, str | None]] | None) -> dict[str, str | None]:
+    """A ``modoptions``/``mapoptions`` column value as the dict the JSON has."""
+    return {option["name"]: option["value"] for option in options or ()}
+
+
+def _start_pos(row: Mapping[str, Any]) -> dict[str, Any] | None:
+    if row["start_x"] is None:
+        return None
+    return {key: _json_number(row[f"start_{key}"]) for key in ("x", "y", "z")}
+
+
+def _without_nulls(record: dict[str, Any], *keys: str) -> dict[str, Any]:
+    """The record without those of ``keys`` that are null: the parser leaves them out."""
+    return {key: value for key, value in record.items() if key not in keys or value is not None}
+
+
+def _person(row: Mapping[str, Any]) -> dict[str, Any]:
+    """A record of ``players``, ``ais`` or ``spectators`` from its row, without the name."""
+    if row["role"] == "spectator":
+        return _without_nulls({"playerId": row["player_id"], "userId": row["user_id"]}, "userId")
+    if row["role"] == "ai":
+        return _without_nulls(
+            {
+                "aiId": row["ai_id"],
+                "teamId": row["team_id"],
+                "allyTeamId": row["ally_team_id"],
+                "name": row["ai_name"],
+                "shortName": row["ai_short_name"],
+                "version": row["ai_version"],
+                "faction": row["faction"],
+                "startPos": _start_pos(row),
+            },
+            "startPos",
+        )
+    return _without_nulls(
+        {
+            "playerId": row["player_id"],
+            "teamId": row["team_id"],
+            "allyTeamId": row["ally_team_id"],
+            "userId": row["user_id"],
+            "faction": row["faction"],
+            "rank": row["rank"],
+            "skill": row["skill"],
+            "skillUncertainty": _json_number(row["skill_uncertainty"]),
+            "startPos": _start_pos(row),
+        },
+        "startPos",
+    )
+
+
+def _command(row: Mapping[str, Any], unitdefs: Sequence[str]) -> dict[str, Any]:
+    event: dict[str, Any] = {"frame": row["frame"], "type": "cmd", "player": row["player"]}
+    event["via"] = row["via"]
+    if row["ai"] is not None:
+        event["ai"] = row["ai"]
+    event["team"] = row["team"]
+    if row["units"] is not None:
+        event["units"] = list(row["units"])
+    params = list(row["params"] or ())
+    if row["inserted"]:
+        insert = [row["insert_position"], row["command_id"], row["options"], *params]
+        record = command_record(1, row["insert_options"] or 0, insert, unitdefs)
+        command = record["inner"]
+    else:
+        record = command = command_record(row["command_id"], row["options"], params, unitdefs)
+    if "unit" in command:  # a BUILD: the unit as the parser named it
+        command["unit"] = row["unit"]
+    return event | record
+
+
+def _event(table: str, row: Mapping[str, Any]) -> dict[str, Any]:
+    """The event of the parsed document that a row of an event table (not commands) holds."""
+    event: dict[str, Any] = {"frame": row["frame"]}
+    if table == SELECTIONS:
+        return event | {"type": "select", "player": row["player"], "units": row["units"]}
+    if table == CHAT:
+        return event | {"type": "chat"} | {key: row[key] for key in ("player", "to", "message")}
+    if table == START_PICKS:
+        return event | {
+            "type": "startpos",
+            **{key: row[key] for key in ("player", "team", "ready")},
+            "x": _json_number(row["x"]),
+            "z": _json_number(row["z"]),
+        }
+    if table == DRAWINGS:
+        event |= {"type": "mapdraw", "player": row["player"], "action": _action(row["action"])}
+        event |= {"x": row["x"], "z": row["z"]}
+        event |= {key: row[key] for key in ("x2", "z2", "label") if row[key] is not None}
+        return event | ({"from_lua": True} if row["from_lua"] else {})
+    kind = row["type"]
+    event["type"] = kind
+    if table == SHARES:
+        event["player"] = row["player"]
+        amounts = {"metal": _json_number(row["metal"]), "energy": _json_number(row["energy"])}
+        if kind == "share":
+            return event | {"to_team": row["to_team"], "units": row["selected_units"]} | amounts
+        if kind == "setshare":
+            return event | {"team": row["team"]} | amounts
+        event |= {key: row[key] for key in ("ai", "from_team", "to_team")}
+        return event | amounts | {"units": row["units"]}
+    if kind in ("start", "quit"):
+        return event
+    event["player"] = row["player"]
+    if kind == "gameover":
+        return event | {"winners": row["winners"]}
+    if kind == "playerleft":
+        return event | {"reason": row["reason"]}
+    if kind == "pause":
+        return event | {"paused": row["paused"]}
+    return event | {"action": _action(row["action"]), "param": row["param"]}
+
+
+def _by_replay(frame: pl.DataFrame | None) -> dict[str, list[dict[str, Any]]]:
+    rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in frame.iter_rows(named=True) if frame is not None else ():
+        rows[row["replay"]].append(row)
+    return rows
+
+
+def _statistics(
+    game: Mapping[str, Any],
+    team_rows: Iterable[Mapping[str, Any]],
+    player_rows: Iterable[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    if game["statistics_teams"] is None:
+        return None
+    samples: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for row in team_rows:
+        samples[row["team_id"]].append(
+            {key: _json_number(row[column]) for key, column in TEAM_STATISTICS_FIELDS.items()}
+        )
+    return {
+        "winningAllyTeamIds": game["statistics_winning_ally_teams"],
+        "playerStats": [
+            {key: row[column] for key, column in PLAYER_STATISTICS_FIELDS.items()}
+            for row in player_rows
+        ],
+        "teamStats": {str(team): samples.get(team, []) for team in game["statistics_teams"]},
+    }
+
+
+def replay_documents(frames: Mapping[str, pl.DataFrame]) -> dict[str, dict[str, Any]]:
+    """Replay -> its parsed document, from the rows of some tables of its replays.
+
+    The document of every replay in the rows of `GAMES`, with what the other tables given
+    hold: `PLAYERS` gives ``players``, ``ais`` and ``spectators``; `TEAM_STATISTICS` with
+    `PLAYER_STATISTICS` give ``statistics``; the event tables give ``events``, in stream
+    order. Names are not in the tables, so the documents have none. Numbers come back as the
+    document writes them; command parameters went through float32, as in the replay. A start
+    box, a start position or a spectator's user id that is null is left out, as the parser
+    leaves it out.
+    """
+    players = _by_replay(frames.get(PLAYERS))
+    team_statistics = _by_replay(frames.get(TEAM_STATISTICS))
+    player_statistics = _by_replay(frames.get(PLAYER_STATISTICS))
+    event_rows = {table: _by_replay(frames.get(table)) for table in EVENT_TABLES}
+    has_events = any(table in frames for table in EVENT_TABLES)
+    documents = {}
+    for row in frames[GAMES].iter_rows(named=True):
+        name = row["replay"]
+        meta = {key: row[column] for key, column in META_FIELDS.items()}
+        meta["serverMatchId"] = _string(row["match_id"])
+        ally_teams = []
+        for ally_team in row["ally_teams"] or ():
+            box = {side: _json_number(ally_team[side]) for side in START_BOX}
+            ally_teams.append(
+                _without_nulls(
+                    {
+                        "allyTeamId": ally_team["ally_team_id"],
+                        "startBox": box if any(side is not None for side in box.values()) else None,
+                        "playerCount": ally_team["player_count"],
+                    },
+                    "startBox",
+                )
+            )
+        document: dict[str, Any] = {
+            "format": FORMAT,
+            "source": {"file": f"{name}.sdfz", "bytes": row["sdfz_bytes"], "parser": row["parser"]},
+            "meta": meta,
+            "allyTeams": ally_teams,
+        }
+        if PLAYERS in frames:
+            people = sorted(players.get(name, ()), key=lambda person: person["slot"])
+            for role, key in (("player", "players"), ("ai", "ais"), ("spectator", "spectators")):
+                document[key] = [_person(person) for person in people if person["role"] == role]
+        document |= {
+            "modoptions": options_dict(row["modoptions"]),
+            "mapoptions": options_dict(row["mapoptions"]),
+            "restrictions": options_dict(row["restrictions"]),
+            "unitdefs": row["unitdefs"],
+        }
+        if TEAM_STATISTICS in frames and PLAYER_STATISTICS in frames:
+            document["statistics"] = _statistics(
+                row, team_statistics.get(name, ()), player_statistics.get(name, ())
+            )
+        if has_events:
+            unitdefs = row["unitdefs"] or []
+            events = [
+                (event["seq"], table, event)
+                for table, rows in event_rows.items()
+                for event in rows.get(name, ())
+            ]
+            events.sort(key=lambda item: item[0])
+            document["events"] = [
+                _command(event, unitdefs) if table == COMMANDS else _event(table, event)
+                for _, table, event in events
+            ]
+        documents[name] = document
+    return documents
+
+
+def replay_headers(games: pl.DataFrame, players: pl.DataFrame) -> dict[str, Replay]:
+    """Replay -> a `Replay` of its setup, from rows of the games and players tables.
+
+    What the parsed document says about the game and its players (`replay_documents` of
+    these two tables): ``meta``, ``players``, ``ais``, ``spectators``, ``allyTeams``,
+    ``modoptions``, ``mapoptions``, ``restrictions``, ``unitdefs`` and ``source``, so that
+    `Replay.teams()`, the positions of `reason8.game.positions` and the like work as on the
+    document. ``events`` and ``statistics`` are left out: read them from their tables.
+    """
+    documents = replay_documents({GAMES: games, PLAYERS: players})
+    return {name: Replay(document) for name, document in documents.items()}
 
 
 # --- reading
@@ -465,7 +1000,8 @@ def scan(
     """A lazy frame of one table over the days ``since`` (inclusive) .. ``until`` (exclusive).
 
     The frame has a ``date`` column from the partitions. Filters on ``frame`` skip the row
-    groups (about two minutes of a game each) they rule out.
+    groups (about two minutes of a game each) they rule out. Unlike `open_source`, it does
+    not check the layout version of the files.
     """
     files = table_files(table, directory, since, until)
     if not files:
@@ -497,11 +1033,6 @@ def build_order_frame(commands: pl.LazyFrame, until_frame: int | None = None) ->
         & (options & INTERNAL != 0)
         & (pl.col("insert_options").fill_null(0) & CTRL != 0),
     )
-
-
-def _round(value: float | None) -> float | None:
-    """A float32 parameter back to the value the JSON keeps (2 decimals)."""
-    return None if value is None else round(value, 2)
 
 
 def build_orders_from(frame: pl.DataFrame) -> dict[str, list[BuildOrder]]:
@@ -557,152 +1088,48 @@ def teams_from(players: pl.DataFrame) -> dict[str, dict[int, Team]]:
     """Replay -> team id -> `Team`, from rows of the players table, as `Replay.teams()`."""
     by_replay: dict[str, dict[int, Team]] = defaultdict(dict)
     for row in players.sort("replay", "slot").iter_rows(named=True):
+        if row["role"] == "spectator":
+            continue
+        is_ai = row["role"] == "ai"
         teams = by_replay[row["replay"]]
         previous = teams.get(row["team_id"])
-        player_ids = () if row["is_ai"] else (previous.player_ids if previous else ())
+        player_ids = () if is_ai else (previous.player_ids if previous else ())
         has_start = row["start_x"] is not None
         teams[row["team_id"]] = Team(
             team_id=row["team_id"],
             ally_team_id=row["ally_team_id"],
             faction=row["faction"],
-            is_ai=row["is_ai"],
-            player_ids=player_ids if row["is_ai"] else player_ids + (row["player_id"],),
+            is_ai=is_ai,
+            player_ids=player_ids if is_ai else player_ids + (row["player_id"],),
             start_pos=(row["start_x"], row["start_z"]) if has_start else None,
         )
     return {replay: dict(sorted(teams.items())) for replay, teams in by_replay.items()}
 
 
-def options_dict(options: Iterable[Mapping[str, str | None]] | None) -> dict[str, str | None]:
-    """A ``modoptions``/``mapoptions`` column value as the dict the JSON has."""
-    return {option["name"]: option["value"] for option in options or ()}
-
-
-def _start_pos(row: Mapping[str, Any]) -> dict[str, float | None] | None:
-    if row["start_x"] is None:
-        return None
-    return {"x": row["start_x"], "y": row["start_y"], "z": row["start_z"]}
-
-
-def replay_headers(games: pl.DataFrame, players: pl.DataFrame) -> dict[str, Replay]:
-    """Replay -> a `Replay` of everything but its events, from rows of the games and players.
-
-    What the parsed document says about the game and its players: ``meta``, ``players``,
-    ``ais``, ``allyTeams``, ``modoptions``, ``mapoptions``, ``restrictions``, ``unitdefs`` and
-    ``source``, so that `Replay.teams()`, the positions of `reason8.game.positions` and the
-    like work as on the document. Names, ``spectators`` and ``statistics`` are not in the
-    tables, and ``events`` is left out: read the commands from their table. A player's
-    ``skillUncertainty`` is the float32 of the table.
-    """
-    by_replay: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(
-        lambda: {"players": [], "ais": []}
-    )
-    for row in players.sort("replay", "slot").iter_rows(named=True):
-        if row["is_ai"]:
-            record = {"aiId": row["ai_id"], "shortName": row["ai_short_name"]}
-            record["version"] = row["ai_version"]
-        else:
-            record = {"playerId": row["player_id"]}
-        record |= {
-            "teamId": row["team_id"],
-            "allyTeamId": row["ally_team_id"],
-            "userId": row["user_id"],
-            "faction": row["faction"],
-            "rank": row["rank"],
-            "skill": row["skill"],
-            "skillUncertainty": row["skill_uncertainty"],
-            "startPos": _start_pos(row),
-        }
-        by_replay[row["replay"]]["ais" if row["is_ai"] else "players"].append(record)
-    headers = {}
-    for row in games.iter_rows(named=True):
-        meta = {
-            "gameId": row["game_id"],
-            "engine": row["engine"],
-            "game": row["game"],
-            "map": row["map"],
-            "startTime": row["start_time"],
-            "durationMs": row["duration_ms"],
-            "fullDurationMs": row["full_duration_ms"],
-            "winningAllyTeamIds": row["winning_ally_teams"],
-            "startPosType": row["start_pos_type"],
-            "demoVersion": row["demo_version"],
-            "gameTime": row["game_time"],
-            "wallclockTime": row["wallclock_time"],
-            "startFrame": row["start_frame"],
-            "endFrame": row["end_frame"],
-            "serverMatchId": None if row["match_id"] is None else str(row["match_id"]),
-        }
-        ally_teams = []
-        for ally_team in row["ally_teams"] or ():
-            box = {side: ally_team[side] for side in ("left", "top", "right", "bottom")}
-            ally_teams.append(
-                {
-                    "allyTeamId": ally_team["ally_team_id"],
-                    "playerCount": ally_team["player_count"],
-                    "startBox": box if any(value is not None for value in box.values()) else None,
-                }
-            )
-        records = by_replay.get(row["replay"], {"players": [], "ais": []})
-        headers[row["replay"]] = Replay(
-            {
-                "format": FORMAT,
-                "source": {"bytes": row["sdfz_bytes"], "parser": row["parser"]},
-                "meta": meta,
-                "allyTeams": ally_teams,
-                "players": records["players"],
-                "ais": records["ais"],
-                "modoptions": options_dict(row["modoptions"]),
-                "mapoptions": options_dict(row["mapoptions"]),
-                "restrictions": options_dict(row["restrictions"]),
-                "unitdefs": row["unitdefs"],
-            }
-        )
-    return headers
-
-
 @dataclass
 class Source:
-    """The rows of the replays of some days, as `open_source` found them.
-
-    The rows of most replays come from the day files of the tables; those of the parsed
-    replays that the tables lack (new, changed, or in a day written by another version) were
-    converted from their JSON. `unreadable` holds the parsed replays that could not be read,
-    with the error.
-    """
+    """The replays of some days in the tables, as `open_source` found them."""
 
     files: dict[str, list[Path]]  # table -> the day files to read
-    stored: frozenset[str] = frozenset()  # the replays whose rows are read from those files
-    converted: dict[str, dict[str, pl.DataFrame]] = field(default_factory=dict)
-    unreadable: dict[str, str] = field(default_factory=dict)
+    stored: frozenset[str] = frozenset()  # the replays to read from those files
 
     def scan(self, table: str, replays: Iterable[str] | None = None) -> pl.LazyFrame:
-        """A lazy frame of one table: the stored rows, then those of the converted replays.
-
-        With `replays`, only theirs, read from the files of their days only.
-        """
-        wanted = None if replays is None else set(replays)
-        names = self.stored if wanted is None else self.stored & wanted
+        """A lazy frame of one table: the rows of the source's replays, or of `replays`
+        only (then read from the files of their days only)."""
+        names = self.stored if replays is None else self.stored & set(replays)
         files = self.files.get(table) or []
-        if wanted is not None:
+        if replays is not None:
             days = {partition(name) for name in names}
             files = [path for path in files if path.parent.name in days]
-        frames = []
-        if files:
-            stored = pl.scan_parquet(files, hive_partitioning=False)
-            frames.append(stored.filter(pl.col("replay").is_in(sorted(names))))
-        frames += [
-            rows[table].lazy()
-            for name, rows in self.converted.items()
-            if table in rows and (wanted is None or name in wanted)
-        ]
-        if not frames:
+        if not files:
             return pl.LazyFrame(schema=SCHEMAS[table])
-        return pl.concat(frames)
+        stored = pl.scan_parquet(files, hive_partitioning=False)
+        return stored.filter(pl.col("replay").is_in(sorted(names)))
 
     def by_day(self) -> list[Source]:
         """The source split into its days, oldest first: a pass can read each in a process."""
         days: dict[str, set[str]] = defaultdict(set)
-        for name in [*self.stored, *self.converted, *self.unreadable]:
+        for name in self.stored:
             days[partition(name)].add(name)
         return [
             Source(
@@ -710,20 +1137,13 @@ class Source:
                     table: [path for path in paths if path.parent.name == day]
                     for table, paths in self.files.items()
                 },
-                stored=frozenset(self.stored & names),
-                converted={
-                    name: self.converted[name] for name in sorted(names & set(self.converted))
-                },
-                unreadable={
-                    name: self.unreadable[name] for name in sorted(names & set(self.unreadable))
-                },
+                stored=frozenset(names),
             )
             for day, names in sorted(days.items())
         ]
 
 
 def open_source(
-    parsed_dir: Path | None,
     directory: Path | None = None,
     *,
     since: date | None = None,
@@ -732,21 +1152,18 @@ def open_source(
     tables: Iterable[str] = TABLES,
     log: Callable[[str], None] = lambda message: print(message, file=sys.stderr),
 ) -> Source:
-    """The replays of the days ``since`` (inclusive) .. ``until`` (exclusive) for a pass.
+    """The replays in the tables of ``directory`` of the days ``since`` (inclusive) ..
+    ``until`` (exclusive), or only those of ``replays`` (names without ``.sdfz``), for a
+    pass that reads ``tables``.
 
-    These are the replays in the tables of ``directory`` and the parsed replays in
-    ``parsed_dir``, or only those of ``replays`` (names without ``.sdfz``). A parsed replay
-    that the tables lack or hold for an older parsed file is converted from its JSON here,
-    one at a time, and only its rows of ``tables`` are kept; `reason8 tables` stores them
-    instead, so that the next pass does not convert them again.
+    A day whose files lack a table or hold another layout version is left out, with a
+    message: its replays are parsed again by `reason8 parse`.
     """
     directory = directory or tables_dir()
     tables = tuple(tables)
     wanted = None if replays is None else frozenset(replays)
     files: dict[str, list[Path]] = {table: [] for table in tables}
     kept: set[str] = set()
-    to_convert: list[tuple[str, Path, int]] = []
-    stored_days: dict[str, dict[str, int] | None] = {}
     partitions = sorted(
         path
         for path in directory.glob(PARTITION_PREFIX + "*")
@@ -755,51 +1172,20 @@ def open_source(
     for partition_directory in partitions:
         day = partition_directory.name.removeprefix(PARTITION_PREFIX)
         stored = stored_replays(partition_directory, day)
-        stored_days[day] = stored
-        if stored is None:  # incomplete, or written by another version: read from the JSON
+        if stored is None:
+            log(f"{partition_directory.name}: tables missing or not of {VERSION}, left out")
             continue
         # the replays the day's games table lists: a day being rewritten may hold more
         kept |= {name for name in stored if wanted is None or name in wanted}
         for table in tables:
             files[table].append(partition_directory / table_name(day, table))
-    parsed_partitions = parsed_days(parsed_dir, since, until) if parsed_dir else []
-    for parsed_partition in parsed_partitions:
-        day = parsed_partition.name.removeprefix(PARTITION_PREFIX)
-        stored = stored_days.get(day) or {}
-        for path in sorted(parsed_partition.glob("*" + PARSED_SUFFIX)):
-            name = replay_key(path)
-            if wanted is not None and name not in wanted:
-                continue
-            size = path.stat().st_size
-            if stored.get(name) != size:
-                to_convert.append((name, path, size))
-                kept.discard(name)
-    source = Source(files, frozenset(kept))
-    if to_convert:
-        log(
-            f"{len(to_convert)} parsed replays are not in the tables or changed since: "
-            "reading them from the JSON (`reason8 tables` stores them)"
-        )
-    for name, path, size in to_convert:
-        try:
-            rows = replay_tables(load_replay(path), name, size)
-        except Exception as error:  # reported by the pass, as a replay it could not read
-            source.unreadable[name] = str(error)
-            continue
-        source.converted[name] = {table: rows[table] for table in tables}
-    return source
+    return Source(files, frozenset(kept))
 
 
 def add_source_arguments(parser: argparse.ArgumentParser) -> None:
     """The options of a pass that reads the replays with `open_source`."""
     parser.add_argument(
-        "--parsed",
-        type=Path,
-        default=data_dir() / "parsed",
-        help="parsed replays, read for those the tables lack",
-    )
-    parser.add_argument(
-        "--tables", type=Path, default=data_dir() / AREA, help="the tables (reason8 tables)"
+        "--tables", type=Path, default=data_dir() / AREA, help="the tables of the parsed replays"
     )
     parser.add_argument("--since", type=date.fromisoformat, help="first day (YYYY-MM-DD)")
     parser.add_argument("--until", type=date.fromisoformat, help="day after the last (YYYY-MM-DD)")
@@ -815,70 +1201,76 @@ def file_version(path: Path) -> str | None:
         return None
 
 
+def stored_replays(directory: Path, day: str) -> dict[str, int | None] | None:
+    """Replay -> size of its replay file, as the day's games table records them; None when a
+    table of the day is missing or holds another layout version."""
+    paths = [directory / table_name(day, table) for table in TABLES]
+    if any(file_version(path) != VERSION for path in paths):
+        return None
+    games = pl.read_parquet(directory / table_name(day, GAMES), columns=["replay", "sdfz_bytes"])
+    return dict(games.iter_rows())
+
+
 def staging_dir(out_dir: Path, day: str) -> Path:
     """Where the rows of single replays wait until their day is written."""
     return out_dir / STAGING / day
 
 
-def convert_replay(path: Path, staging: Path) -> str | None:
-    """Convert one parsed replay into staged files, one per table; return an error or None."""
-    name = replay_key(path)
-    try:
-        rows = replay_tables(load_replay(path), name, path.stat().st_size)
-    except Exception as error:  # one bad file must not stop the day; it is retried next time
-        return f"{path.name}: {type(error).__name__}: {error}"[:500]
+def stage(rows: Mapping[str, pl.DataFrame], staging: Path, name: str) -> None:
+    """Keep the rows of one replay in ``staging`` until its day is written, `GAMES` last."""
     staging.mkdir(parents=True, exist_ok=True)
-    for table, frame in rows.items():
-        frame.write_parquet(
+    for table in TABLES:
+        rows[table].write_parquet(
             staging / f"{name}.{table}{SUFFIX}", compression="zstd", compression_level=1
         )
-    return None
 
 
 @dataclass
 class DayPlan:
-    """What a day needs: the parsed replays, the ones to convert and the ones to keep."""
+    """The replays of a day to stage, and what its tables hold now.
+
+    Each task is the arguments of the function that stages one replay (`update_days`).
+    """
 
     day: str
-    parsed: dict[str, Path]  # replay -> parsed file
-    sizes: dict[str, int]
-    kept: set[str]
-    up_to_date: bool
-
-    @property
-    def to_convert(self) -> list[Path]:
-        return [path for name, path in self.parsed.items() if name not in self.kept]
+    tasks: list[tuple[Any, ...]]
+    stored: dict[str, int | None] = field(default_factory=dict)  # replay -> sdfz size
 
 
-def plan_day(parsed_partition: Path, tables_partition: Path, force: bool = False) -> DayPlan:
-    day = parsed_partition.name.removeprefix(PARTITION_PREFIX)
-    parsed = {replay_key(path): path for path in sorted(parsed_partition.glob("*" + PARSED_SUFFIX))}
-    sizes = {name: path.stat().st_size for name, path in parsed.items()}
-    stored = None if force else stored_replays(tables_partition, day)
-    kept = {name for name, size in (stored or {}).items() if sizes.get(name) == size}
-    return DayPlan(day, parsed, sizes, kept, up_to_date=stored == sizes)
+@dataclass
+class DayResult:
+    day: str
+    replays: int = 0
+    converted: int = 0  # replays staged and written
+    seconds: float = 0.0  # CPU time of the staging and the writing, in one process
+    table_bytes: dict[str, int] = field(default_factory=dict)
+    rows: dict[str, int] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)
+    up_to_date: bool = False
 
 
-def write_day(plan: DayPlan, tables_partition: Path, staging: Path) -> DayResult:
-    """Write the tables of a day from its kept rows and its staged replays, in replay order.
+def write_day(day: str, stored: Iterable[str], tables_partition: Path, staging: Path) -> DayResult:
+    """Write the tables of a day from its staged replays and the ``stored`` ones, in name
+    order; a staged replay replaces the stored rows of the same replay.
 
     Each table is streamed into a temporary file and renamed into place, `GAMES` last.
     """
-    result = DayResult(plan.day, replays=len(plan.parsed))
-    result.parsed_bytes = sum(plan.sizes.values())
-    staged = {name for name in plan.parsed if (staging / f"{name}.{GAMES}{SUFFIX}").exists()}
-    # runs of consecutive kept replays are read with one scan
+    suffix = f".{GAMES}{SUFFIX}"
+    staged = {path.name.removesuffix(suffix) for path in staging.glob("*" + suffix)}
+    names = sorted(set(stored) | staged)
+    result = DayResult(day, replays=len(names), converted=len(staged))
+    # runs of consecutive stored replays are read with one scan
     pieces: list[list[str] | str] = []
-    for name in plan.parsed:
-        if name in plan.kept:
+    for name in names:
+        if name in staged:
+            pieces.append(name)
+        else:
             if not pieces or isinstance(pieces[-1], str):
                 pieces.append([])
             pieces[-1].append(name)
-        elif name in staged:
-            pieces.append(name)
     tables_partition.mkdir(parents=True, exist_ok=True)
     for table in TABLES:
-        existing = tables_partition / table_name(plan.day, table)
+        existing = tables_partition / table_name(day, table)
         sources = [
             pl.scan_parquet(staging / f"{piece}.{table}{SUFFIX}")
             if isinstance(piece, str)
@@ -899,43 +1291,11 @@ def write_day(plan: DayPlan, tables_partition: Path, staging: Path) -> DayResult
         os.replace(temporary_path, existing)
         result.table_bytes[table] = existing.stat().st_size
         result.rows[table] = pl.scan_parquet(existing).select(pl.len()).collect().item()
-    result.converted = len(staged)
     for path in staging.glob("*"):
         path.unlink()
     if staging.is_dir():
         staging.rmdir()
     return result
-
-
-@dataclass
-class DayResult:
-    day: str
-    replays: int = 0
-    converted: int = 0
-    seconds: float = 0.0  # CPU time of the conversions and the writing, in one process
-    parsed_bytes: int = 0
-    table_bytes: dict[str, int] = field(default_factory=dict)
-    rows: dict[str, int] = field(default_factory=dict)
-    errors: list[str] = field(default_factory=list)
-    up_to_date: bool = False
-
-
-def replay_key(path: Path) -> str:
-    return path.name.removesuffix(PARSED_SUFFIX)
-
-
-def stored_replays(directory: Path, day: str) -> dict[str, int] | None:
-    """Replay -> parsed size, as the day's games table records them, or None to rebuild."""
-    paths = [directory / table_name(day, table) for table in TABLES]
-    if any(file_version(path) != VERSION for path in paths):
-        return None
-    games = pl.read_parquet(directory / table_name(day, GAMES), columns=["replay", "parsed_bytes"])
-    return dict(games.iter_rows())
-
-
-def update_day(parsed_partition: Path, tables_partition: Path, force: bool = False) -> DayResult:
-    """Bring the tables of one day up to date with its parsed replays, in this process."""
-    return update([parsed_partition], tables_partition.parent, jobs=0, force=force)[0]
 
 
 def _timed(function: Callable[..., Any], *arguments: Any) -> tuple[Any, float]:
@@ -959,62 +1319,67 @@ class _InProcess:
         return future
 
 
-def update(
-    days: Iterable[Path],
+def update_days(
+    plans: Iterable[DayPlan],
     out_dir: Path,
+    task: Callable[..., dict[str, Any]],
     *,
     jobs: int = 1,
-    force: bool = False,
+    on_entry: Callable[[dict[str, Any]], None] = lambda entry: None,
     log: Callable[[str], None] = lambda message: print(message, file=sys.stderr),
 ) -> list[DayResult]:
-    """Bring the tables of the given parsed partitions up to date.
+    """Stage the replays of each plan with ``task(*arguments, staging)``, and write each day.
 
-    Replays are converted in parallel, oldest day first, and a day is written as soon as its
-    replays are converted, so only the days in progress are staged. ``jobs=0`` runs everything
-    in this process.
+    ``task`` returns an entry for its replay (``file``, and ``status`` "ok" when it staged
+    the rows, otherwise an ``error``), given to ``on_entry`` as it comes. The replays are
+    staged in parallel, oldest day first, and a day is written as soon as its replays are
+    done, so only the days in progress are staged. A day without replays to stage is left
+    as it is. ``jobs=0`` runs everything in this process.
     """
-    plans = [plan_day(day, out_dir / day.name, force) for day in days]
-    results = {plan.day: DayResult(plan.day, replays=len(plan.parsed)) for plan in plans}
+    plans = list(plans)
+    results = {plan.day: DayResult(plan.day, replays=len(plan.stored)) for plan in plans}
     by_day = {plan.day: plan for plan in plans}
     pending: dict[str, int] = {}
-    conversions: list[tuple[str, Path]] = []
+    tasks: list[tuple[str, tuple[Any, ...]]] = []
     for plan in plans:
-        if plan.up_to_date:
+        if not plan.tasks:
             results[plan.day].up_to_date = True
-            results[plan.day].parsed_bytes = sum(plan.sizes.values())
             continue
         staging = staging_dir(out_dir, plan.day)
         for path in staging.glob("*") if staging.is_dir() else ():
             path.unlink()  # left by a run that stopped
-        pending[plan.day] = len(plan.to_convert)
-        conversions += [(plan.day, path) for path in plan.to_convert]
-    conversions.reverse()  # popped from the end: oldest day first
+        pending[plan.day] = len(plan.tasks)
+        tasks += [(plan.day, arguments) for arguments in plan.tasks]
+    tasks.reverse()  # popped from the end: oldest day first
     executor = _InProcess() if jobs <= 0 else ProcessPoolExecutor(max_workers=jobs)
     with executor as pool:
         futures: dict[Future[Any], tuple[str, str]] = {}
 
         def submit_write(day: str) -> None:
-            arguments = (by_day[day], out_dir / partition_of(day), staging_dir(out_dir, day))
+            arguments = (
+                day,
+                list(by_day[day].stored),
+                out_dir / partition_of(day),
+                staging_dir(out_dir, day),
+            )
             futures[pool.submit(_timed, write_day, *arguments)] = ("write", day)
 
-        for day, count in pending.items():
-            if count == 0:
-                submit_write(day)
-        while futures or conversions:
-            # a few conversions queued at a time, so that a finished day is written next
-            while conversions and len(futures) < 2 * max(1, jobs):
-                day, path = conversions.pop()
-                future = pool.submit(_timed, convert_replay, path, staging_dir(out_dir, day))
-                futures[future] = ("convert", day)
+        while futures or tasks:
+            # a few tasks queued at a time, so that a finished day is written next
+            while tasks and len(futures) < 2 * max(1, jobs):
+                day, arguments = tasks.pop()
+                future = pool.submit(_timed, task, *arguments, staging_dir(out_dir, day))
+                futures[future] = ("stage", day)
             done, _ = wait(futures, return_when=FIRST_COMPLETED)
             for future in done:
                 kind, day = futures.pop(future)
                 value, seconds = future.result()
                 result = results[day]
                 result.seconds += seconds
-                if kind == "convert":
-                    if value is not None:
-                        result.errors.append(value)
+                if kind == "stage":
+                    if value.get("status") != "ok":
+                        result.errors.append(f"{value.get('file')}: {value.get('error')}")
+                    on_entry(value)
                     pending[day] -= 1
                     if pending[day] == 0:
                         submit_write(day)
@@ -1022,16 +1387,11 @@ def update(
                 value.seconds, value.errors = result.seconds, result.errors
                 results[day] = value
                 log(
-                    f"{day}: {value.converted} of {value.replays} replays converted, "
+                    f"{day}: {value.converted} of {value.replays} replays written, "
                     f"{sum(value.table_bytes.values()) / 1e6:.1f} MB"
                 )
-                for error in value.errors:
-                    log(f"  {error}")
     if (out_dir / STAGING).is_dir() and not any((out_dir / STAGING).iterdir()):
         (out_dir / STAGING).rmdir()
-    for result in results.values():
-        if result.up_to_date:
-            log(f"{result.day}: up to date ({result.replays} replays)")
     return sorted(results.values(), key=lambda result: result.day)
 
 
@@ -1039,36 +1399,18 @@ def partition_of(day: str) -> str:
     return PARTITION_PREFIX + day
 
 
-def parsed_days(
-    parsed_dir: Path, since: date | None = None, until: date | None = None
-) -> list[Path]:
-    """The partitions of the parsed area in the range, oldest first."""
-    return sorted(
-        path
-        for path in parsed_dir.glob(PARTITION_PREFIX + "*")
-        if path.is_dir() and partition_in_range(path.name, since, until)
-    )
-
-
-def default_jobs() -> int:
-    """A quarter of the CPU threads: each process holds one parsed replay, 0.3 to 2 GB."""
-    return max(1, (os.cpu_count() or 1) // 4)
-
-
 def summarize(results: list[DayResult]) -> str:
     built = [result for result in results if not result.up_to_date]
     converted = sum(result.converted for result in built)
     lines = [
-        f"{len(results)} days, {len(results) - len(built)} up to date, "
-        f"{converted} replays converted"
+        f"{len(results)} days, {len(results) - len(built)} up to date, {converted} replays written"
     ]
     if converted:
-        seconds = sum(result.seconds for result in built)
-        parsed_bytes = sum(result.parsed_bytes for result in built)
         table_bytes = sum(sum(result.table_bytes.values()) for result in built)
+        replays = sum(result.replays for result in built)
         lines.append(
-            f"{seconds / converted:.2f} s of CPU per replay, tables "
-            f"{table_bytes / 1e6:.1f} MB = {table_bytes / parsed_bytes:.0%} of the parsed JSON"
+            f"{sum(result.seconds for result in built) / converted:.2f} s of CPU per replay "
+            f"written; the days written hold {replays} replays in {table_bytes / 1e6:.1f} MB"
         )
         for table in TABLES:
             size = sum(result.table_bytes.get(table, 0) for result in built)
@@ -1076,28 +1418,5 @@ def summarize(results: list[DayResult]) -> str:
             lines.append(f"  {table}: {rows:,} rows, {size / 1e6:.1f} MB")
     errors = sum(len(result.errors) for result in results)
     if errors:
-        lines.append(f"{errors} replays could not be read")
+        lines.append(f"{errors} replays failed")
     return "\n".join(lines)
-
-
-def add_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--parsed", type=Path, default=data_dir() / "parsed")
-    parser.add_argument("--out", type=Path, default=data_dir() / AREA)
-    parser.add_argument(
-        "--jobs",
-        type=int,
-        default=default_jobs(),
-        help="replays converted in parallel (default: a quarter of the CPU threads)",
-    )
-    parser.add_argument("--force", action="store_true", help="rebuild days that are up to date")
-    parser.add_argument("--since", type=date.fromisoformat, help="first day (YYYY-MM-DD)")
-    parser.add_argument("--until", type=date.fromisoformat, help="day after the last (YYYY-MM-DD)")
-
-
-def run(args: argparse.Namespace) -> int:
-    require_partitioned(args.parsed, "*" + PARSED_SUFFIX)
-    days = parsed_days(args.parsed, args.since, args.until)
-    print(f"{len(days)} days of parsed replays", file=sys.stderr)
-    results = update(days, args.out, jobs=args.jobs, force=args.force)
-    print(summarize(results), file=sys.stderr)
-    return 0

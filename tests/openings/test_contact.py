@@ -253,17 +253,15 @@ def test_measure_reads_the_replays_from_the_tables(tmp_path):
         {"team": team.team_id, "ally": team.ally_team_id, "gaia": False}
         for team in replay.teams().values()
     ]
-    parsed, state = tmp_path / "parsed", tmp_path / "state"
+    out, state = tmp_path / "tables", tmp_path / "state"
     names = [f"2026-11-0{day}_10-00-00-000_x" for day in (1, 2, 3)]
     for name in names:
         (state / f"date={name[:10]}").mkdir(parents=True)
         write_state(state / f"date={name[:10]}" / f"{name}.jsonl.gz", lines)
-    synthetic.write_parsed(parsed, names[0], replay)
-    synthetic.write_tables(parsed)
-    synthetic.write_parsed(parsed, names[1], replay)  # not in the tables yet
+    synthetic.write_tables(out, dict.fromkeys(names[:2], replay))
     # names[2] is not parsed: skipped
 
-    table = measure(state, parsed, map_list={})
+    table = measure(state, map_list={}, tables_dir=out)
     fights = read_fights(state / "date=2026-11-01" / f"{names[0]}.jsonl.gz")
     expected = [
         row | {"replay": name}
@@ -271,7 +269,7 @@ def test_measure_reads_the_replays_from_the_tables(tmp_path):
         for row in measure_game(fights, replay, "x", {})
     ]
     assert table.to_dicts() == pl.from_dicts(expected, schema=TABLE_SCHEMA).to_dicts()
-    later = measure(state, parsed, map_list={}, since=date(2026, 11, 2))
+    later = measure(state, map_list={}, tables_dir=out, since=date(2026, 11, 2))
     assert later["replay"].unique().to_list() == [names[1]]
 
 

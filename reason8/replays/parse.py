@@ -1,19 +1,20 @@
-"""Parse `.sdfz` replays into compact JSON with the pinned sdfz-demo-parser.
+"""Parse `.sdfz` replays into the Parquet tables, with the pinned sdfz-demo-parser.
 
 Usage::
 
     tools/fetch-parser.sh                # once: download the pinned parser binary
-    uv run reason8 parse                 # data/replays/**/*.sdfz -> data/parsed/date=*/*.json.zst
+    uv run reason8 parse                 # data/replays/**/*.sdfz -> data/tables/date=*/
     uv run reason8 parse --since 2026-11-01 --until 2026-11-08    # the replays of one week
     uv run reason8 parse DIR_OR_FILE ... --out OUT --jobs 24
 
-Each replay becomes one zstd-compressed JSON document (see docs/reference/replay-format.md),
-written to the date partition of the replay (``<out>/date=YYYY-MM-DD/``, see `reason8.paths`).
-Directories are searched at any depth; ``--since`` and ``--until`` read only their partitions.
-A replay that fails to parse gets an entry with the error in `<out>/_index.jsonl`
-instead of stopping the run. Already parsed replays are skipped unless `--force`.
-Afterwards the Parquet tables (`reason8.replays.tables`) of the days it parsed replays of are
-brought up to date, in the ``tables`` directory next to ``<out>``, unless `--no-tables`.
+Each replay becomes one document in memory (`compact`, the shape `reason8.replays.replay.Replay`
+reads, see docs/reference/replay-format.md), which is turned into the rows of the tables
+(`reason8.replays.tables`) and kept only there: the days of the replays parsed are rewritten in
+``<out>/date=YYYY-MM-DD/``, one file per table. Directories are searched at any depth;
+``--since`` and ``--until`` read only their partitions. A replay is done when the games table
+of its day lists it with the size of its file; the others are parsed, all of them with
+``--force``. Every replay tried gets an entry in ``<out>/_index.jsonl``: its status, the error
+of one that failed (it is tried again next time), its sizes and the seconds it took.
 Default paths are under the data directory (``REASON8_DATA_DIR``, or ``data/`` in the repo).
 """
 
@@ -25,14 +26,13 @@ import os
 import subprocess
 import sys
 import time
-from collections import Counter
-from compression import zstd
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from collections import Counter, defaultdict
 from datetime import date
 from pathlib import Path
 from typing import Any
 
-from reason8.paths import data_dir, find_files, partitioned_path, require_partitioned
+from reason8.paths import PARTITION_PREFIX, data_dir, find_files, partition, require_partitioned
+from reason8.replays import tables
 from reason8.replays.codes import (
     LUAUI_AI_ID,
     MAPDRAW_ACTIONS,
@@ -44,14 +44,7 @@ from reason8.replays.codes import (
 from reason8.replays.replay import FORMAT
 from reason8.replays.sdfz import GAME_SPEED, RawCommandPacket, read_command_packets_file
 
-#: Level 12 is about 15% smaller than gzip and decompresses twice as fast, at
-#: about 0.2 s of CPU per replay. Level 19 is another 18% smaller but takes about
-#: 27 times longer, which dominates the parse time, so it isn't worth it here.
-ZSTD_LEVEL = 12
-PARSED_SUFFIX = ".json.zst"
-
 PARSER_VERSION = "5.15.1"
-INDEX_NAME = "_index.jsonl"
 
 # Packet types we ask the parser for. Everything else (frame/sync/ping noise,
 # system/log messages, setup text containing names) is dropped at the source.
@@ -391,30 +384,14 @@ def parse_replay(parser: Path, replay: Path) -> tuple[dict[str, Any], int]:
     return compact(parsed, raw, source), len(parser_output)
 
 
-def output_path(out_dir: Path, replay: Path) -> Path:
-    """Where the parsed replay is kept: in the date partition of the replay."""
-    return partitioned_path(out_dir, replay.stem + PARSED_SUFFIX)
-
-
-def write_json_zst(document: Any, path: Path, level: int = ZSTD_LEVEL) -> int:
-    """Write compact JSON compressed with zstd; return the uncompressed size."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = path.with_name(path.name + ".tmp")
-    data = json.dumps(document, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    temporary_path.write_bytes(zstd.compress(data, level=level))
-    os.replace(temporary_path, path)
-    return len(data)
-
-
-def process_one(
-    parser: Path, replay: Path, out_dir: Path, zstd_level: int = ZSTD_LEVEL
-) -> dict[str, Any]:
+def parse_into(parser: Path, replay: Path, staging: Path) -> dict[str, Any]:
+    """Parse one replay and stage its rows (`reason8.replays.tables.stage`); return its entry
+    of the index, with the error instead when it fails."""
     entry: dict[str, Any] = {"file": replay.name, "sdfz_bytes": replay.stat().st_size}
     start_time = time.perf_counter()
     try:
         document, parser_json_bytes = parse_replay(parser, replay)
-        path = output_path(out_dir, replay)
-        json_bytes = write_json_zst(document, path, zstd_level)
+        tables.stage(tables.replay_tables(document, replay.stem), staging, replay.stem)
         meta = document["meta"]
         entry.update(
             status="ok",
@@ -424,8 +401,6 @@ def process_one(
             gameId=meta.get("gameId"),
             events=len(document["events"]),
             parser_json_bytes=parser_json_bytes,
-            json_bytes=json_bytes,
-            compressed_bytes=path.stat().st_size,
         )
     except Exception as error:  # record any failure per file, keep going
         entry.update(status="error", error=f"{type(error).__name__}: {error}"[:2000])
@@ -452,8 +427,9 @@ def find_replays(
     return found
 
 
-def read_index(out_dir: Path) -> dict[str, dict[str, Any]]:
-    path = out_dir / INDEX_NAME
+def read_index(directory: Path) -> dict[str, dict[str, Any]]:
+    """The index of the replays tried, in a tables directory, by replay file name."""
+    path = directory / tables.INDEX_NAME
     if not path.exists():
         return {}
     return parse_index(path.read_text())
@@ -465,8 +441,9 @@ def parse_index(text: str) -> dict[str, dict[str, Any]]:
     return {entry["file"]: entry for entry in entries}
 
 
-def write_index(out_dir: Path, index: dict[str, dict[str, Any]]) -> None:
-    path = out_dir / INDEX_NAME
+def write_index(directory: Path, index: dict[str, dict[str, Any]]) -> None:
+    path = directory / tables.INDEX_NAME
+    directory.mkdir(parents=True, exist_ok=True)
     temporary_path = path.with_name(path.name + ".tmp")
     temporary_path.write_text(index_text(index))
     os.replace(temporary_path, path)
@@ -501,9 +478,7 @@ def summarize(entries: list[dict[str, Any]]) -> str:
 
         lines.append(
             f"per replay: {mean('seconds'):.2f} s, sdfz {mean('sdfz_bytes') / 1e6:.2f} MB, "
-            f"parser JSON {mean('parser_json_bytes') / 1e6:.1f} MB, "
-            f"ours {mean('json_bytes') / 1e6:.2f} MB "
-            f"({mean('compressed_bytes') / 1e6:.2f} MB compressed)"
+            f"parser JSON {mean('parser_json_bytes') / 1e6:.1f} MB"
         )
     for title, fields in (
         ("failures per game version", ("game",)),
@@ -533,7 +508,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "inputs", nargs="*", type=Path, help=f"files or dirs (default {data_dir() / 'replays'})"
     )
-    parser.add_argument("--out", type=Path, default=data_dir() / "parsed")
+    parser.add_argument("--out", type=Path, default=data_dir() / tables.AREA, help="the tables")
     parser.add_argument("--parser", type=Path, default=default_parser())
     parser.add_argument(
         "--jobs",
@@ -541,19 +516,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=default_jobs(),
         help="parallel parses (default: three quarters of the CPU threads)",
     )
-    parser.add_argument(
-        "--zstd-level",
-        type=int,
-        default=ZSTD_LEVEL,
-        help=f"zstd compression level (default {ZSTD_LEVEL})",
-    )
-    parser.add_argument("--force", action="store_true", help="re-parse replays already done")
-    parser.add_argument(
-        "--no-tables",
-        dest="tables",
-        action="store_false",
-        help="don't update the Parquet tables of the days parsed (see `reason8 tables`)",
-    )
+    parser.add_argument("--force", action="store_true", help="parse replays already done again")
     parser.add_argument(
         "--since",
         type=date.fromisoformat,
@@ -566,6 +529,27 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def plan_days(
+    replays: list[Path], out_dir: Path, parser: Path, force: bool = False
+) -> list[tables.DayPlan]:
+    """The replays to parse, per day: those the day's tables lack or hold for a replay file
+    of another size, or all of them with ``force``. A day whose tables are missing a table
+    or of another layout is rebuilt from the replays parsed now."""
+    by_day: dict[str, list[Path]] = defaultdict(list)
+    for replay in replays:
+        by_day[partition(replay.name).removeprefix(PARTITION_PREFIX)].append(replay)
+    plans = []
+    for day, day_replays in sorted(by_day.items()):
+        stored = tables.stored_replays(out_dir / tables.partition_of(day), day) or {}
+        to_parse = [
+            replay
+            for replay in sorted(day_replays)
+            if force or stored.get(replay.stem) != replay.stat().st_size
+        ]
+        plans.append(tables.DayPlan(day, [(parser, replay) for replay in to_parse], stored))
+    return plans
+
+
 def run(args: argparse.Namespace) -> int:
     if not args.parser.exists():
         print(
@@ -574,45 +558,24 @@ def run(args: argparse.Namespace) -> int:
         return 2
     replays = find_replays(args.inputs or [data_dir() / "replays"], args.since, args.until)
     args.out.mkdir(parents=True, exist_ok=True)
-    require_partitioned(args.out, "*" + PARSED_SUFFIX)
+    require_partitioned(args.out, "*" + tables.SUFFIX)
+    plans = plan_days(replays, args.out, args.parser, args.force)
+    count = sum(len(plan.tasks) for plan in plans)
+    print(f"{len(replays)} replays, {count} to parse", file=sys.stderr)
     index = read_index(args.out)
-    replays_to_parse = [
-        replay
-        for replay in replays
-        if args.force
-        or index.get(replay.name, {}).get("status") != "ok"
-        or not output_path(args.out, replay).exists()
-    ]
-    print(f"{len(replays)} replays, {len(replays_to_parse)} to parse", file=sys.stderr)
-
     results: list[dict[str, Any]] = []
-    with ProcessPoolExecutor(max_workers=max(1, args.jobs)) as pool:
-        futures = [
-            pool.submit(process_one, args.parser, replay, args.out, args.zstd_level)
-            for replay in replays_to_parse
-        ]
-        for future in as_completed(futures):
-            entry = future.result()
-            results.append(entry)
-            index[entry["file"]] = entry
-            status = entry["status"] if entry["status"] == "ok" else entry["error"]
-            print(f"{entry['seconds']:7.2f}s {entry['file']}: {status}", file=sys.stderr)
-            if len(results) % 50 == 0:
-                write_index(args.out, index)
+
+    def record(entry: dict[str, Any]) -> None:
+        results.append(entry)
+        index[entry["file"]] = entry
+        status = entry["status"] if entry["status"] == "ok" else entry["error"]
+        print(f"{entry['seconds']:7.2f}s {entry['file']}: {status}", file=sys.stderr)
+        if len(results) % 50 == 0:
+            write_index(args.out, index)
+
+    days = tables.update_days(plans, args.out, parse_into, jobs=max(1, args.jobs), on_entry=record)
     write_index(args.out, index)
     if results:
         print(summarize(results), file=sys.stderr)
-    parsed_days = {
-        partitioned_path(args.out, entry["file"]).parent
-        for entry in results
-        if entry["status"] == "ok"
-    }
-    if args.tables and parsed_days:
-        # imported here: the tables module builds on this one
-        from reason8.replays import tables
-
-        table_results = tables.update(
-            sorted(parsed_days), args.out.parent / tables.AREA, jobs=tables.default_jobs()
-        )
-        print(tables.summarize(table_results), file=sys.stderr)
+        print(tables.summarize(days), file=sys.stderr)
     return 0

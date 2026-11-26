@@ -223,20 +223,20 @@ def test_sides_lines_compare_the_same_place_on_both_sides():
 
 
 def test_load_sample_keeps_full_human_games(tmp_path):
-    parsed = tmp_path / "parsed"
+    out = tmp_path / "tables"
     document = synthetic.with_own_starts_recommended(json.loads(FIXTURE.read_text("utf-8")))
-    synthetic.write_parsed(parsed, "2026-11-01_game", document)
     flooded = dict(document, modoptions={**document.get("modoptions", {}), "map_waterlevel": "50"})
-    synthetic.write_parsed(parsed, "2026-11-01_flooded", flooded)
-    synthetic.write_tables(parsed)
     short = dict(document, players=document["players"][:-1])
-    synthetic.write_parsed(parsed, "2026-11-02_short", short)  # read from its JSON
-    sample = load_sample(parsed, map_list={})
+    synthetic.write_tables(
+        out,
+        {"2026-11-01_game": document, "2026-11-01_flooded": flooded, "2026-11-02_short": short},
+    )
+    sample = load_sample(map_list={}, tables_dir=out)
     assert list(sample.openings) == [MAP]
     assert len(sample.openings[MAP]) == 16
     assert sample.openings[MAP] == openings(Replay(document), map_list={})
     assert list(sample.setups) == [sample.openings[MAP][0].match]
     # every player is on a position: (side of the layout, place in its list)
     assert sorted(sample.places.values()) == [(side, n) for side in (0, 1) for n in range(8)]
-    assert not load_sample(parsed, maps=["Rosetta 1.4.4"], map_list={}).openings
-    assert not load_sample(parsed, map_list={}, since=date(2026, 11, 2)).openings
+    assert not load_sample(maps=["Rosetta 1.4.4"], map_list={}, tables_dir=out).openings
+    assert not load_sample(map_list={}, tables_dir=out, since=date(2026, 11, 2)).openings
