@@ -501,18 +501,6 @@ From these, `Replay.build_orders()` (with `count`, `queued`, `inserted` and
 first contact and the position check take from a replay are read. The tests
 check them against the documents of the fixture and of synthetic replays.
 
-### Converting the JSON of earlier versions
-
-Earlier versions kept each parsed replay twice: as a zstd JSON document in
-`parsed/date=<day>/<name>.json.zst`, with the index in `parsed/_index.jsonl`,
-and as the tables. `reason8 tables --from-parsed DIR` converts those documents
-into the tables without parsing the replays again, and adds their index
-entries to `tables/_index.jsonl`; a replay the tables of its day hold is
-skipped, so it can be stopped and run again. It is the only code that still
-reads the JSON documents (`reason8/replays/from_parsed.py`): once the
-documents are converted, `parsed/` is deleted, locally and in the bucket, and
-so is the command.
-
 ## Measurements
 
 ### First sample of the slice
@@ -608,13 +596,13 @@ tables of the earlier layout.
   the tables from the JSON: 6 min 46 s of wall time, 1.02 s per replay. Over
   the slice the parse index records 88.5 hours of compute for 42,931 replays
   (7.4 s per replay, most of them parsed with 24 jobs).
-- **Converting the JSON of the earlier version**
-  (`reason8 tables --from-parsed`): 1 min 24 s for the 399 replays with 4
-  processes, 0.21 s per replay and 1.42 s of CPU per replay. The tables are
-  equal to those of the parse, file for file. The whole slice (42,931 replays)
-  takes about 2.5 hours with 4 processes. A worker holds one document;
-  building the earlier tables from the JSON, a worker peaked at 1.7 GB on the
-  largest replay of two weeks.
+- **Converting the JSON of the earlier version** (done once, by a command
+  since removed): 1 min 24 s for the 399 replays with 4 processes, 0.21 s per
+  replay and 1.42 s of CPU per replay. The tables are equal to those of the
+  parse, file for file. The whole slice (42,931 replays) took 82 minutes with
+  12 processes, 2.0 s of CPU per replay. A worker holds one document; building
+  the earlier tables from the JSON, a worker peaked at 1.7 GB on the largest
+  replay of two weeks.
 - **Build orders of the first 8 minutes** of every game of two weeks (2,830
   replays, 6,227,332 orders, measured with the earlier layout): from the
   tables, 2.4 s to collect `build_order_frame(..., until_frame=14400)` as a

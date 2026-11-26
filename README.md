@@ -58,10 +58,6 @@ more.
   map drawings, start picks, shares, statistics, players, games), the replays
   not parsed yet or all of them.
 
-`tables --from-parsed DIR --jobs N --since D --until D`
-: Once: convert the parsed JSON documents of earlier versions (`data/parsed`)
-  into the tables, without parsing the replays again.
-
 `header REPLAY`
 : Print which engine, game version and map a replay needs.
 
