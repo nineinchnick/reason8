@@ -34,7 +34,8 @@ before that, the team's measures are:
 
 One row per team goes to ``<out>/teams.parquet`` (`reason8 eval report` compares them). A
 game whose ``result.json`` exists is not played again, so an interrupted run can be repeated.
-Each game's folder keeps its start script, engine log, replay and state file.
+Each game's folder keeps its start script, engine log, replay and state file, and the
+state's Parquet tables (`reason8.headless.tables`).
 """
 
 from __future__ import annotations
@@ -53,6 +54,7 @@ import polars as pl
 from reason8.bot.game import FRAMES_PER_MINUTE, team_game_layout, team_game_script, team_positions
 from reason8.game.unitdefs import UnitDef, game_unit_defs
 from reason8.headless import run as headless_run
+from reason8.headless import tables
 from reason8.headless.state import read_records
 from reason8.openings.contact import first_contact, read_fights
 from reason8.openings.extract import OPENING_SECONDS
@@ -214,6 +216,7 @@ def play_game(
         with state.open("rb") as source, gzip.open(game_dir / STATE_NAME, "wb") as target:
             shutil.copyfileobj(source, target)
         state.unlink()
+        tables.convert(game_dir / STATE_NAME)
         measures = team_measures(game_dir / STATE_NAME, unit_defs)
         teams = []
         for team, (ally_team, position) in enumerate(team_positions(layout)):
