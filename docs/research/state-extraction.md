@@ -16,16 +16,24 @@ Faster than real time?
   start, 1.8x at minute 25)
 
 State snapshots from a spectator widget?
-: Yes. Units, positions, health, build progress, resources and wind, plus an
-  event for every unit created / finished / destroyed and for every first hit
-  between two enemy units
+: Yes. Resources and wind every second; units, positions, health and build
+  progress every 5 s; an event for every unit created / finished / destroyed /
+  given / gone idle and for every first hit between two enemy units. Converted
+  to Parquet tables after the run
+
+What stands at any frame?
+: Rebuilt from the unit events alone; it matches the snapshots of real games
+  but for units still dying and the odd unit made between two frames (section
+  4\)
 
 Is the re-run the same game?
 : Yes. 0 desync warnings, same winner and length as recorded, byte-identical
   output across runs
 
 Disk per game (snapshot every 5 s, gzip)
-: 1v1 (13 min): 86 KB. 8v8 (26 min): 6.0 MB
+: 1v1 (13 min): 86 KB. 8v8 (26 min): 6.0 MB (format 1). First 10 minutes of an
+  8v8 in format 5: 39 KB of gzipped JSON lines and 28 KB of Parquet tables per
+  game minute
 
 Replays per hour per core
 : 1v1: 80 to 100. 8v8: 5 to 8
@@ -80,12 +88,17 @@ arguments; nothing is committed from `data/`.
 
 `batch`
 : Plays many replays, several engines at once: fetches what each needs, keeps
-  the state as `date=<day>/<replay name>.jsonl.gz`, skips the ones already
-  done
+  the state as `date=<day>/<replay name>.jsonl.gz` with its Parquet tables
+  next to it, skips the ones already done
 
 `state`
 : Reads a state file; prints sizes and counts, and the first finished builds
   per team
+
+`tables`
+: Converts state files to Parquet tables (`tables.py`); with `--check`
+  compares the units rebuilt from the events with every snapshot
+  (`standing.py`)
 
 `widgets/reason8_state_export.lua`
 : The widget that writes the state file
@@ -104,6 +117,8 @@ uv run reason8 headless setup --data-dir data/bar \
 uv run reason8 headless run --data-dir data/bar --threads 1 --snapshots \
     --out X.jsonl data/replays/date=D/X.sdfz
 uv run reason8 headless state X.jsonl --builds
+# tables for the state files of a date range (those written before, too)
+uv run reason8 headless tables --state-dir data/state --since 2026-11-01
 # the first 12 game minutes of many replays, 4 engines at once
 uv run reason8 headless batch --data-dir data/bar --out-dir data/state \
     --jobs 4 --max-frame 21600 data/replays/date=D/A.sdfz data/replays/date=D/B.sdfz
@@ -281,16 +296,25 @@ watches as a full-view spectator, and writes JSON lines to
 `LuaUI/Config/reason8_state.jsonl` in the run's write dir. That folder is one
 of the two that BAR allows a user widget to write to.
 
+Format 5 (the `v` of the header) writes these lines:
+
 `header`
 : *When:* once
 : *Content:* game, map, engine, map size, the map's wind range and tidal
-  strength, teams (number, ally team, AI or not, side), unit type id to name
+  strength, teams (number, ally team, AI or not, side), unit type id to name,
+  the types that cannot move (`static`), how often resource and snapshot lines
+  come
+
+`r`
+: *When:* every second (30 frames)
+: *Content:* the wind strength at that moment; per team: metal and energy
+  (stored, storage, income, expense)
 
 `s`
-: *When:* every N game seconds
-: *Content:* the wind strength at that moment; per team: metal and energy
-  (stored, storage, income, expense); per unit: id, type, team, x, z, health
-  %, build %
+: *When:* every 5 game seconds
+: *Content:* per unit that can move or is still being built: id, type, team,
+  x, z, health %, build %. Finished buildings and units that are dying are
+  left out
 
 `created`
 : *When:* unit placed
@@ -309,6 +333,10 @@ of the two that BAR allows a user widget to write to.
 : *When:* unit changed team
 : *Content:* frame, unit, type, new team, old team
 
+`idle`
+: *When:* a factory or builder ran out of orders
+: *Content:* frame, unit, type, team, position
+
 `hit`
 : *When:* a unit is damaged by a given enemy team for the first time
 : *Content:* frame, unit, type, team, position, the attacking unit, its type
@@ -321,7 +349,19 @@ of the two that BAR allows a user widget to write to.
 `end`
 : *When:* game over or last frame
 : *Content:* frame, reason, winning ally teams, how the attackers were told
-  (below)
+  (below), when in the frame resources and snapshots were taken
+
+Resource and snapshot lines are written in `GameFramePost`, after everything
+the frame did, so a line of frame F shows the world after the unit lines up to
+frame F (`"sampled":"frame_end"`). An engine without that call-in gets them at
+the start of the frame (`"frame_start"`); every engine we use has it.
+
+Up to format 4 the snapshot held the wind and the resources too, listed every
+unit, and was written in `GameFrame`, at the start of its frame (formats 2 to
+4 add the `hit` and `damage` lines and the wind, the exact attacker, and
+`idle`). `read_records()` in `state.py` reads every format the same way: the
+snapshots of format 5 come back whole, with the wind and resources of the same
+frame and the finished buildings rebuilt from the unit lines (health unknown).
 
 The `finished` lines are the **finished builds** that the opening model needs:
 what was actually built and when, not just what was ordered.
@@ -383,6 +423,129 @@ The sizes in the table were measured before the `hit` and `damage` lines and
 the wind were added. The first 12 minutes of an 8v8 game, with snapshots every
 5 s, are 3.6 to 4.2 MB raw and 0.8 to 0.9 MB gzipped.
 
+### Format 5 and the tables
+
+The state is joined with every build order of every player: what stood on the
+map and what the team had at that frame. Two things changed for that in format
+5\. Resources and wind, which change all the time and are small, come every
+second. Finished buildings, which do not move, are left out of the snapshots:
+in format 4 they were 62% to 67% of the snapshot rows of 8v8 games (six games
+measured), and what stands follows from the unit lines (below). Their health
+is the only thing lost; the `hit` and `damage` lines still say when and how
+hard they were attacked.
+
+A Lua widget can only write text, so the JSON lines are converted to Parquet
+tables after the run (`reason8 headless tables`, run by `batch` and the
+evaluation games). A state file `<name>.jsonl.gz` gets one file per table next
+to it, `<name>.<table>.parquet`, in the date partition of the replay:
+
+`game`
+: one row: format, versions, map, wind range, intervals, teams, unit types
+  (with `static`), last frame, how the game ended
+
+`resources`
+: per team and resource line: metal and energy (stored, storage, income,
+  expense), wind. Sorted by team and frame
+
+`events`
+: units created (with builder), finished, destroyed (finished or not, by which
+  team), given (from which team), gone idle; with position. In the order the
+  engine reported them
+
+`units`
+: snapshot units with position, health and build progress. Sorted by unit and
+  frame
+
+`hits`
+: first hit of a unit by each enemy team, with the attacker
+
+`damage`
+: hits and damage per damaged and attacking team, per second
+
+Unit types are names, dictionary-encoded, so tables of different game versions
+can be read together; teams are 16-bit, frames, ids and positions 32-bit
+integers, money and damage 32-bit floats; zstd level 19. Sorting the units by
+unit and frame instead of frame and unit makes that table a quarter smaller (a
+unit's rows repeat each other's values), and level 19 instead of 9 makes all
+tables 13% smaller; writing a game's tables takes 0.07 s. `tables.scan()`
+reads one table of many games as a lazy Polars frame, by date range;
+`read_records()` reads a game's tables as if they were its JSON lines (with
+the units of a snapshot sorted by id).
+
+Size of the first 10 minutes of the same 8v8 replay (Rosetta, 16 players,
+engine 2026.09.03), per game minute:
+
+| Format                                  | JSON raw | JSON gzip | Tables |
+| --------------------------------------- | -------- | --------- | ------ |
+| 4: resources and all units every 5 s    | 263 KB   | 43 KB     | 24 KB  |
+| 5: resources every 1 s, units every 5 s | 186 KB   | 39 KB     | 28 KB  |
+
+Of the format 5 tables, per game minute: units 12.6 KB, resources 7.4 KB,
+events 4.2 KB, hits 1.3 KB, damage 1.0 KB and the game row 1.2 KB (most of it
+the 500 unit type names). The resource lines are 434 KB of the 1.86 MB of JSON
+lines, the snapshots 865 KB (2.07 MB in format 4).
+
+The JSON lines stay next to the tables: they are what the engine wrote, they
+are converted again in a fraction of a second when the layout changes, and
+writing them again means playing the game again. They are 40% bigger than the
+tables. The 152 state files written before format 5 (formats 2 and 4, 108 MB
+gzipped, 22 measured: 62 KB per game minute) give 46 KB of tables per game
+minute, with every unit in the snapshots and resources every 5 s, in 0.3 to
+0.5 s per file.
+
+The widget's cost did not change. Measured on the same replay and the same
+first 10 minutes, with a copy of each widget that adds up the time spent in
+its own call-ins (`Spring.GetTimer`): 0.413 s in format 4 and 0.415 s in
+format 5, of 150 to 200 s of simulation. The wall times of the runs themselves
+(155 to 205 s of simulation for either format) were set by the 8 other engines
+running on the machine at the time, not by the widget. Each format's file was
+byte-identical across two runs, under different load.
+
+### What stands, from the events
+
+`standing.standing_units()` rebuilds the units of every team at any frame from
+the `events` table: the last `created` line of each unit id (ids are used
+again), less those `destroyed` after it, finished if a `finished` line
+follows, owned by the team of the last `given` line. The position is where the
+unit was created: where a building stands, and for a unit that can move the
+factory or builder that made it.
+
+`reason8 headless tables --check` compares that with every snapshot of a game:
+the same units, of the same type and team, finished or not, and for units that
+cannot move at the same place.
+
+Results, on every state file there was (186 replays: 72 of format 2, 114 of
+format 4; 24,174 snapshots, 15.7 million unit rows) and on every fifth
+evaluation game (61 AI games of format 3; 6,283 snapshots, 3.0 million unit
+rows), comparing a snapshot with the units after the previous frame, and the
+last snapshot of a game over or shutdown with the units after its own frame:
+
+Units still dying
+: 5,624 rows (0.03%), in every game. A unit that was destroyed stays in the
+  engine's unit list while its death animation plays (up to 50 frames seen),
+  so the snapshot still has it. Format 5 leaves dying units out of snapshots
+
+Units made by the game at the start of the frame
+: 19 rows in 11 replays, all `legdrone`: drones that Legion units launch from
+  the game's scripts. Those run before the widget's `GameFrame`, so a format 4
+  snapshot already has the drones that the rebuilt units only get after the
+  frame
+
+A unit reported destroyed before it was created
+: 3 rows, one unit (a `corak` in one replay): its `destroyed` line came before
+  its `created` line in the same frame, so it is rebuilt as standing until the
+  end. Not seen anywhere else
+
+There were no differences of type, team, being finished or position.
+
+On the format 5 run of the replay above (121 snapshots, 27,551 unit rows) the
+snapshot at the end of the frame and the units rebuilt after the same frame
+differ in one row: a lab whose `created` line has the snapshot's frame but
+came after the snapshot, between two frames. Frame numbers alone cannot tell
+it apart. Everything else matches, including units given, units destroyed
+before they were finished, and the commanders created by the game at the
+start.
+
 ### Not recorded yet
 
 - What each player could **see** (line of sight). The spectator sees
@@ -390,6 +553,13 @@ the wind were added. The first 12 minutes of an 8v8 game, with snapshots every
   the engine per ally team; this is the main addition needed for milestone 2.
 - Wrecks and other reclaimable features, unit orders, and the map's metal
   spots.
+
+Each fits the format as lines and a table of their own, without changing the
+others: visibility as a line per ally team and interval (units in line of
+sight and in radar, by id) and a `visibility` table (frame, ally team, unit,
+LOS or radar); command queues as a line per order a unit is given and an
+`orders` table; static map data (metal spots, features at the start) once in
+the header and a `map` table per map rather than per game.
 
 ## 5. Per engine: RAM, CPU, throughput
 
@@ -579,7 +749,8 @@ What the pipeline must do, all of it already in `reason8/headless/`:
 
 - Record what each player could see (line of sight per ally team); needed
   before the state is used for training.
-- A compact binary state format for 8v8.
+- Six table files per game: if tens of thousands get slow to list or sync,
+  merge the tables of a day into one file per table.
 - The cloud cost per 1,000 replays. `reason8 headless batch` runs a list of
   replays with N engines at once and skips what is done, on one machine.
 - Find out why engines slow each other down (memory bandwidth, or fast and
