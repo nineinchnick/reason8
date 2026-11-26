@@ -50,7 +50,6 @@ from __future__ import annotations
 import argparse
 import math
 import os
-import re
 import sys
 from bisect import bisect_left
 from collections.abc import Iterable, Mapping, Sequence
@@ -64,7 +63,7 @@ import polars as pl
 
 from reason8 import markdown
 from reason8.paths import data_dir, find_files, require_partitioned
-from reason8.replays.replay import GAME_SPEED, Replay, load_replay
+from reason8.replays.replay import GAME_SPEED, Replay, load_replay, parse_skill
 
 #: BAR's APM gadget ignores a unit's commands for this many frames after its last one.
 SPAM_FRAMES = 7
@@ -140,14 +139,6 @@ class FrameCounter:
             return False
         self.frames.append(frame)
         return True
-
-
-def parse_skill(text: object) -> float | None:
-    """The OpenSkill mu of a player as the replay writes it, e.g. ``"[45.67]"``."""
-    if isinstance(text, int | float):
-        return float(text)
-    found = re.search(r"-?\d+(?:\.\d+)?", str(text or ""))
-    return float(found.group()) if found else None
 
 
 def end_frames(replay: Replay) -> dict[int, int]:

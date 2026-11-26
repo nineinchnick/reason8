@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from compression import zstd
 from dataclasses import dataclass, field
@@ -211,3 +212,11 @@ def iter_replays(
     """
     for path in find_files(Path(directory), "*.json.zst", since=since, until=until):
         yield load_replay(path)
+
+
+def parse_skill(text: object) -> float | None:
+    """The OpenSkill mu of a player as the replay writes it, e.g. ``"[45.67]"`` or ``"~(12.3)"``."""
+    if isinstance(text, int | float):
+        return float(text)
+    found = re.search(r"-?\d+(?:\.\d+)?", str(text or ""))
+    return float(found.group()) if found else None
