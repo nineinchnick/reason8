@@ -3,11 +3,12 @@
 The data directory defaults to ``data/`` at the repository root and can be overridden with the
 ``REASON8_DATA_DIR`` environment variable (useful in git worktrees that share one cache).
 
-Replays, parsed replays and state files are kept in daily partitions by the date the match
-started, Hive style: ``replays/date=2026-11-01/<name>.sdfz``,
-``parsed/date=2026-11-01/<name>.json.zst``, ``state/date=2026-11-01/<name>.jsonl.gz``. The date
-is the first ten characters of the replay's file name (``YYYY-MM-DD_HH-MM-SS-mmm_<map>_<engine>``);
-a file whose name does not start with a date goes to ``date=unknown``. The S3 bucket uses the
+Replays, the tables of the parsed replays and state files are kept in daily partitions by the
+date the match started, Hive style: ``replays/date=2026-11-01/<name>.sdfz``,
+``tables/date=2026-11-01/2026-11-01.<table>.parquet``,
+``state/date=2026-11-01/<name>.jsonl.gz``. The date is the first ten characters of the
+replay's file name (``YYYY-MM-DD_HH-MM-SS-mmm_<map>_<engine>``); a file whose name does not
+start with a date goes to ``date=unknown``. The S3 bucket uses the
 same relative paths. Bookkeeping files (``manifest.parquet``, ``_index.jsonl``) stay at the top
 of their directory. This module is the one place that knows the layout.
 """

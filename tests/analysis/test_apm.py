@@ -4,7 +4,6 @@ from reason8.analysis.apm import (
     FRAMES_PER_MINUTE,
     INCLUDED,
     PLAYER_SCHEMA,
-    UNREADABLE,
     WITH_BOTS,
     ActionCounter,
     end_frames,
@@ -147,21 +146,17 @@ def test_game_apm_rows():
 
 
 def test_measure_and_report(tmp_path):
-    parsed = tmp_path / "parsed"
+    out = tmp_path / "tables"
     events = [select(0, 0, 100), select(0, 1, 200)]
     events += [click(frame, 0) for frame in range(0, 3 * MINUTE, 200)]
     events += [widget(frame, 1, 200) for frame in range(0, 3 * MINUTE, 400)]
-    synthetic.write_parsed(parsed, "2026-11-01_game", make_replay(events))
-    synthetic.write_tables(parsed)
-    # parsed after the tables were written, and a replay that cannot be read
     later = make_replay(events[:1] + [widget(frame, 0, 100) for frame in range(0, MINUTE, 3)])
-    synthetic.write_parsed(parsed, "2026-11-02_game", later)
-    (parsed / "date=2026-11-02" / "2026-11-02_broken.json.zst").write_bytes(b"not zstd")
-    counts = measure(parsed, tmp_path / "apm", jobs=2)
-    assert counts == {"replays": 3, "games": 2, "players": 4}
+    synthetic.write_tables(out, {"2026-11-01_game": make_replay(events), "2026-11-02_game": later})
+    counts = measure(tmp_path / "apm", tables_dir=out, jobs=2)
+    assert counts == {"replays": 2, "games": 2, "players": 4}
     games = pl.read_parquet(tmp_path / "apm" / "games.parquet")
-    assert games["replay"].to_list() == ["2026-11-01_game", "2026-11-02_broken", "2026-11-02_game"]
-    assert games["status"].to_list() == [INCLUDED, UNREADABLE, INCLUDED]
+    assert games["replay"].to_list() == ["2026-11-01_game", "2026-11-02_game"]
+    assert games["status"].to_list() == [INCLUDED, INCLUDED]
     players = pl.read_parquet(tmp_path / "apm" / "players.parquet")
     assert players.to_dicts() == [
         {name: pl.Series([value], dtype=PLAYER_SCHEMA[name]).item() for name, value in row.items()}

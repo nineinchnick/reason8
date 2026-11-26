@@ -1,4 +1,9 @@
-"""Read replays parsed by `reason8 parse` (see docs/reference/replay-format.md)."""
+"""A parsed replay: the document that `reason8 parse` makes of a replay.
+
+The parser keeps each document as rows of the tables (`reason8.replays.tables`, which gives it
+back with `replay_documents`); the test fixture is one kept as JSON (`load_replay`). See
+docs/reference/replay-format.md.
+"""
 
 from __future__ import annotations
 
@@ -7,11 +12,9 @@ import re
 from collections.abc import Iterator
 from compression import zstd
 from dataclasses import dataclass, field
-from datetime import date
 from pathlib import Path
 from typing import Any
 
-from reason8.paths import find_files
 from reason8.replays.sdfz import GAME_SPEED as GAME_SPEED
 
 FORMAT = "reason8.replay/1"
@@ -193,6 +196,7 @@ def _build_order(event: dict[str, Any], command: dict[str, Any], *, inserted: bo
 
 
 def load_replay(path: str | Path) -> Replay:
+    """A parsed document kept as JSON (``.json`` or ``.json.zst``): the test fixture."""
     path = Path(path)
     if path.suffix == ".zst":
         document = json.loads(zstd.decompress(path.read_bytes()))
@@ -201,17 +205,6 @@ def load_replay(path: str | Path) -> Replay:
     if document.get("format") != FORMAT:
         raise ValueError(f"{path}: unsupported format {document.get('format')!r}")
     return Replay(document)
-
-
-def iter_replays(
-    directory: str | Path, *, since: date | None = None, until: date | None = None
-) -> Iterator[Replay]:
-    """All parsed replays in a directory and its date partitions (as written by `reason8 parse`).
-
-    ``since`` (inclusive) and ``until`` (exclusive) read only the partitions of those dates.
-    """
-    for path in find_files(Path(directory), "*.json.zst", since=since, until=until):
-        yield load_replay(path)
 
 
 def parse_skill(text: object) -> float | None:

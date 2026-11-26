@@ -5,23 +5,13 @@ shape sdfz-demo-parser 5.15.1 emits, and the demo file is built byte by byte.
 """
 
 import gzip
-import json
 import struct
-from compression import zstd
-from pathlib import Path
 
 import pytest
 
+from reason8.replays import tables
 from reason8.replays.codes import command_name, option_names
-from reason8.replays.parse import (
-    FORMAT,
-    ParseError,
-    compact,
-    failures_by,
-    output_path,
-    summarize,
-    write_json_zst,
-)
+from reason8.replays.parse import ParseError, compact, failures_by, summarize
 from reason8.replays.replay import Replay
 from reason8.replays.sdfz import RawCommand, RawCommandPacket, read_command_packets_file
 
@@ -268,8 +258,6 @@ def test_failures_by_version_and_engine():
             "seconds": 1.0,
             "sdfz_bytes": 2e6,
             "parser_json_bytes": 2e7,
-            "json_bytes": 7e6,
-            "compressed_bytes": 5e5,
         },
         {"status": "error", "game": "test-2", "engine": "2026.07.04", "error": "boom"},
         {"status": "error", "game": "test-1", "engine": "2025.06.24", "error": "boom"},
@@ -287,13 +275,13 @@ def test_failures_by_version_and_engine():
     assert "  2026.07.04: 1/2 failed" in summary
 
 
-def test_write_json_zst_round_trip(tmp_path):
-    document = {"format": FORMAT, "events": [{"frame": 1, "type": "start"}]}
-    path = output_path(tmp_path, tmp_path / "game.sdfz")
-    uncompressed = write_json_zst(document, path)
-    assert path == tmp_path / "date=unknown" / "game.json.zst"
-    assert json.loads(zstd.decompress(path.read_bytes())) == document
-    assert uncompressed == len(json.dumps(document, separators=(",", ":")))
-    assert not list(tmp_path.rglob("*.tmp"))
-    dated = output_path(tmp_path, Path("replays/date=x/2026-11-01_10-00-00-000_Map_1.sdfz"))
-    assert dated == tmp_path / "date=2026-11-01" / "2026-11-01_10-00-00-000_Map_1.json.zst"
+def test_compact_documents_go_into_the_tables_without_names():
+    document = compact(parsed_doc(), raw_for_doc(), {"file": "x.sdfz", "bytes": 3})
+    rows = tables.replay_tables(document, "x")
+    back = tables.replay_documents(rows)["x"]
+    assert back["events"] == document["events"]
+    assert back["statistics"] == document["statistics"]
+    assert back["meta"]["serverMatchId"] == "42" and back["source"]["file"] == "x.sdfz"
+    assert [player["playerId"] for player in back["players"]] == [0, 1]
+    assert all("name" not in person for person in back["players"] + back["spectators"])
+    assert rows[tables.PLAYERS]["role"].to_list() == ["player", "player", "spectator"]

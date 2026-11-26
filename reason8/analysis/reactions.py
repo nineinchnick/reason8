@@ -221,7 +221,6 @@ def day_reactions(source: tables.Source, state_paths: Sequence[Path]) -> tuple[l
 
 def measure(
     state_dir: Path,
-    parsed_dir: Path,
     unit_defs: Mapping[str, UnitDef],
     jobs: int,
     *,
@@ -232,16 +231,15 @@ def measure(
     """The idle events of every state file with them (format 4 and later) whose replay is
     parsed; the games whose replay is not are skipped.
 
-    The replays are read from their tables (`reason8.replays.tables.open_source`, by
-    default next to `parsed_dir`), a day per process.
+    The replays are read from the tables in `tables_dir` (by default those of the data
+    directory, `reason8.replays.tables.open_source`), a day per process.
     """
     state_paths_of: dict[str, list[Path]] = defaultdict(list)
     for state_path in sorted(state_dir.glob(f"date=*/*{STATE_SUFFIX}")):
         if partition_in_range(state_path.parent.name, since, until):
             state_paths_of[partition(state_path.name)].append(state_path)
     source = tables.open_source(
-        parsed_dir,
-        parsed_dir.parent / tables.AREA if tables_dir is None else tables_dir,
+        tables_dir,
         since=since,
         until=until,
         replays=[
@@ -251,13 +249,7 @@ def measure(
         ],
         tables=(tables.GAMES, tables.PLAYERS, tables.COMMANDS, tables.SELECTIONS),
     )
-    for name, error in source.unreadable.items():
-        print(f"{name}: {error}", flush=True)
-    sources = {
-        partition(next(iter(names))): day
-        for day in source.by_day()
-        if (names := day.stored | set(day.converted))
-    }
+    sources = {partition(next(iter(day.stored))): day for day in source.by_day()}
     rows = []
     unparsed = 0
     with ProcessPoolExecutor(max_workers=max(1, jobs)) as pool:
@@ -379,7 +371,6 @@ def run(args: argparse.Namespace) -> int:
     unit_defs = game_unit_defs(Path(args.data_dir).resolve(), args.game)
     idle = measure(
         args.state_dir or data_dir() / "state",
-        args.parsed,
         unit_defs,
         args.jobs,
         tables_dir=args.tables,

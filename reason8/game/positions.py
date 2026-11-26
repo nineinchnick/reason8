@@ -7,8 +7,7 @@ Usage::
                                  # and how the games were set up
     uv run reason8 maps check --since 2026-10-14 --until 2026-10-28    # some days
 
-The check reads the games and players tables of the parsed replays (`reason8 tables`), not
-their JSON documents.
+The check reads the games and players tables of the parsed replays (`reason8 parse`).
 
 BAR's map metadata recommends start positions per map, each with a role, and the game shows
 them before the start. A player's *position* is the nearest recommended start position of
@@ -372,13 +371,7 @@ def run(args: argparse.Namespace) -> int:
     if not load_map_list():
         print("no map list: run `reason8 maps fetch` first", file=sys.stderr)
     source = tables.open_source(
-        args.parsed,
-        args.tables,
-        since=args.since,
-        until=args.until,
-        tables=(tables.GAMES, tables.PLAYERS),
+        args.tables, since=args.since, until=args.until, tables=(tables.GAMES, tables.PLAYERS)
     )
-    for name, error in source.unreadable.items():
-        print(f"skipped {name}: {error}", file=sys.stderr)
     print(check(game_headers(source, args.map or DEFAULT_MAPS)))
     return 0

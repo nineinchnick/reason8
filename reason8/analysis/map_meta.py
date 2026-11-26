@@ -5,7 +5,7 @@ Usage::
     uv run reason8 analysis map-meta                        # the tables of docs/research/maps/
     uv run reason8 analysis map-meta --map "Rosetta 1.4.4"  # one map
 
-Replays come from the Parquet tables of the parsed replays (`reason8 tables`). A game counts
+Replays come from the Parquet tables of the parsed replays (`reason8 parse`). A game counts
 when it is on a map of the training slice, it is an 8v8 of human players and the lobby left
 the map's water level alone. Positions are the recommended start positions of BAR's map metadata
 (`reason8.game.positions`); fetch the pinned map list once with
@@ -87,7 +87,6 @@ class Sample:
 
 
 def load_sample(
-    parsed_dir: Path,
     maps: Iterable[str] | None = None,
     map_list: Mapping[str, MapMetadata] | None = None,
     *,
@@ -98,14 +97,14 @@ def load_sample(
     """Openings of the 8v8 games between humans on the slice maps (or on `maps`).
 
     Games with a changed water level (the ``map_waterlevel`` lobby option) are left out:
-    they are played on different terrain. The replays are read from their tables
-    (`reason8.replays.tables.open_source`, by default next to `parsed_dir`), of the days
-    ``since`` (inclusive) .. ``until`` (exclusive).
+    they are played on different terrain. The replays are read from the tables in
+    `tables_dir` (by default those of the data directory,
+    `reason8.replays.tables.open_source`), of the days ``since`` (inclusive) .. ``until``
+    (exclusive).
     """
     wanted = set(maps) if maps is not None else set(DEFAULT_MAPS)
     source = tables.open_source(
-        parsed_dir,
-        parsed_dir.parent / tables.AREA if tables_dir is None else tables_dir,
+        tables_dir,
         since=since,
         until=until,
         tables=(tables.GAMES, tables.PLAYERS, tables.COMMANDS),
@@ -696,9 +695,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    sample = load_sample(
-        args.parsed, args.map, tables_dir=args.tables, since=args.since, until=args.until
-    )
+    sample = load_sample(args.map, tables_dir=args.tables, since=args.since, until=args.until)
     for map_name, group in sample.openings.items():
         print(report(map_name, group, sample.setups, sample.places))
         print()

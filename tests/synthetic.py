@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import copy
-import json
-from compression import zstd
+from collections.abc import Mapping
 from pathlib import Path
 
 from reason8.game.maps import encode_option
+from reason8.paths import PARTITION_PREFIX, partition
 from reason8.replays import tables
-from reason8.replays.parse import output_path
-from reason8.replays.replay import FORMAT, Replay
+from reason8.replays.replay import Replay
 
 MAP = "Test Valley 1.0"  # 10,000 x 10,000 map units, teams in opposite corners
 
@@ -376,20 +375,28 @@ def command_replay(*, started: bool = True) -> Replay:
     )
 
 
-# --- parsed replays and their tables on disk
+# --- parsed replays in the tables on disk
 
 
-def write_parsed(directory: Path, name: str, replay: Replay | dict) -> Path:
-    """Write a replay as `reason8 parse` does, into the date partition of its name."""
-    document = replay.doc if isinstance(replay, Replay) else replay
-    path = output_path(directory, Path(f"{name}.sdfz"))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(zstd.compress(json.dumps({"format": FORMAT, **document}).encode()))
-    return path
+def _stage(name: str, document: dict, staging: Path) -> dict:
+    tables.stage(tables.replay_tables(document, name), staging, name)
+    return {"file": f"{name}.sdfz", "status": "ok"}
 
 
-def write_tables(parsed: Path) -> Path:
-    """The tables of every parsed replay, as `reason8 tables` writes them next to `parsed`."""
-    out = parsed.parent / tables.AREA
-    tables.update(tables.parsed_days(parsed), out, jobs=0, log=lambda message: None)
-    return out
+def write_tables(directory: Path, replays: Mapping[str, Replay | dict]) -> Path:
+    """Write replays into the tables in `directory` as `reason8 parse` does, keeping the
+    replays the tables of their days hold already. Returns `directory`."""
+    by_day: dict[str, dict[str, dict]] = {}
+    for name, replay in replays.items():
+        document = replay.doc if isinstance(replay, Replay) else replay
+        by_day.setdefault(partition(name).removeprefix(PARTITION_PREFIX), {})[name] = document
+    plans = [
+        tables.DayPlan(
+            day,
+            [(name, document) for name, document in documents.items()],
+            tables.stored_replays(directory / tables.partition_of(day), day) or {},
+        )
+        for day, documents in sorted(by_day.items())
+    ]
+    tables.update_days(plans, directory, _stage, jobs=0, log=lambda message: None)
+    return directory

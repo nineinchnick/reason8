@@ -4,7 +4,7 @@ S3 is opt-in: nothing uses it unless ``--s3-uri`` or the ``REASON8_S3_URI`` envi
 names a location, such as ``s3://bucket`` or ``s3://bucket/some/prefix``. Objects are stored
 under that location with the same relative paths as in the data directory, date partitions
 included (``replays/date=2026-11-01/<replay_file_name>``,
-``parsed/date=2026-11-01/<name>.json.zst``, ``matches/<dump>.parquet``, ..., see
+``tables/date=2026-11-01/2026-11-01.games.parquet``, ``matches/<dump>.parquet``, ..., see
 `reason8.paths`). Credentials and region come from the usual AWS configuration (``~/.aws``,
 ``AWS_PROFILE``, ...).
 """

@@ -35,19 +35,20 @@ def test_download_flags():
 
 
 def test_sync_flags():
-    args = cli.make_parser().parse_args(["sync", "pull", "replays", "parsed", "--dry-run"])
-    assert args.direction == "pull" and args.areas == ["replays", "parsed"] and args.dry_run
+    args = cli.make_parser().parse_args(["sync", "pull", "replays", "tables", "--dry-run"])
+    assert args.direction == "pull" and args.areas == ["replays", "tables"] and args.dry_run
 
 
 def test_parse_flags():
     args = cli.make_parser().parse_args(
-        ["parse", "a.sdfz", "replays", "--jobs", "4", "--zstd-level", "3", "--out", "parsed"]
+        ["parse", "a.sdfz", "replays", "--jobs", "4", "--force", "--out", "tables"]
     )
     assert args.inputs == [Path("a.sdfz"), Path("replays")]
-    assert (args.jobs, args.zstd_level, args.out) == (4, 3, Path("parsed"))
+    assert (args.jobs, args.force, args.out) == (4, True, Path("tables"))
 
 
 def test_the_two_tables_commands_run_their_own_module():
     parser = cli.make_parser()
-    assert parser.parse_args(["tables"]).run.__module__ == "reason8.replays.tables"
+    arguments = ["tables", "--from-parsed", "parsed"]
+    assert parser.parse_args(arguments).run.__module__ == "reason8.replays.from_parsed"
     assert parser.parse_args(["headless", "tables"]).run.__module__ == "reason8.headless.tables"

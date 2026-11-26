@@ -71,13 +71,11 @@ def test_idle_records_need_format_4(tmp_path):
 
 
 def test_measure_reads_the_replays_from_the_tables(tmp_path):
-    parsed, state = tmp_path / "parsed", tmp_path / "state"
+    out, state = tmp_path / "tables", tmp_path / "state"
     events = [select(0, 0, 5), click(100, 0), widget(40, 1, 6), click(200, 0)]
-    synthetic.write_parsed(parsed, "2026-11-01_game", make_replay(events))
-    synthetic.write_tables(parsed)
-    # parsed after the tables were written; a game whose replay is not parsed; one
-    # without idle events
-    synthetic.write_parsed(parsed, "2026-11-02_game", make_replay(events))
+    replay = make_replay(events)
+    synthetic.write_tables(out, {"2026-11-01_game": replay, "2026-11-02_game": replay})
+    # a game whose replay is not parsed; one without idle events
     header = {"t": "header", "v": 4, "unitdefs": {"12": "armlab"}}
     idle = [
         {"t": "idle", "f": 30, "u": 5, "d": 12, "team": 0},
@@ -93,7 +91,7 @@ def test_measure_reads_the_replays_from_the_tables(tmp_path):
         directory.mkdir(parents=True, exist_ok=True)
         with gzip.open(directory / f"{name}.jsonl.gz", "wt") as file:
             file.write("".join(json.dumps(record) + "\n" for record in records))
-    frame = measure(state, parsed, {}, jobs=2)
+    frame = measure(state, {}, jobs=2, tables_dir=out)
     assert frame.select("replay", "unit_id", "clicked_frame", "any_frame").rows() == [
         ("2026-11-01_game", 5, 100, 100),
         ("2026-11-01_game", 6, None, 40),
@@ -102,7 +100,7 @@ def test_measure_reads_the_replays_from_the_tables(tmp_path):
     ]
     assert frame["unit"].unique().to_list() == ["armlab"]
     assert frame["skill"].null_count() == 0
-    one_day = measure(state, parsed, {}, jobs=1, since=date(2026, 11, 2))
+    one_day = measure(state, {}, jobs=1, tables_dir=out, since=date(2026, 11, 2))
     assert one_day["replay"].unique().to_list() == ["2026-11-02_game"]
 
 

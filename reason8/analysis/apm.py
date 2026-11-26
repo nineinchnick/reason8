@@ -63,7 +63,7 @@ from typing import Any
 import polars as pl
 
 from reason8 import markdown
-from reason8.paths import data_dir, require_partitioned
+from reason8.paths import data_dir
 from reason8.replays import tables
 from reason8.replays.replay import GAME_SPEED, Replay, parse_skill
 
@@ -81,7 +81,6 @@ MINUTE_BURST_SECONDS = (1, 10)
 MINUTE_BURST_KINDS = ("clicked", "all")
 
 INCLUDED = "included"
-UNREADABLE = "unreadable"
 WITH_BOTS = "bots in the game"
 NOT_FINISHED = "no game over"
 TOO_SHORT = "shorter than a minute"
@@ -362,17 +361,12 @@ def event_stream(source: tables.Source, replays: Iterable[str]) -> pl.LazyFrame:
     """The commands, selections and events of `replays`, in stream order, from the tables.
 
     One row per event with the fields that `player_actions` and `end_frames` read: ``type``,
-    ``frame``, ``player``, ``via``, ``ai``, ``units``, ``action`` and ``param``. A command
-    comes after the selections and events whose ``commands_before`` is at most its position
-    among the replay's commands.
+    ``frame``, ``player``, ``via``, ``ai``, ``units``, ``action`` and ``param``.
     """
     replays = list(replays)
-    order = pl.col("position").cast(pl.Int64), pl.col("kind").cast(pl.Int8)
     commands = source.scan(tables.COMMANDS, replays).select(
         "replay",
-        pl.int_range(pl.len()).over("replay").alias("position"),
-        pl.lit(1).alias("kind"),
-        pl.lit(0).alias("seq"),
+        "seq",
         pl.lit("cmd").alias("type"),
         "frame",
         "player",
@@ -381,31 +375,15 @@ def event_stream(source: tables.Source, replays: Iterable[str]) -> pl.LazyFrame:
         "units",
     )
     selections = source.scan(tables.SELECTIONS, replays).select(
-        "replay",
-        pl.col("commands_before").alias("position"),
-        pl.lit(0).alias("kind"),
-        "seq",
-        pl.lit("select").alias("type"),
-        "frame",
-        "player",
-        "units",
+        "replay", "seq", pl.lit("select").alias("type"), "frame", "player", "units"
     )
     events = source.scan(tables.EVENTS, replays).select(
-        "replay",
-        pl.col("commands_before").alias("position"),
-        pl.lit(0).alias("kind"),
-        "seq",
-        pl.col("type").cast(pl.String),
-        "frame",
-        "player",
-        "action",
-        "param",
+        "replay", "seq", pl.col("type").cast(pl.String), "frame", "player", "action", "param"
     )
     return (
         pl.concat([commands, selections, events], how="diagonal_relaxed")
-        .with_columns(*order, pl.col("seq").cast(pl.Int64))
-        .sort("replay", "position", "kind", "seq", maintain_order=True)
-        .drop("position", "kind", "seq")
+        .sort("replay", "seq", maintain_order=True)
+        .drop("seq")
     )
 
 
@@ -427,8 +405,6 @@ def day_apm(source: tables.Source) -> dict[str, GameApm]:
     for name in included:
         if name not in results:  # no events at all
             results[name] = game_apm(headers[name], name, [])
-    for name, error in source.unreadable.items():
-        results[name] = GameApm({"replay": name, "status": UNREADABLE, "error": error})
     return results
 
 
@@ -471,7 +447,6 @@ MINUTE_SCHEMA = {
 
 
 def measure(
-    parsed_dir: Path,
     out_dir: Path,
     *,
     tables_dir: Path | None = None,
@@ -481,16 +456,10 @@ def measure(
 ) -> dict[str, int]:
     """Count the actions in every parsed replay and write the three tables to `out_dir`.
 
-    The replays are read from their tables (`reason8.replays.tables.open_source`, by
-    default next to `parsed_dir`), a day per process.
+    The replays are read from the tables in `tables_dir` (by default those of the data
+    directory, `reason8.replays.tables.open_source`), a day per process.
     """
-    require_partitioned(parsed_dir, "*.json.zst")
-    source = tables.open_source(
-        parsed_dir,
-        parsed_dir.parent / tables.AREA if tables_dir is None else tables_dir,
-        since=since,
-        until=until,
-    )
+    source = tables.open_source(tables_dir, since=since, until=until)
     results: dict[str, GameApm] = {}
     days = source.by_day()
     with ProcessPoolExecutor(max_workers=max(1, jobs)) as pool:
@@ -755,7 +724,6 @@ def run(args: argparse.Namespace) -> int:
         print(report(args.out))
         return 0
     counts = measure(
-        args.parsed,
         args.out,
         tables_dir=args.tables,
         jobs=args.jobs,
