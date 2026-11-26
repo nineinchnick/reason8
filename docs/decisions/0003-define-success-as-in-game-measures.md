@@ -41,14 +41,19 @@ The first milestone succeeds when, on Supreme Isthmus 8v8:
    interval.
 2. **Economy at least BARb's:** at 4:00 of game time, the bot's economy (metal
    and energy income, and the value of what it has built) is at least that of
-   stock BARb at the same position. A fixed minute, not each team's first
-   contact: measured at its own contact, a bot that meets the enemy later is
-   measured later and looks stronger than it is
-   ([`evaluation.md`](../reference/evaluation.md)). It is measured over N
-   headless games, each played twice with the sides swapped, on the same
-   seeds; N is set by an A/A test of stock BARb against itself. That test
-   found 3 to 11 seeds enough to see a 10% difference, so N is 30 seeds, 60
-   games ([`evaluation.md`](../reference/evaluation.md#the-aa-test)).
+   BARb at the same position, BARb playing under the same human-like limits as
+   the bot ([ADR 0008](0008-play-under-human-like-limits.md): reaction delays
+   and the work one look gives a unit), built as `BARbLimited` by
+   `reason8 bot build --limits-only`. Stock BARb reacts to every idle unit in
+   the same frame; against it the comparison would measure the limits, not the
+   decisions. A fixed minute, not each team's first contact: measured at its
+   own contact, a bot that meets the enemy later is measured later and looks
+   stronger than it is ([`evaluation.md`](../reference/evaluation.md)). It is
+   measured over N headless games, each played twice with the sides swapped,
+   on the same seeds; N is set by an A/A test of stock BARb against itself.
+   That test found 3 to 11 seeds enough to see a 10% difference, so N is 30
+   seeds, 60 games
+   ([`evaluation.md`](../reference/evaluation.md#the-aa-test)).
 
 Prediction accuracy on held-out replays is a development metric: it compares
 models quickly and picks which ones are worth playing, but it is not the goal.
