@@ -807,11 +807,6 @@ def _percent(part: int, whole: int) -> str:
     return f"{100 * part / whole:.1f}%" if whole else "-"
 
 
-def _clock(frame: int) -> str:
-    seconds = frame // GAME_SPEED
-    return f"{seconds // 60}:{seconds % 60:02d}"
-
-
 def _quantiles(values: Sequence[int]) -> tuple[int, int, int]:
     ordered = sorted(values)
     if not ordered:
@@ -960,7 +955,7 @@ def stats(out_dir: Path) -> str:
             [map_name, group.height]
             + [sources[source] for source in (contact.MEASURED, contact.BY_POSITION)]
             + [sources[contact.WINDOW]]
-            + [_clock(frame) for frame in _quantiles(group["cutoff_frame"].to_list())]
+            + [markdown.clock(frame) for frame in _quantiles(group["cutoff_frame"].to_list())]
             + [_percent(group["orders"].sum(), group["orders_in_window"].sum())]
         )
     lines += markdown.table(
