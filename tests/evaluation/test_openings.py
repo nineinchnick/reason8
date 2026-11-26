@@ -66,3 +66,32 @@ def test_balanced_draws_as_many_humans_per_position():
     both = balanced(bot, human)
     counts = both.group_by("source", "position").len().sort("source", "position")
     assert counts["len"].to_list() == [3, 1, 3, 1]
+
+
+def test_built_units(tmp_path):
+    from reason8.evaluation.openings import built_units
+    from tests.openings.test_contact import hit, state_lines, write_state
+
+    names = {"armcom": 1, "corcom": 2, "armflea": 3, "cormex": 4, "corak": 5}
+
+    def finished(frame, team, unit):
+        return {
+            "t": "finished",
+            "f": frame,
+            "u": 100 + frame,
+            "d": names[unit],
+            "team": team,
+            "x": 0,
+            "z": 0,
+        }
+
+    events = [
+        finished(30, 0, "armcom"),  # the commander: left out
+        finished(900, 0, "armflea"),
+        finished(950, 2, "cormex"),
+        hit(1000, 0, "armcom", 2, "corak"),  # team 0 meets the enemy
+        finished(1200, 0, "armflea"),  # after contact: left out
+        finished(1300, 2, "corak"),  # team 2 has no contact: kept
+    ]
+    built = built_units(write_state(tmp_path / "s.jsonl.gz", state_lines(events)))
+    assert built == {0: ["armflea"], 2: ["cormex", "corak"]}
