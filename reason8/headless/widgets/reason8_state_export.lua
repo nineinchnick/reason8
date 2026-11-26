@@ -6,7 +6,8 @@
 -- this widget loaded as a full-view spectator, it writes what the world looked
 -- like: every N seconds one line with every team's resources and every unit's
 -- type, owner, position, health and build progress, plus one line per unit
--- created / finished / destroyed / given, and the damage enemies do to each
+-- created / finished / destroyed / given, one when a factory or builder goes
+-- idle, and the damage enemies do to each
 -- other. The widget is unsynced and gives no orders, so the replay stays valid.
 --
 -- The approach (spectator widget + headless playback at max speed) follows
@@ -37,7 +38,7 @@ function widget:GetInfo()
 end
 
 local OUT_PATH = "LuaUI/Config/reason8_state.jsonl"
-local FORMAT_VERSION = 3 -- 2: hit and damage lines, wind; 3: exact attacker
+local FORMAT_VERSION = 4 -- 2: hit and damage lines, wind; 3: exact attacker; 4: idle
 
 local spGetGameFrame = Spring.GetGameFrame
 local spGetAllUnits = Spring.GetAllUnits
@@ -352,6 +353,15 @@ function widget:UnitDestroyed(unitID, unitDefID, unitTeam, attackerID, attackerD
 		unitTeam,
 		format(',"built":%s,"by_team":%d', (buildProgress or 1) >= 1 and "true" or "false", attackerTeam or -1)
 	)
+end
+
+-- A factory or builder that ran out of orders: BAR's interface lists it as idle, and the
+-- player's next order to it is their reaction (docs/decisions/0008).
+function widget:UnitIdle(unitID, unitDefID, unitTeam)
+	local unitDef = unitDefID and UnitDefs[unitDefID]
+	if unitDef and (unitDef.isBuilder or unitDef.isFactory) then
+		writeEvent("idle", unitID, unitDefID, unitTeam)
+	end
 end
 
 function widget:UnitGiven(unitID, unitDefID, newTeam, oldTeam)
