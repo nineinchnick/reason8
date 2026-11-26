@@ -73,6 +73,19 @@ def test_ngram_predicts_and_backs_off():
     assert model.trained_on.units == frozenset(BOTS + AIR)
 
 
+def test_most_likely_reads_the_counts_by_back_off():
+    training = [opening(1), opening(2, ("armmex", "armlab")), opening(3, AIR, "Cortex")]
+    model = NgramModel("trigram", chain(3)[:-1]).fit(training)
+    assert model.most_likely(opening(9), 0) == "armmex"
+    # the longest context seen decides (after one armmex alone it would be armmex)
+    assert model.most_likely(opening(9, ("armmex", "armmex")), 2) == "armwin"
+    # a tie goes to the unit counted first
+    assert model.most_likely(opening(9), 1) == "armmex"
+    assert model.most_likely(opening(9, ("armwin", "armwin")), 2) == "armlab"
+    # without a level that ignores the faction, an unseen faction gets nothing
+    assert model.most_likely(opening(9, faction="Legion"), 0) is None
+
+
 def test_save_load_and_check(tmp_path):
     training = [opening(1, build=31400), opening(2, AIR, "Cortex", build=31900)]
     model = NgramModel("trigram", chain(3, condition=("map", "position"))).fit(training)

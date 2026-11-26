@@ -28,15 +28,12 @@ from reason8 import markdown
 from reason8.data.matches import scan_dump, select_matches
 from reason8.game.positions import position_order
 from reason8.game.versions import BALANCE_OPTIONS, balance_options, build_number
+from reason8.models.evaluate import SCORED_STEPS
+from reason8.models.ngram import Level, NgramModel, OpeningSteps
 from reason8.openings.extract import Opening, first_factory, opening_shape, openings
 from reason8.paths import data_dir
 from reason8.replays.parse import output_path
 from reason8.replays.replay import load_replay
-
-# Steps per opening used for next-unit accuracy. A few players send hundreds of orders in
-# the first minutes (one drag queues dozens of wind turbines) and would otherwise decide
-# the result.
-SCORED_ORDERS = 30
 
 
 def total_variation(first: Counter, second: Counter) -> float:
@@ -60,42 +57,41 @@ class NextUnitModel:
     Backs off to the previous order alone, then to the faction's most ordered unit. The
     start of the game counts as an order, so the first orders are predicted from what
     players of that faction order first. This is the frequency baseline an opening model has
-    to beat.
+    to beat: `NgramModel` over raw orders (drags not merged), read by back-off
+    (`NgramModel.most_likely()`) instead of smoothed, and fitted on the first
+    `SCORED_STEPS` orders of each opening.
     """
 
-    START = "<start>"
+    LEVELS: tuple[Level, ...] = ((("faction",), 2), (("faction",), 1), (("faction",), 0))
 
-    def __init__(self, context: int = 2) -> None:
-        self.context = context
-        self.counts: dict[tuple[str | None, ...], Counter] = defaultdict(Counter)
+    def __init__(self) -> None:
+        self.model = NgramModel("next unit by frequency", self.LEVELS)
 
-    def _keys(self, opening: Opening, index: int) -> list[tuple[str | None, ...]]:
-        """Contexts of the order at `index`, longest first."""
-        before = (self.START,) * self.context + opening.units[:index]
-        return [
-            (opening.faction, *before[len(before) - length :])
-            for length in range(self.context, -1, -1)
-        ]
+    def steps(self, opening: Opening) -> OpeningSteps:
+        """The opening as the n-gram model reads it: every order is one step."""
+        return OpeningSteps(
+            match_id=opening.match,
+            faction=opening.faction,
+            map=None,
+            position=opening.position,
+            role=opening.role,
+            build=None,
+            opening_era=None,
+            steps=opening.units,
+        )
 
     def fit(self, training: Iterable[Opening]) -> NextUnitModel:
-        for opening in training:
-            for index, unit in enumerate(opening.units[:SCORED_ORDERS]):
-                for key in self._keys(opening, index):
-                    self.counts[key][unit] += 1
+        self.model.fit(map(self.steps, training), SCORED_STEPS)
         return self
 
     def predict(self, opening: Opening, index: int) -> str | None:
-        for key in self._keys(opening, index):
-            seen = self.counts.get(key)
-            if seen:
-                return seen.most_common(1)[0][0]
-        return None
+        return self.model.most_likely(self.steps(opening), index)
 
     def score(self, test: Iterable[Opening]) -> tuple[int, int]:
         """(correct, total) next-unit predictions over the scored steps of every opening."""
         correct = total = 0
         for opening in test:
-            for index, unit in enumerate(opening.units[:SCORED_ORDERS]):
+            for index, unit in enumerate(opening.units[:SCORED_STEPS]):
                 total += 1
                 correct += self.predict(opening, index) == unit
         return correct, total
@@ -388,7 +384,7 @@ def report(all_openings: Sequence[Opening], matches: Mapping[str, SampleMatch], 
             rows[-1] += ["too few games", "", "", "", ""]
     lines += markdown.table(header, rows)
 
-    lines += ["", f"## Next-unit accuracy on '{NEWEST_GROUP}' (first {SCORED_ORDERS} orders)", ""]
+    lines += ["", f"## Next-unit accuracy on '{NEWEST_GROUP}' (first {SCORED_STEPS} orders)", ""]
     rows = []
     for name, group in groups.items():
         games = len(by_match(group))

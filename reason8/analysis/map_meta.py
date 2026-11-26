@@ -35,7 +35,6 @@ from pathlib import Path
 
 from reason8 import markdown
 from reason8.analysis.opening_shift import (
-    SCORED_ORDERS,
     NextUnitModel,
     by_match,
     feature_distance,
@@ -44,6 +43,8 @@ from reason8.analysis.opening_shift import (
 from reason8.data.matches import DEFAULT_MAPS
 from reason8.game.maps import MapMetadata
 from reason8.game.positions import StartSetup, position_order, replay_positions, start_setup
+from reason8.models.evaluate import SCORED_STEPS
+from reason8.models.ngram import OpeningSteps
 from reason8.openings.extract import (
     FACTIONS,
     Opening,
@@ -238,16 +239,21 @@ class PositionNextUnitModel(NextUnitModel):
     that positions which play alike share their counts.
     """
 
+    LEVELS = (
+        (("position", "faction"), 2),
+        (("position", "faction"), 1),
+        *NextUnitModel.LEVELS,
+    )
+
     def __init__(self, group_of: Mapping[str, str] | None = None) -> None:
         super().__init__()
         self.group_of = group_of
 
-    def _keys(self, opening: Opening, index: int) -> list[tuple[str | None, ...]]:
-        plain = super()._keys(opening, index)
-        told = opening.position
-        if self.group_of is not None and told is not None:
-            told = self.group_of[told]
-        return [(told, *key) for key in plain[:-1]] + plain
+    def steps(self, opening: Opening) -> OpeningSteps:
+        steps = super().steps(opening)
+        if self.group_of is None or opening.position is None:
+            return steps
+        return replace(steps, position=self.group_of[opening.position])
 
 
 def folds(matches: Iterable[str], count: int = FOLDS, seed: int = 0) -> list[set[str]]:
@@ -557,7 +563,7 @@ def report(
             )
     lines += markdown.table(["position, faction", "openings", *kinds], rows)
 
-    lines += ["", f"## Next-unit accuracy, first {SCORED_ORDERS} orders, held-out games", ""]
+    lines += ["", f"## Next-unit accuracy, first {SCORED_STEPS} orders, held-out games", ""]
     models = (
         next_unit_scores(placed, NextUnitModel),
         next_unit_scores(placed, lambda: PositionNextUnitModel(spot_roles)),
