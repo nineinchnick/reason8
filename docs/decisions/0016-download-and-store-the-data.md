@@ -1,7 +1,7 @@
 # 0016. Download in a fixed order, keep the data in a private S3 bucket by day, run locally first
 
 - **Status:** Accepted
-- **Date:** 2026-11-23
+- **Date:** 2026-11-26
 
 ## Context
 
@@ -26,17 +26,17 @@ The order of the downloads matters because any run downloads a prefix of it:
   games.
 
 Everything we work on lives in the git-ignored data directory: raw replays,
-parsed replays, the match dumps, re-simulated state, datasets and models.
-Parsing the whole slice takes about 19 hours with 8 jobs
+the tables of the parsed replays, the match dumps, re-simulated state,
+datasets and models. Parsing the whole slice takes 88.5 hours of compute
 ([`replay-format.md`](../reference/replay-format.md)), and re-simulating it
 much longer
 ([ADR 0010](0010-re-simulate-replays-headlessly-for-game-state.md)). Work runs
 in several git worktrees and will run on more machines, each needing the same
 data without downloading it from BAR again. The whole slice is about 175 GB of
-replays and 70 GB of parsed replays, some 43k files in each directory, while
-much of the work needs only some days of the window (a week to try something,
-the newest games for the current meta). Replays contain player names, which
-are personal data: raw replays must never be published.
+replays in some 43k files and about 64 GB of tables, while much of the work
+needs only some days of the window (a week to try something, the newest games
+for the current meta). Replays contain player names, which are personal data:
+raw replays must never be published.
 
 A headless engine needs 5 to 6 GB of RAM, so RAM rather than cores limits how
 many run at once ([`state-extraction.md`](../research/state-extraction.md)).
@@ -56,40 +56,44 @@ version matters. The window is pinned to 2026-05-23 .. 2026-11-22
 
 **Storage.** Keep the data in a private S3 bucket (eu-central-1, all public
 access blocked, encrypted at rest, no versioning) that mirrors the data
-directory: `replays/`, `parsed/`, `tables/`, `matches/`, later `state/`. The
-bucket is the shared cache; a local data directory is a working copy that can
-be rebuilt from it.
+directory: `replays/`, `tables/`, `matches/`, later `state/`. The bucket is
+the shared cache; a local data directory is a working copy that can be rebuilt
+from it.
 
-- Replays, parsed replays and state files are kept in daily partitions by the
-  day the match started, Hive style: `replays/date=YYYY-MM-DD/<name>.sdfz`,
-  `parsed/date=YYYY-MM-DD/<name>.json.zst`,
+- Replays and state files are kept in daily partitions by the day the match
+  started, Hive style: `replays/date=YYYY-MM-DD/<name>.sdfz`,
   `state/date=YYYY-MM-DD/<name>.jsonl.gz`. The day is the first ten characters
   of the replay's file name, which every derived file keeps; a name that
   doesn't start with a date goes to `date=unknown`.
-- The Parquet tables of the parsed replays
-  ([ADR 0005](0005-learn-decisions-with-their-context.md)) are the `tables`
+- The parsed replays are the Parquet tables
+  ([ADR 0005](0005-learn-decisions-with-their-context.md)) of the `tables`
   area, with the same partitions and **one file per table and day**:
-  `tables/date=YYYY-MM-DD/YYYY-MM-DD.commands.parquet`, and likewise
-  `selections`, `events`, `players` and `games`. A file per replay would make
-  about 43k small files per table, each with its own footer and too few rows
-  for its row groups and dictionaries to pay off; a scan would spend its time
-  opening files. A day holds a few hundred replays, a few hundred MB, so it is
-  still the unit that `sync`, `--since` and `--until` select. A day's file is
-  rewritten whole when replays of that day are added or parsed again: the rows
-  of the unchanged replays are copied from the old file, the new ones are
-  converted from their JSON, and each file is written under a temporary name
-  and renamed into place, the `games` table last. That table records each
-  replay's parsed file and its size, so a day is up to date when it lists
-  exactly the parsed files of the day, and a day that a run left halfway is
-  done again. The bookkeeping files (`manifest.parquet`, `_index.jsonl`) stay
-  at the top of their directory, and the match dumps in `matches/` aren't
-  partitioned. One function (`reason8.paths.partition()`) knows the layout;
-  the data directory and the bucket use the same relative paths, so copying
-  between them needs no mapping.
+  `tables/date=YYYY-MM-DD/YYYY-MM-DD.commands.parquet`, and likewise for the
+  other tables ([`replay-format.md`](../reference/replay-format.md#tables)). A
+  file per replay would make about 43k small files per table, each with its
+  own footer and too few rows for its row groups and dictionaries to pay off;
+  a scan would spend its time opening files. A day holds a few hundred
+  replays, a few hundred MB, so it is still the unit that `sync`, `--since`
+  and `--until` select. A day's files are rewritten whole when replays of that
+  day are parsed: the rows of the other replays are copied from the old files,
+  and each file is written under a temporary name and renamed into place, the
+  `games` table last. That table records each replay and the size of its
+  replay file, so a replay is done when its day lists it with that size, and a
+  day that a run left halfway is done again. Every file holds the layout
+  version of the tables; a day of another version is not read until its
+  replays are parsed again.
+- The bookkeeping files stay at the top of their directory:
+  `replays/manifest.parquet` (every match of the slice and what became of its
+  download) and `tables/_index.jsonl` (every replay parsed, with its status,
+  the error of one that failed, its sizes and the time it took). The match
+  dumps in `matches/` aren't partitioned. One function
+  (`reason8.paths.partition()`) knows the layout; the data directory and the
+  bucket use the same relative paths, so copying between them needs no
+  mapping.
 - Commands that read a directory find the files in every partition; `sync`,
-  `parse`, `tables` and the passes over the parsed replays take `--since` and
-  `--until` to work on some days only. Data files outside the partitions stop
-  the commands that write or copy them, until they are moved into their
+  `parse` and the passes over the parsed replays take `--since` and `--until`
+  to work on some days only. Data files outside the partitions stop the
+  commands that write or copy them, until they are moved into their
   partitions.
 - `reason8 sync push|pull` copies files that are missing or differ in size,
   merges the bookkeeping files (`manifest.parquet`, `_index.jsonl`), and never
@@ -124,12 +128,12 @@ based on measured cost.
 - A day's tables are a handful of files that a scan opens at once, and a pass
   over the opening of every game reads only the first row groups of each
   replay. Adding a replay to a day rewrites that day's files, a few hundred
-  MB, which takes seconds next to converting the replay.
-- Storing the slice costs about $7 a month (about 300 GB of S3 Standard at
-  $0.0245 per GB-month: 175 GB of replays, 70 GB of parsed replays and about
-  55 GB of tables) plus about $0.50 once for the uploads. Pulling it all to a
-  machine outside AWS costs about $0.09 per GB above the free 100 GB a month;
-  jobs running in eu-central-1 read it for free.
+  MB, which takes seconds next to parsing the replays.
+- Storing the slice costs about $6 a month (about 240 GB of S3 Standard at
+  $0.0245 per GB-month: 175 GB of replays and about 64 GB of tables) plus
+  about $0.50 once for the uploads. Pulling it all to a machine outside AWS
+  costs about $0.09 per GB above the free 100 GB a month; jobs running in
+  eu-central-1 read it for free.
 - Without versioning, an overwrite or a delete can't be undone: `sync` never
   deletes and overwrites a file only when its size differs, and only the
   maintainer manages the bucket itself.

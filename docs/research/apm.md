@@ -125,11 +125,11 @@ read with the wrong layout.
 
 ## Sample
 
-`reason8 analysis apm` reads every replay in `data/parsed/`: the 42,931 parsed
-games of the slice (the window of [`dataset.md`](../reference/dataset.md)).
-One game has bots and is left out; 42,927 of the rest are 8v8 and three are
-1v1. Skill is the player's OpenSkill value from the replay (the lobby's,
-before the game), in five bands:
+`reason8 analysis apm` reads every parsed replay in the tables: the 42,931
+parsed games of the slice (the window of
+[`dataset.md`](../reference/dataset.md)). One game has bots and is left out;
+42,927 of the rest are 8v8 and three are 1v1. Skill is the player's OpenSkill
+value from the replay (the lobby's, before the game), in five bands:
 
 | skill band | player-games | player-minutes |
 | ---------- | -----------: | -------------: |

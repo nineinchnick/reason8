@@ -379,7 +379,7 @@ gains about two thirds of a point. More games is what the model is short of:
 ## Unit names across versions
 
 Every parsed replay carries the game's unit names (`unitdefs`). Compared over
-the 93 builds in `data/parsed` (29036 to 32018; all maps), separately for
+the 93 builds of the parsed replays (29036 to 32018; all maps), separately for
 games without Legion (78 builds) and with it (25 builds; about 240 more
 names):
 
@@ -485,10 +485,9 @@ uv run reason8 analysis opening-shift --list   # the sample's replay files
 uv run reason8 analysis opening-shift          # every table above
 ```
 
-Both read the match dumps; `--list` then looks for the parsed files in
-`data/parsed/`, and the measurement reads the sample's games from the Parquet
-tables of the parsed replays
-([`replay-format.md`](../reference/replay-format.md#tables)), of the days
+Both read the match dumps; `--list` then looks for the sample's replays in the
+Parquet tables of the parsed replays, and the measurement reads its games from
+them ([`replay-format.md`](../reference/replay-format.md#tables)), of the days
 `--since` and `--until` name. Loading the 1,512 games of the tables sample
 (2026-10-14 to 2026-10-27) takes 4.1 s from the tables instead of about nine
 minutes from the JSON documents; the label shuffles take the rest. The replay

@@ -1,7 +1,7 @@
 # 0005. Learn decisions with their context
 
 - **Status:** Accepted
-- **Date:** 2026-11-23
+- **Date:** 2026-11-26
 
 ## Context
 
@@ -48,28 +48,26 @@ resources and the buildings already standing.
 - **Orders come from the replay's commands.** Replays are parsed with the
   pinned standalone `sdfz-demo-parser`, and the command packets are read again
   from the replay file by our own reader (`reason8.replays.sdfz`) to recover
-  the correct command ids. Each replay is stored as one compact,
-  zstd-compressed JSON document (`reason8 parse`), the archival copy that
-  keeps everything we take from the replay.
-- **Passes over many games read Parquet tables.** Tables derived from the JSON
-  documents (`reason8 tables`) hold one row per command, per selection, per
-  lifecycle event (start, game over, resign, team died, player left, pause,
-  quit), per player or AI and per game. A command keeps its frame, player,
-  team, `via`, the units it is addressed to, its name and id, its options as a
-  bitmask, its unit, its parameters (x, z and facing in their own columns for
-  structures) and what an INSERT wraps, so that the build orders and the
-  action counts come out exactly as from the JSON. Rows are in stream order,
-  so a scan of the opening stops reading a game early. Player names are not in
-  the tables; user ids are, for the join with the match dumps. Chat, map
-  drawing, start-position picks and resource shares stay in the JSON only
-  until a pass needs them.
-- **Every pass over the parsed replays reads the tables**: the position check,
-  first contact, the opening dataset and the measurements of actions per
-  minute, reactions to idle units, the opening meta and the balance patches. A
-  parsed replay that the tables lack, or hold for an older parsed file, is
-  converted from its JSON by the pass itself, in memory, so that a result
-  never depends on whether `reason8 tables` has run yet. Only `reason8 tables`
-  and `reason8 parse` write the tables.
+  the correct command ids. `reason8 parse` turns each replay into one compact
+  document in memory and keeps it only as rows of Parquet tables.
+- **The tables are the one copy of the parsed replays.** They hold one row per
+  command, per selection, per lifecycle event (start, game over, resign, team
+  died, player left, pause, quit), per chat message, map drawing,
+  start-position pick and resource share, per player, AI or spectator, per
+  sample of the end-of-game statistics and per game, and so everything the
+  document holds but the names of players and spectators. User ids stay, for
+  the join with the match dumps, and so does the chat text. A field of the
+  document without a column is an error, not a field dropped: the replay fails
+  to parse until the tables have a column for it. A command keeps its frame,
+  player, team, `via`, the units it is addressed to, its name and id, its
+  options as a bitmask, its unit, its parameters (x, z and facing in their own
+  columns for structures) and what an INSERT wraps, so that the build orders
+  and the action counts come out exactly as from the document. Rows are in
+  stream order, so a scan of the opening stops reading a game early.
+- **Every pass over the parsed replays reads the tables, and only them**: the
+  position check, first contact, the opening dataset and the measurements of
+  actions per minute, reactions to idle units, the opening meta and the
+  balance patches. Only `reason8 parse` writes them.
 - **State comes from re-simulating the replay.** Training data joins the
   orders with the re-simulated state, at least for the part of the game being
   learned.
@@ -86,22 +84,23 @@ resources and the buildings already standing.
   the first 10 minutes.
 - Our command reader must agree with the parser packet by packet; a mismatch
   is an error, not a guess.
-- Decoding a JSON document costs about a third of a second however little of
-  it a pass needs (a document is about 17 MB of JSON, more than half of it
-  MOVE commands), about 3.6 CPU-hours over the slice. The build orders of the
-  first 8 minutes of every game come out of the tables in seconds instead
+- A pass reads only the columns it needs. Decoding a whole parsed document
+  took about a third of a second however little of it a pass needed (a
+  document is about 17 MB of JSON, more than half of it MOVE commands); the
+  build orders of the first 8 minutes of every game come out of the tables in
+  seconds instead
   ([`replay-format.md`](../reference/replay-format.md#tables)): on two weeks
   of the slice the opening dataset takes 14 s in one process instead of 288 s
-  with four, with the same rows (the other passes are measured there too).
-- A pass that needs what only the JSON holds (chat, map drawing,
-  start-position picks, shares, the end-of-game statistics) reads that part
-  from the JSON, or the field goes into a table first.
-- The tables take about four fifths of the space of the JSON again; most of it
-  is the coordinates of the commands, which compress about as well in either
-  form. They are derived data: they can be rebuilt from the JSON at any time,
-  and a change to their layout is a new version that rebuilds them.
-- The parsed files keep player names and ids for joining with match data, so
-  they must not be published.
+  with four, with the same rows.
+- **A field the parser output has and the document does not keep, or one the
+  parser does not emit yet, needs every replay parsed again**: 88.5 hours of
+  compute for the 42,931 replays of the slice, measured from the parse index,
+  and the replays themselves must be kept. This is accepted for one copy of
+  about 64 GB instead of two (65 GB of JSON next to 50 GB of tables that held
+  less). A new layout of the tables alone does not need the replays:
+  `reason8.replays.tables.replay_documents` gives the documents back from the
+  rows.
+- The tables keep user ids and chat text, so they must not be published.
 - The dataset gains placement (position relative to the start, metal spots,
   vents and other buildings), unit properties and per-snapshot state.
 - The in-game side has to pass positions to BARb, which today chooses where to

@@ -32,14 +32,13 @@ dataset: a game's split depends only on its match id, so nothing moves between
 splits as more replays are parsed.
 
 The builder reads the Parquet tables of the parsed replays
-([`replay-format.md`](replay-format.md#tables)), not their JSON documents: the
-games and players tables for the game and its players, and the build commands
-of the first 8 minutes from the commands table, turned into the rows of the
-dataset with Polars. A parsed replay that the tables lack is converted from
-its JSON while building (`reason8 tables` stores it once instead). On the two
-weeks of the tables sample (2,830 replays, 2026-10-14 to 2026-10-27) it takes
-14 s in one process with 4 Polars threads, where reading the JSON documents
-took 288 s with 4 processes; both give the same files row for row.
+([`replay-format.md`](replay-format.md#tables)): the games and players tables
+for the game and its players, and the build commands of the first 8 minutes
+from the commands table, turned into the rows of the dataset with Polars. On
+the two weeks of the tables sample (2,830 replays, 2026-10-14 to 2026-10-27)
+it takes 14 s in one process with 4 Polars threads, where reading the JSON
+documents of an earlier version took 288 s with 4 processes; both give the
+same files row for row.
 
 `--cutoff window` builds the openings as they were before they ended at first
 contact (`openings_v1`: every order of the first 8 minutes),
@@ -93,9 +92,6 @@ changed water level
 
 not two teams of 8
 : the replay does not have two ally teams of 8 players each
-
-unreadable replay
-: the parsed file cannot be read
 
 Openings left out (`openings.parquet`, column `status`):
 
