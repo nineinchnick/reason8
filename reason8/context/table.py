@@ -24,7 +24,9 @@ The output, in ``<data dir>/datasets/context_v1/``:
 
 ``train.parquet``, ``validation.parquet``, ``test.parquet``
     One row per build order of an opening: the columns of the opening dataset, ``replay``,
-    ``step_idx``, ``state_frame``, ``resources_frame`` and the context columns.
+    ``state_frame``, ``resources_frame`` and the context columns. Which orders start a step
+    is not stored: `reason8.context.measure` numbers the steps when it loads the rows
+    (`reason8.openings.dataset.step_index`), as the opening models do.
 ``games.parquet``
     One row per game of the sample, with why a game is not in the table yet.
 ``splits/<split>.txt``
@@ -263,26 +265,18 @@ def running_counts(
 # --- the join
 
 
-def with_steps(orders: pl.DataFrame) -> pl.DataFrame:
-    """Add ``step_idx`` (`reason8.openings.dataset.step_index`), ``state_frame``,
-    ``time_s`` and ``since_previous_s`` (the time since the player's last build order in an
-    earlier frame)."""
+def with_times(orders: pl.DataFrame) -> pl.DataFrame:
+    """Add ``state_frame``, ``time_s`` and ``since_previous_s`` (the time since the
+    player's last build order in an earlier frame)."""
     # the player's last order in an earlier frame: the orders of one frame are given at once,
     # and an order in the frame of the step before it starts a new step only if its unit
     # differs, so the time since an order of the same frame would give the unit away
     previous = pl.col("frame").shift(1)
     earlier_frame = pl.when(pl.col("frame") != previous).then(previous).forward_fill().over(PLAYER)
-    return (
-        orders.sort(*PLAYER, "order_index")
-        .with_columns(
-            openings.step_index(PLAYER).alias("step_idx"),
-            pl.max_horizontal(pl.col("frame") - 1, pl.lit(0)).cast(pl.Int32).alias("state_frame"),
-            (pl.col("frame") / GAME_SPEED).cast(pl.Float32).alias("time_s"),
-            ((pl.col("frame") - earlier_frame) / GAME_SPEED)
-            .cast(pl.Float32)
-            .alias("since_previous_s"),
-        )
-        .with_columns(pl.col("step_idx").cast(pl.Int32))
+    return orders.sort(*PLAYER, "order_index").with_columns(
+        pl.max_horizontal(pl.col("frame") - 1, pl.lit(0)).cast(pl.Int32).alias("state_frame"),
+        (pl.col("frame") / GAME_SPEED).cast(pl.Float32).alias("time_s"),
+        ((pl.col("frame") - earlier_frame) / GAME_SPEED).cast(pl.Float32).alias("since_previous_s"),
     )
 
 
@@ -296,7 +290,7 @@ def join_state(
     """The orders of some games with the state of their team and allies before each order.
 
     `orders` are rows of the opening dataset with ``replay`` (the state's name for the
-    game), after `with_steps`; `games` has a row per game of the state's ``game`` table
+    game), after `with_times`; `games` has a row per game of the state's ``game`` table
     (``replay``, ``wind_min``, ``wind_max``, ``teams``); `resources` and `events` are those
     tables of the same games. The state of an order is the one written at the end of
     ``state_frame``, the frame before the order's: the last resources line up to it (at
@@ -488,7 +482,7 @@ def build_table(
             .collect()
         )
         joined = join_state(
-            with_steps(orders),
+            with_times(orders),
             chunk,
             pl.scan_parquet([state_tables.table_path(stem, "resources") for stem in stems]),
             pl.concat([pl.scan_parquet(state_tables.table_path(stem, "events")) for stem in stems]),
@@ -525,7 +519,10 @@ def build_table(
         else pl.DataFrame(schema={"split": pl.String})
     )
     steps = (
-        pl.scan_parquet(parts).filter(pl.col("step_idx").is_not_null()).select(pl.len()).collect()
+        pl.scan_parquet(parts)
+        .sort(*PLAYER, "order_index")
+        .select(openings.step_starts(PLAYER).sum())
+        .collect()
         if parts
         else None
     )

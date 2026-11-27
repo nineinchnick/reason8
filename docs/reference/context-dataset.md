@@ -59,16 +59,16 @@ Every column of the opening dataset's rows
 `replay`
 : The replay's name without `.sdfz`: the name the state tables use.
 
-`step_idx`
-: The step of the opening the order starts, from 0, counted by
-  `reason8.openings.dataset.step_index`: the order adds a unit and does not
-  repeat the unit of the order before it in the same frame. Null for repeats
-  and for orders that take units out of a factory queue. The scored steps of
-  [ADR 0013](../decisions/0013-evaluate-on-held-out-games.md) are the rows
-  with `step_idx` below 30.
-
 `state_frame`, `resources_frame`
 : The frame whose state the row has, and the frame of its resources line.
+
+Which orders start a step is not a column: `reason8 context measure` and
+`reason8 context check` number the steps when they load the rows
+(`reason8.openings.dataset.step_index`, the rule of
+[ADR 0013](../decisions/0013-evaluate-on-held-out-games.md)), as the opening
+models do, so the table always has the steps the models are scored on, and a
+change of the rule needs no new build. The scored steps are those numbered
+below 30.
 
 The context columns come in groups, listed with their columns in the manifest,
 so that a model can take any of them:
