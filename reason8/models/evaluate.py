@@ -63,6 +63,40 @@ class Scores:
     groups: dict[str, np.ndarray]  # map, position, faction, era per step
 
 
+def ranks(probabilities: np.ndarray, truth: np.ndarray) -> np.ndarray:
+    """The rank of the true unit in each row of `probabilities` (0: the most likely).
+
+    Ties are broken against the truth: a model that cannot tell gets no credit.
+    """
+    truth_probability = probabilities[np.arange(len(truth)), truth][:, None]
+    better = np.count_nonzero(probabilities > truth_probability, axis=1)
+    ties = np.count_nonzero(probabilities == truth_probability, axis=1) - 1
+    return better + ties
+
+
+def score_probabilities(
+    probabilities: np.ndarray,
+    truth: np.ndarray,
+    unknown: int,
+    match_ids: np.ndarray,
+    step_indices: np.ndarray,
+    groups: dict[str, np.ndarray],
+) -> Scores:
+    """`Scores` of a model that gives each scored step a distribution over its vocabulary:
+    one row of `probabilities` per step, `truth` the index of the true unit in it, `unknown`
+    the index of the entry for units the model never saw. Scored as `score` does."""
+    rank = ranks(probabilities, truth)
+    known = truth != unknown
+    return Scores(
+        np.asarray(match_ids, dtype=np.int64),
+        np.asarray(step_indices, dtype=np.int32),
+        (rank < 1) & known,
+        (rank < 3) & known,
+        -np.log(probabilities[np.arange(len(truth)), truth].astype(np.float64)),
+        groups,
+    )
+
+
 def score(
     model: NgramModel | RepeatModel,
     openings: Sequence[OpeningSteps],
@@ -311,17 +345,25 @@ def report(
 
 
 def paired_difference(
-    first: Scores, second: Scores, mask: np.ndarray, rounds: int = BOOTSTRAP_ROUNDS, seed: int = 0
+    first: Scores,
+    second: Scores,
+    mask: np.ndarray,
+    rounds: int = BOOTSTRAP_ROUNDS,
+    seed: int = 0,
+    metric: str = "top1",
 ) -> tuple[float, float]:
-    """95% interval of top-1(first) - top-1(second) over the same steps, resampling games."""
+    """95% interval of metric(first) - metric(second) over the same steps, resampling games.
+
+    `metric` is ``top1``, ``top3`` or ``log_loss``.
+    """
     games, game_of_step = np.unique(first.match_ids[mask], return_inverse=True)
     if not len(games):
         return math.nan, math.nan
     steps = np.bincount(game_of_step, minlength=len(games)).astype(np.float64)
+    first_values = getattr(first, metric)[mask].astype(np.float64)
+    second_values = getattr(second, metric)[mask].astype(np.float64)
     difference = np.bincount(
-        game_of_step,
-        weights=first.top1[mask].astype(np.float64) - second.top1[mask].astype(np.float64),
-        minlength=len(games),
+        game_of_step, weights=first_values - second_values, minlength=len(games)
     )
     draws = np.random.default_rng(seed).multinomial(
         len(games), np.full(len(games), 1 / len(games)), size=rounds
