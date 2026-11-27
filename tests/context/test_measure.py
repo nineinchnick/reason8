@@ -71,3 +71,33 @@ def test_variants():
         ("trees: history + own_units", ["previous_1", "own_done_mex"]),
         ("trees: history + all context", ["previous_1", "time_s", "metal", "own_done_mex"]),
     ]
+
+
+def test_mask_rescales_what_a_builder_can_give():
+    from reason8.context import builder_measure
+
+    probabilities = np.array([[0.5, 0.3, 0.2], [0.5, 0.3, 0.2]])
+    mask = np.array([[True, False, True], [True, True, True]])
+    masked, removed = builder_measure.apply_mask(probabilities, mask)
+    assert np.allclose(masked, [[0.5 / 0.7, 0.0, 0.2 / 0.7], [0.5, 0.3, 0.2]])
+    assert np.allclose(removed, [0.3, 0.0])
+
+
+def test_builder_variants():
+    from reason8.context import builder_measure
+
+    groups = {
+        "history": builder_measure.history_features(["mex"]),
+        "builder": ["builder_kind"],
+        **{name: [f"{name}_column"] for name in builder_measure.ADDED_GROUPS},
+    }
+    found = dict(builder_measure.variants(groups, ["mex"]))
+    reference = found[builder_measure.REFERENCE]
+    assert reference == [*groups["history"], "builder_kind"]
+    model = found[builder_measure.MODEL]
+    assert [column for column in model if column not in reference] == [
+        f"{name}_column" for name in builder_measure.MODEL_GROUPS
+    ]
+    assert "skill_column" not in found[builder_measure.WITHOUT_SKILL]
+    short = found[builder_measure.SHORT_HISTORY]
+    assert "previous_1" in short and "previous_2" not in short

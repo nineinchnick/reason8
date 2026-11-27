@@ -420,6 +420,30 @@ def test_build_table_and_check(tmp_path):
     assert matched.select("kind", "by_builder").rows() == [("structure", True)]
 
 
+def test_load_builder_steps(tmp_path):
+    from reason8.context import builder_measure
+
+    sample = pl.DataFrame(
+        {"match_id": [7], "replay_file_name": [REPLAY + ".sdfz"], "map": ["M"], "split": ["train"]}
+    )
+    out, _ = build(tmp_path, sample)
+    steps = builder_measure.load_builder_steps(out)
+    first = steps.frame.filter(pl.col("player_slot") == 0)
+    assert first["unit"].to_list() == ["armmex", "armpw", "reclaim", "armmex", "armlab"]
+    assert first["previous_1"].to_list() == ["<start>", "armmex", "armpw", "reclaim", "armmex"]
+    # two mex orders (one drag) before the fourth step, none counting the step itself
+    assert first["ordered_mex"].to_list() == [0, 2, 2, 2, 3]
+    assert first["ordered_reclaim"].to_list() == [0, 0, 0, 1, 1]
+    assert set(steps.groups) == {"history", *table.GROUPS}
+    mask = builder_measure.mask_matrix(
+        first, ["armlab", "armmex", "armpw", "reclaim", "<unknown>"], steps.answers
+    )
+    assert mask.tolist()[:2] == [
+        [True, True, False, True, True],  # the commander
+        [False, False, True, False, True],  # the factory
+    ]
+
+
 def test_time_since_an_earlier_frame():
     """Orders of one frame all get the time since the last order before that frame."""
     orders = pl.DataFrame(
