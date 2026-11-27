@@ -163,12 +163,17 @@ def choose_opening(
     map_name: str | None,
     start: tuple[float, float] | None,
     variant: int = 0,
+    position: str | None = None,
 ) -> dict | None:
     """The opening the AI plays, chosen as ``opening.as`` does: of the openings for the side
     and map, those of the position whose start is nearest to the team's, and of them the
     `variant`-th (the script picks it at random and logs it); without one for the map, the
-    first for the side and any map."""
+    first for the side and any map. The script finds its position from where its commander
+    stands, which is not always the start in the replay; the `position` it logged wins."""
     for_map = [o for o in openings if o["side"] == side and o.get("map", "") == map_name]
+    logged = [o for o in for_map if position is not None and o.get("position") == position]
+    if logged:
+        return logged[variant] if variant < len(logged) else logged[0]
     if for_map and start is not None:
         nearest = min(
             for_map,
@@ -187,9 +192,11 @@ def check_replay(
     ai_short_name: str,
     state_records: list[dict] | None = None,
     variants: Mapping[int, int] | None = None,
+    positions: Mapping[int, str | None] | None = None,
 ) -> list[dict]:
-    """One result per team that the AI played. `variants` is the opening each team chose,
-    from the engine log (`check_infolog`); without it, the first of its position."""
+    """One result per team that the AI played. `variants` and `positions` are the opening
+    and position each team chose, from the engine log (`check_infolog`); without them, the
+    first opening of the position nearest to its start."""
     tasks = openings.get("tasks", {})
     teams = replay.teams()
     map_name = replay.meta.get("map")
@@ -206,6 +213,7 @@ def check_replay(
             map_name,
             team.start_pos if team else None,
             (variants or {}).get(ai["teamId"], 0),
+            (positions or {}).get(ai["teamId"]),
         )
         if opening is None:
             result.update({"matches": False, "error": f"no opening for side {side!r}"})
@@ -317,10 +325,10 @@ def run(args: argparse.Namespace) -> int:
     document, _ = parse_replay(args.parser or default_parser(), args.replay)
     state_records = list(read_records(args.state)) if args.state else None
     log = check_infolog(args.infolog, args.ai) if args.infolog else None
-    variants = {
-        team: counts["variant"] for team, counts in (log or {}).get("opening_by_team", {}).items()
-    }
-    teams = check_replay(Replay(document), openings, args.ai, state_records, variants)
+    chosen = (log or {}).get("opening_by_team", {})
+    variants = {team: counts["variant"] for team, counts in chosen.items()}
+    positions = {team: counts["position"] for team, counts in chosen.items()}
+    teams = check_replay(Replay(document), openings, args.ai, state_records, variants, positions)
     result: dict = {"teams": teams}
     ok = bool(teams) and all(team["matches"] for team in teams)
     if log is not None:

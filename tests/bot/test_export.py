@@ -133,3 +133,15 @@ def test_reaction_table():
         "answered": 0.0,
         "quantiles": [],
     }
+
+
+def test_choose_opening_at_the_logged_position():
+    openings = [
+        {"side": "armada", "map": "Isthmus", "position": "P1", "start": [100, 100], "variant": 0},
+        {"side": "armada", "map": "Isthmus", "position": "P2", "start": [900, 100], "variant": 0},
+        {"side": "armada", "map": "Isthmus", "position": "P2", "start": [900, 100], "variant": 1},
+    ]
+    # the replay's start is near P1, but the AI's commander stood at P2 and it said so
+    chosen = choose_opening(openings, "armada", "Isthmus", (100, 100), variant=1, position="P2")
+    assert chosen is openings[2]
+    assert choose_opening(openings, "armada", "Isthmus", (100, 100), position="P9") is openings[0]
