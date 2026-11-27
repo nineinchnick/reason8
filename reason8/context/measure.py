@@ -90,6 +90,18 @@ NOT_IN_ALL = ("pace",)
 NGRAM_NAME = "4-gram, faction, map and position"
 
 
+def default_device() -> str:
+    """``cuda`` when XGBoost can train on a GPU here, otherwise ``cpu``."""
+    if not xgboost.build_info().get("USE_CUDA"):
+        return "cpu"
+    try:
+        data = xgboost.DMatrix(np.zeros((2, 1), dtype=np.float32), label=[0, 1])
+        xgboost.train({"device": "cuda", "tree_method": "hist"}, data, num_boost_round=1)
+    except xgboost.core.XGBoostError:
+        return "cpu"
+    return "cuda"
+
+
 @dataclass
 class Steps:
     """The steps of the decision table: one row per step with its features, and the
@@ -217,10 +229,13 @@ def score_groups(frame: pl.DataFrame) -> dict[str, np.ndarray]:
 class TreeModel:
     """Gradient-boosted trees over the order history and the chosen context groups."""
 
-    def __init__(self, name: str, features: Sequence[str], threads: int) -> None:
+    def __init__(
+        self, name: str, features: Sequence[str], threads: int, device: str = "cpu"
+    ) -> None:
         self.name = name
         self.features = list(features)
         self.threads = threads
+        self.device = device
         self.categories: dict[str, dict[str, int]] = {}
         self.classes: list[str] = []
         self.vocabulary: list[str] = []
@@ -284,7 +299,11 @@ class TreeModel:
             class_index = {unit: position for position, unit in enumerate(self.classes)}
             return np.array([class_index.get(unit, other) for unit in frame["unit"].to_list()])
 
-        parameters = PARAMETERS | {"num_class": other + 1, "nthread": self.threads}
+        parameters = PARAMETERS | {
+            "num_class": other + 1,
+            "nthread": self.threads,
+            "device": self.device,
+        }
         training = self.dmatrix(train, labels(train))
         stopping = self.dmatrix(validation, labels(validation), reference=training)
         self.booster = xgboost.train(
@@ -296,6 +315,7 @@ class TreeModel:
             verbose_eval=False,
         )
         self.rounds = self.booster.best_iteration + 1
+        self.booster.set_param({"device": "cpu"})  # predict on the frames in memory
         self.seconds = time.monotonic() - started
         return self
 
@@ -482,6 +502,7 @@ def measure(
     saved_model: Path | None,
     threads: int,
     rounds: int,
+    device: str = "cpu",
     log=lambda message: print(message, file=sys.stderr, flush=True),
 ) -> str:
     steps = load_steps(directory)
@@ -511,7 +532,7 @@ def measure(
     validation = steps.frame.filter(pl.col("split") == "validation")
     trees: dict[str, TreeModel] = {}
     for name, features in variants(steps.groups):
-        tree = TreeModel(name, features, threads).fit(train, validation)
+        tree = TreeModel(name, features, threads, device).fit(train, validation)
         trees[name] = tree
         scores[name] = tree.score(held_out)
         trained_on[name] = f"{train['match_id'].n_unique()} table games"
@@ -529,12 +550,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="the n-gram trained on the whole opening dataset",
     )
     parser.add_argument("--threads", type=int, default=6)
+    parser.add_argument(
+        "--device", default=None, help="cpu or cuda (default: cuda when XGBoost can use a GPU)"
+    )
     parser.add_argument("--rounds", type=int, default=BOOTSTRAP_ROUNDS)
     parser.add_argument("--out", type=Path, default=None, help="also write the report here")
 
 
 def run(args: argparse.Namespace) -> int:
-    text = measure(args.table, args.split, args.saved_model, args.threads, args.rounds)
+    device = args.device or default_device()
+    text = measure(args.table, args.split, args.saved_model, args.threads, args.rounds, device)
     print(text)
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)

@@ -120,11 +120,11 @@ the saved n-gram
   table it shows what the smaller training set costs.
 
 trees
-: Gradient-boosted trees (XGBoost 3.4, `xgboost-cpu`), one class per unit seen
-  at least 20 times in training and one class for the rest, its probability
-  split between them by their training counts. Depth 6, learning rate 0.15, 64
-  bins, at most 400 rounds, stopped when the validation log-loss has not
-  improved for 20 rounds.
+: Gradient-boosted trees (XGBoost 3.4), one class per unit seen at least 20
+  times in training and one class for the rest, its probability split between
+  them by their training counts. Depth 6, learning rate 0.15, 64 bins, at most
+  400 rounds, stopped when the validation log-loss has not improved for 20
+  rounds.
 
 The trees see the **order history** in every variant: faction, map, position,
 its role, the step number, the number of orders so far, the units of the three
