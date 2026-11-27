@@ -882,33 +882,39 @@ PLAYER = ("match_id", "player_slot")
 STEP_FRAMES = 6
 
 
-def step_starts(player: Sequence[str] = PLAYER) -> pl.Expr:
-    """Whether an order starts a step of its opening, the unit a model predicts next (ADR
-    0013); null for orders that add no units.
+def step_starts(
+    player: Sequence[str] = PLAYER, answer: str = "unit", decides: pl.Expr | None = None
+) -> pl.Expr:
+    """Whether an order starts a step of its opening, the answer a model predicts next (ADR
+    0013); null for orders that are not decisions (by default those that add no units).
 
-    An order that adds the same unit as the order before it (the player's last order that
-    added units) at most `STEP_FRAMES` frames later is part of that order's step: one drag
-    of buildings, one run of quick clicks. Runs chain: each order is compared with the
-    order directly before it. The rows need ``seq_idx``, ``frame`` and ``unit`` and must be
-    sorted by `player` and order.
+    An order that gives the same answer (`answer`, by default the unit added) as the order
+    before it (the player's last decision) at most `STEP_FRAMES` frames later is part of
+    that order's step: one drag of buildings, one run of quick clicks. Runs chain: each
+    order is compared with the order directly before it. The rows need ``frame``, the
+    `answer` column and, without `decides`, ``seq_idx``, and must be sorted by `player` and
+    order. `decides` marks the decisions: the decision table counts jobs given to builders
+    as decisions too, with the job as the answer (`reason8.context.table`).
     """
-    added = pl.col("seq_idx").is_not_null()
+    added = pl.col("seq_idx").is_not_null() if decides is None else decides
     by_player = list(player)
 
     def before(column: str) -> pl.Expr:
         return pl.when(added).then(pl.col(column)).shift(1).forward_fill().over(by_player)
 
-    continues = (pl.col("unit") == before("unit")) & (
+    continues = (pl.col(answer) == before(answer)) & (
         pl.col("frame") - before("frame") <= STEP_FRAMES
     )
     return pl.when(added).then(~continues.fill_null(False))
 
 
-def step_index(player: Sequence[str] = PLAYER) -> pl.Expr:
-    """The step of the opening an order starts, numbered from 0 (`step_starts`); null for
-    orders that are part of the step before them and for orders that add no units. The
-    rows must be sorted by `player` and order."""
-    starts = step_starts(player)
+def step_index(
+    player: Sequence[str] = PLAYER, answer: str = "unit", decides: pl.Expr | None = None
+) -> pl.Expr:
+    """The step of the opening an order starts, numbered from 0 (`step_starts`, with the
+    same arguments); null for orders that are part of the step before them and for orders
+    that are not decisions. The rows must be sorted by `player` and order."""
+    starts = step_starts(player, answer, decides)
     return pl.when(starts).then(
         starts.fill_null(False).cast(pl.Int32).cum_sum().over(list(player)) - 1
     )
