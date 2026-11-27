@@ -62,7 +62,7 @@ from reason8.models.ngram import (
     load_model,
     models_dir,
 )
-from reason8.openings.dataset import SPLITS
+from reason8.openings.dataset import SPLITS, step_index
 
 HISTORY = 3  # previous steps the trees see, as the 4-gram does
 MIN_CLASS_STEPS = 20
@@ -121,7 +121,11 @@ def load_steps(directory: Path) -> Steps:
         pl.scan_parquet(directory / f"{split}.parquet").with_columns(pl.lit(split).alias("split"))
         for split, _ in SPLITS
     ]
-    rows = pl.concat(scans, how="diagonal_relaxed")
+    rows = (
+        pl.concat(scans, how="diagonal_relaxed")
+        .sort(*PLAYER, "order_index")
+        .with_columns(step_index(PLAYER).alias("step_idx"))
+    )
     added = pl.col("count") > 0
     ordered = (
         rows.select(*PLAYER, "order_index", "unit", "count", "step_idx")

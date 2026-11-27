@@ -33,6 +33,7 @@ import polars as pl
 from reason8 import markdown
 from reason8.context.table import (
     OTHER,
+    PLAYER,
     RESOURCES,
     dataset_dir,
     role_expression,
@@ -42,7 +43,7 @@ from reason8.context.table import (
 )
 from reason8.headless import standing
 from reason8.headless import tables as state_tables
-from reason8.openings.dataset import SPLITS
+from reason8.openings.dataset import SPLITS, step_index
 from reason8.replays.replay import GAME_SPEED
 
 SPOT_DISTANCE = 16  # map units between an order's spot and the unit created for it
@@ -53,7 +54,11 @@ def load_rows(directory: Path, match_ids: Sequence[int] | None = None) -> pl.Dat
     rows = pl.concat(frames, how="diagonal_relaxed")
     if match_ids is not None:
         rows = rows.filter(pl.col("match_id").is_in(list(match_ids)))
-    return rows.collect()
+    return (
+        rows.sort(*PLAYER, "order_index")
+        .with_columns(step_index(PLAYER).alias("step_idx"))
+        .collect()
+    )
 
 
 def standing_counts(

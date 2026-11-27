@@ -155,9 +155,8 @@ def orders_frame() -> pl.DataFrame:
     )
 
 
-def test_with_steps():
-    rows = table.with_steps(orders_frame()).filter(pl.col("player_slot") == 0)
-    assert rows["step_idx"].to_list() == [0, None, 1, None, 2, 3]
+def test_with_times():
+    rows = table.with_times(orders_frame()).filter(pl.col("player_slot") == 0)
     assert rows["state_frame"].to_list() == [0, 0, 59, 60, 120, 150]
     assert rows["since_previous_s"].to_list() == pytest.approx(
         [None, None, 2.0, 1 / 30, 2.0, 1.0], nan_ok=True
@@ -167,7 +166,7 @@ def test_with_steps():
 def test_join_state():
     state = state_tables()
     joined = table.join_state(
-        table.with_steps(orders_frame()),
+        table.with_times(orders_frame()),
         state["game"],
         state["resources"],
         state["events"],
@@ -249,7 +248,7 @@ def test_build_table_and_check(tmp_path):
     assert manifest["counts"]["rows"] == {"train": len(ORDERS), "validation": 0, "test": 0}
     assert manifest["counts"]["steps"] == 5
     assert set(manifest["groups"]) == set(table.GROUPS)
-    rows = pl.read_parquet(out / "train.parquet")
+    rows = check.load_rows(out)
     for columns in manifest["groups"].values():
         assert set(columns) <= set(rows.columns)
     assert (out / "splits" / "train.txt").read_text() == "7\n"
@@ -300,6 +299,5 @@ def test_time_since_an_earlier_frame():
         [order(0, 0, 30, "armmex", 0), order(0, 1, 60, "armmex", 1), order(0, 2, 60, "armwin", 2)],
         schema=ORDER_COLUMNS,
     )
-    rows = table.with_steps(orders)
-    assert rows["step_idx"].to_list() == [0, 1, 2]
+    rows = table.with_times(orders)
     assert rows["since_previous_s"].to_list() == [None, 1.0, 1.0]
