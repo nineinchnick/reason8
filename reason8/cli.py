@@ -19,6 +19,7 @@ from reason8.evaluation import report as evaluation_report
 from reason8.game import maps, positions
 from reason8.headless import batch, batch_list, run, setup, state
 from reason8.headless import tables as state_tables
+from reason8.models import builder as builder_model
 from reason8.models import evaluate
 from reason8.openings import contact, dataset
 from reason8.paths import LayoutError
@@ -67,6 +68,7 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
             ("measure", context_measure, "measure what each kind of context adds"),
         ],
     ),
+    ("model", builder_model, "train, export and score the builder model (ADR 0019)"),
     (
         "bot",
         "the Reason8 AI, a BARb variant",
