@@ -1,14 +1,17 @@
-"""Build the decision table: every opening build order with the game state at its frame.
+"""Build the decision table: every order of an opening given to builders, build orders
+and jobs, with the builders that got it and the game state at its frame.
 
 Usage::
 
-    uv run reason8 context build        # the re-simulated games of the sample -> context_v1/
+    uv run reason8 context build        # the re-simulated games of the sample -> context_v2/
     uv run reason8 context build --out data/datasets/context_try --sample other.parquet
 
-The rows are the rows of the opening dataset (`reason8.openings.dataset`, ``openings_v2``)
-of the games of the context sample (``<data dir>/logs/context-sample.parquet``) that have
-been re-simulated: the same orders, the same steps and the same splits, so that the
-baselines of `reason8.models` are scored on exactly these rows. Each row gets the state of
+The build orders are the rows of the opening dataset (`reason8.openings.dataset`,
+``openings_v2``) of the games of the context sample (``<data dir>/logs/context-sample.
+parquet``) that have been re-simulated: the same orders and the same splits. The job
+orders of builders (assist, reclaim, repair, resurrect) up to the end of each opening come
+from the replay tables, and every order goes to the builders the command reached
+(`reason8.context.builders`): one row per order and builder. Each row gets the state of
 the player's team and of its allies as the game wrote it just before the order
 (`state_frame`, the frame before the order's): what the bot can read for its own team and
 its allies through the engine's AI interface (ADR 0007). Nothing about the enemy and
@@ -17,16 +20,21 @@ nothing about what anyone could see is used.
 The state comes from the Parquet tables of the re-simulated games
 (`reason8.headless.tables`, format 5: resources every second), and the joins are Polars
 joins: resources by ``join_asof`` on the frame, units standing by summing the changes the
-unit events make (`unit_changes`), the same units `reason8.headless.standing` rebuilds.
-Building again reads whatever games are re-simulated by then and rewrites the table.
+unit events make (`unit_changes`), the same units `reason8.headless.standing` rebuilds,
+and build power the same way. Building again reads whatever games are re-simulated by
+then and rewrites the table. docs/reference/context-dataset.md describes every column.
 
-The output, in ``<data dir>/datasets/context_v1/``:
+The output, in ``<data dir>/datasets/context_v2/``:
 
 ``train.parquet``, ``validation.parquet``, ``test.parquet``
-    One row per build order of an opening: the columns of the opening dataset, ``replay``,
-    ``state_frame``, ``resources_frame`` and the context columns. Which orders start a step
-    is not stored: `reason8.context.measure` numbers the steps when it loads the rows
-    (`reason8.openings.dataset.step_index`), as the opening models do.
+    One row per order and builder (``decision_index``, ``builder_index``): the columns of
+    the opening dataset, the answer, the builder, ``replay``, ``state_frame``,
+    ``resources_frame`` and the context columns. Which orders start a step is not stored:
+    the measurement numbers the steps when it loads the rows
+    (`reason8.openings.dataset.step_index` with the answer), as the opening models do.
+``builder_types.parquet``
+    The unit types with build power of the game versions used: kind, build power, build
+    list and jobs, from which the models' mask is made.
 ``games.parquet``
     One row per game of the sample, with why a game is not in the table yet.
 ``splits/<split>.txt``
@@ -35,27 +43,11 @@ The output, in ``<data dir>/datasets/context_v1/``:
     The sample, the source dataset, the context groups and their columns, the counts and
     the code version.
 
-The context columns, in groups (`GROUPS`) that a model can switch on and off:
-
-``time``
-    ``time_s``: game time of the order.
-``pace``
-    ``since_previous_s``: seconds since the player's last build order in an earlier frame
-    (null before there is one). It describes how the order itself was given more than the
-    game: `reason8.context.measure` leaves it out of the model with all context.
-``economy``
-    The team's metal and energy: stored, storage, income and expense.
-``wind``
-    ``wind``: the current wind speed; ``wind_min``, ``wind_max``: the map's wind range.
-``own_units``
-    ``own_done_<role>`` and ``own_building_<role>``: how many units of each type the team
-    has finished and under construction. A type is a unit name without its faction prefix
-    (``armmex`` and ``cormex`` are both ``mex``); the types are those that make up 99% of
-    the orders of the source dataset's training split, plus the commander, and every other
-    type is counted as ``other``.
-``allies``
-    The economy (``allies_metal`` ...) and the units (``allies_done_<role>``,
-    ``allies_building_<role>``) of the other teams of the player's ally team, summed.
+The context columns come in groups (`GROUPS`) that a model can switch on and off:
+``time``, ``pace``, ``economy``, ``wind``, ``own_units`` and ``allies`` (the state, the
+same for every builder of an order; `STATE_GROUPS`), ``builder`` (its kind, type,
+whether it moves and its previous answer), ``build_power`` (the builder's, and the team's
+finished and idle builders' by kind) and ``skill``.
 """
 
 from __future__ import annotations
@@ -74,15 +66,17 @@ from typing import Any
 
 import polars as pl
 
+from reason8.context import builders
 from reason8.headless import tables as state_tables
 from reason8.headless.state import RESOURCE_LINES_FORMAT
 from reason8.openings import dataset as openings
 from reason8.openings.extract import unit_role
 from reason8.paths import data_dir, partition
+from reason8.replays import tables as replay_tables
 from reason8.replays.replay import GAME_SPEED
 
-NAME = "context_v1"
-FORMAT = "reason8.context/1"
+NAME = "context_v2"
+FORMAT = "reason8.context/2"
 SOURCE_DATASET = openings.NAME
 
 # Why a game of the sample is not in the table (games.parquet, column `status`).
@@ -91,12 +85,13 @@ NOT_SIMULATED = "not re-simulated yet"
 OLD_FORMAT = "state before format 5"
 SHORT_STATE = "state ends before the opening does"
 NOT_IN_DATASET = "no openings in the opening dataset"
+NOT_PARSED = "replay not in the replay tables"
 
 RESOURCES = state_tables.RESOURCE_FIELDS  # metal, metal_storage, ... energy_expense
 COMMANDER = "com"
 OTHER = "other"
 ROLE_COVERAGE = 0.99
-GAMES_PER_CHUNK = 100
+GAMES_PER_CHUNK = 50
 
 LIFE_KINDS = ("created", "finished", "destroyed", "given")
 PLAYER = ["match_id", "player_slot"]
@@ -115,10 +110,25 @@ def groups(roles: Sequence[str]) -> dict[str, list[str]]:
         "wind": ["wind", "wind_min", "wind_max"],
         "own_units": unit_counts_columns("own", roles),
         "allies": [f"allies_{name}" for name in RESOURCES] + unit_counts_columns("allies", roles),
+        "builder": ["builder_kind", "builder_role", "builder_moves", "builder_previous"],
+        "build_power": [
+            "builder_build_power",
+            "team_build_power",
+            *builders.power_columns("team_build_power"),
+            "idle_build_power",
+            *builders.power_columns("idle_build_power"),
+        ],
+        "skill": ["skill"],
     }
 
 
+#: The context columns that hold names, not numbers.
+CATEGORICAL = ("builder_kind", "builder_role", "builder_previous")
+
+
 GROUPS = tuple(groups([]))
+#: The groups `join_state` adds: the state of the game, the same for every builder.
+STATE_GROUPS = ("time", "pace", "economy", "wind", "own_units", "allies")
 
 
 def sample_file() -> Path:
@@ -273,7 +283,8 @@ def with_times(orders: pl.DataFrame) -> pl.DataFrame:
     # differs, so the time since an order of the same frame would give the unit away
     previous = pl.col("frame").shift(1)
     earlier_frame = pl.when(pl.col("frame") != previous).then(previous).forward_fill().over(PLAYER)
-    return orders.sort(*PLAYER, "order_index").with_columns(
+    order = "decision_index" if "decision_index" in orders.columns else "order_index"
+    return orders.sort(*PLAYER, order).with_columns(
         pl.max_horizontal(pl.col("frame") - 1, pl.lit(0)).cast(pl.Int32).alias("state_frame"),
         (pl.col("frame") / GAME_SPEED).cast(pl.Float32).alias("time_s"),
         ((pl.col("frame") - earlier_frame) / GAME_SPEED).cast(pl.Float32).alias("since_previous_s"),
@@ -361,7 +372,8 @@ def join_state(
         (pl.col(side) - pl.col(own)).cast(pl.Int32).alias(f"allies{own.removeprefix('own')}")
         for own, side in zip(own_names, side_names, strict=True)
     ]
-    context = [name for columns in groups(roles).values() for name in columns]
+    found = groups(roles)
+    context = [name for group in STATE_GROUPS for name in found[group]]
     return (
         joined.with_columns(allies)
         .sort("_row")
@@ -393,6 +405,7 @@ def game_states(directory: Path, replays: Iterable[str]) -> pl.DataFrame:
         "wind_min": pl.Float32,
         "wind_max": pl.Float32,
         "teams": state_tables.TABLE_SCHEMAS["game"]["teams"],
+        "game": pl.String,
     }
     if not paths:
         return pl.DataFrame(schema=schema)
@@ -414,21 +427,105 @@ def source_rows(source: Path, match_ids: Iterable[int]) -> pl.LazyFrame:
     )
 
 
+def as_of(
+    rows: pl.DataFrame, sums: pl.DataFrame, names: Sequence[str], key: str = "team"
+) -> pl.DataFrame:
+    """`rows` (with ``replay``, ``team`` and ``state_frame``) with the running `sums`
+    (`reason8.context.builders.running_sums`) as of their ``state_frame``; 0 before the
+    first change."""
+    return (
+        rows.with_row_index("_row")
+        .sort("state_frame")
+        .join_asof(
+            sums.rename({"frame": "_sums_frame"}).sort("_sums_frame"),
+            left_on="state_frame",
+            right_on="_sums_frame",
+            by=["replay", key],
+            strategy="backward",
+            check_sortedness=False,
+        )
+        .sort("_row")
+        .drop("_row", "_sums_frame")
+        .with_columns(pl.col(list(names)).fill_null(0.0))
+    )
+
+
+def join_chunk(
+    orders: pl.DataFrame,
+    games: pl.DataFrame,
+    commands: pl.DataFrame,
+    resources: pl.LazyFrame | pl.DataFrame,
+    events: pl.DataFrame,
+    types: pl.DataFrame,
+    roles: Sequence[str],
+    counts: Counter[str] | None = None,
+) -> pl.DataFrame:
+    """The rows of the decision table of some games: their decisions (build orders and
+    jobs), one row per builder, with the state before each.
+
+    `orders` are rows of the opening dataset with ``replay``; `games` the state's ``game``
+    rows of the same games (with ``game``, the version); `commands` their commands with
+    ``targets`` (`reason8.context.builders.command_units`); `resources` and `events` the
+    state's tables; `types` the builder types of the versions
+    (`reason8.context.builders.builder_types`). `counts` gets the number of job orders
+    left out because they reached no builder (``jobs_to_army_units_only``).
+    """
+    lives = builders.unit_lives(events).collect()
+    decisions = builders.opening_decisions(orders, commands, lives)
+    joined = join_state(with_times(decisions), games, resources, events, roles)
+    rows = builders.order_builders(joined, lives, types, games)
+    # a job that went to no builder is an order to army units: not a decision of a builder
+    if counts is not None:
+        counts["jobs_to_army_units_only"] += rows.filter(
+            pl.col("kind") == builders.JOB_KIND, pl.col("builders") == 0
+        ).height
+    rows = rows.filter((pl.col("kind") != builders.JOB_KIND) | (pl.col("builders") > 0))
+    rows = rows.with_columns(
+        (pl.col("decision_index").rank("dense").over(PLAYER) - 1)
+        .cast(pl.Int32)
+        .alias("decision_index")
+    )
+    rows = builders.with_builder_history(rows)
+    rows = rows.with_columns(pl.col("player_slot").cast(pl.Int32).alias("team"))
+
+    team_power = builders.power_columns("team_build_power")
+    idle_power = builders.power_columns("idle_build_power")
+    changes = unit_changes(events).collect()
+    rows = as_of(rows, builders.team_build_power(changes, types, games), team_power)
+    transitions = builders.transitions_of(
+        commands, events, builders.builder_unit_ids(lives, types, games)
+    )
+    rows = as_of(rows, builders.idle_build_power(transitions, lives, types, games), idle_power)
+    return rows.with_columns(
+        pl.sum_horizontal(team_power).alias("team_build_power"),
+        pl.sum_horizontal(idle_power).alias("idle_build_power"),
+        builders.builder_idle(rows, transitions),
+    ).drop("team")
+
+
 def build_table(
     out_dir: Path,
     sample: pl.DataFrame,
     *,
     source: Path,
     states: Path,
+    tables: Path | None = None,
+    content: Path | None = None,
+    types: pl.DataFrame | None = None,
     sample_path: Path | None = None,
     log=lambda message: print(message, file=sys.stderr),
 ) -> dict[str, Any]:
     """Build the decision table of the re-simulated games of `sample`; return its manifest.
 
     `sample` has a row per game (``match_id``, ``replay_file_name``, ``map``, ``split``);
-    `source` is the opening dataset whose rows are used and `states` the directory of the
-    state tables, in date partitions.
+    `source` is the opening dataset whose rows are used, `states` the directory of the
+    state tables, in date partitions, `tables` that of the replay tables (commands and
+    selections) and `content` the game's content directory with the installed game
+    versions, whose unit files say what each builder is (or `types`, the builder types
+    already read, `reason8.context.builders.builder_types`).
     """
+    tables = tables or replay_tables.tables_dir()
+    content = content or data_dir() / "bar"
     sample = sample.with_columns(
         pl.col("match_id").cast(pl.Int64),
         pl.col("replay_file_name").str.replace(r"\.sdfz$", "").alias("replay"),
@@ -439,6 +536,12 @@ def build_table(
         .group_by("match_id")
         .agg(pl.col("frame").max().alias("last_order_frame"))
         .collect()
+    )
+    replay_source = replay_tables.open_source(
+        tables,
+        replays=states_found["replay"].to_list(),
+        tables=(replay_tables.COMMANDS, replay_tables.SELECTIONS),
+        log=log,
     )
     games = (
         sample.join(states_found, on="replay", how="left")
@@ -452,6 +555,8 @@ def build_table(
             .then(pl.lit(NOT_IN_DATASET))
             .when(pl.col("last_frame") < pl.col("last_order_frame"))
             .then(pl.lit(SHORT_STATE))
+            .when(~pl.col("replay").is_in(sorted(replay_source.stored)))
+            .then(pl.lit(NOT_PARSED))
             .otherwise(pl.lit(INCLUDED))
             .alias("status")
         )
@@ -465,12 +570,15 @@ def build_table(
         .select("unit")
         .collect()["unit"]
     )
+    if types is None:
+        types = builders.builder_types(included["game"].to_list(), content)
 
     work_dir = out_dir.with_name(out_dir.name + ".building")
     if work_dir.exists():
         shutil.rmtree(work_dir)
     (work_dir / "parts").mkdir(parents=True)
     parts = []
+    left_out: Counter[str] = Counter()
     replays = included["replay"].to_list()
     for start in range(0, len(replays), GAMES_PER_CHUNK):
         chunk = included.slice(start, GAMES_PER_CHUNK)
@@ -481,20 +589,37 @@ def build_table(
             .join(chunk.lazy().select("match_id", "replay"), on="match_id")
             .collect()
         )
-        joined = join_state(
-            with_times(orders),
+        last_frame = builders.OPENING_SECONDS * GAME_SPEED
+        commands = builders.command_units(
+            replay_source.scan(replay_tables.COMMANDS, names)
+            .filter(pl.col("frame").is_null() | (pl.col("frame") <= last_frame))
+            .select(builders.COMMAND_COLUMNS),
+            replay_source.scan(replay_tables.SELECTIONS, names).filter(
+                pl.col("frame").is_null() | (pl.col("frame") <= last_frame)
+            ),
+        ).collect()
+        # games of different formats have different event columns
+        events = (
+            state_tables.scan_files(
+                [state_tables.table_path(stem, "events") for stem in stems], "events"
+            )
+            .with_columns(pl.col("replay").cast(pl.String))
+            .collect()
+        )
+        joined = join_chunk(
+            orders,
             chunk,
+            commands,
             state_tables.scan_files(
                 [state_tables.table_path(stem, "resources") for stem in stems], "resources"
             ),
-            # games of different formats have different event columns
-            state_tables.scan_files(
-                [state_tables.table_path(stem, "events") for stem in stems], "events"
-            ),
+            events,
+            types,
             roles,
+            left_out,
         )
         parts.append(work_dir / "parts" / f"part-{len(parts):05d}.parquet")
-        joined.write_parquet(parts[-1])
+        joined.drop("seq").write_parquet(parts[-1])
         log(f"{min(start + GAMES_PER_CHUNK, len(replays))} of {len(replays)} games joined")
 
     rows = pl.scan_parquet(parts) if parts else None
@@ -515,22 +640,11 @@ def build_table(
             "".join(f"{match_id}\n" for match_id in match_ids)
         )
     games.select(
-        "match_id", "replay_file_name", "map", "split", "status", "version", "last_frame"
+        "match_id", "replay_file_name", "map", "split", "status", "version", "last_frame", "game"
     ).sort("match_id").write_parquet(work_dir / "games.parquet")
+    types.write_parquet(work_dir / "builder_types.parquet")
 
-    openings_kept = (
-        pl.scan_parquet(parts).select(*PLAYER, "split").unique().collect()
-        if parts
-        else pl.DataFrame(schema={"split": pl.String})
-    )
-    steps = (
-        pl.scan_parquet(parts)
-        .sort(*PLAYER, "order_index")
-        .select(openings.step_starts(PLAYER).sum())
-        .collect()
-        if parts
-        else None
-    )
+    counts = row_counts_of(parts)
     manifest = {
         "format": FORMAT,
         "name": out_dir.name,
@@ -557,14 +671,21 @@ def build_table(
             "of": f"the added orders of the train split of {source_manifest.get('name')}",
             "roles": list(roles),
         },
+        "answers": {
+            "jobs": list(builders.JOBS),
+            "job_commands": list(builders.JOB_COMMANDS),
+            "builder_kinds": list(builders.BUILDER_KINDS),
+            "steps": "step_index(answer='answer', decides=answer is not null)",
+        },
         "groups": groups(roles),
+        "categorical": list(CATEGORICAL),
         "counts": {
             "games_by_status": dict(Counter(games["status"].to_list()).most_common()),
             "games": openings._counts_by_split(included),
             "games_by_map": dict(sorted(Counter(included["map"].to_list()).items())),
-            "openings": openings._counts_by_split(openings_kept),
             "rows": row_counts,
-            "steps": steps.item() if steps is not None else 0,
+            **counts,
+            "jobs_to_army_units_only": left_out["jobs_to_army_units_only"],
         },
     }
     (work_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
@@ -576,13 +697,50 @@ def build_table(
     return manifest
 
 
+DECISION = ["match_id", "player_slot", "decision_index"]
+
+
+def row_counts_of(parts: Sequence[Path]) -> dict[str, Any]:
+    """Openings, decisions, steps and builder rows of the parts of a build, by split."""
+    if not parts:
+        return {"openings": {}, "decisions": {}, "steps": 0, "decisions_by_kind": {}}
+    rows = pl.scan_parquet(parts)
+    first = rows.filter(pl.col("builder_index") == 0)
+    openings_kept = rows.select(*PLAYER, "split").unique().collect()
+    decisions = first.select("split", "kind").collect()
+    steps = (
+        first.sort(*PLAYER, "decision_index")
+        .select(
+            openings.step_starts(
+                PLAYER, answer="answer", decides=pl.col("answer").is_not_null()
+            ).sum()
+        )
+        .collect()
+        .item()
+    )
+    by_builders = (
+        first.group_by(pl.col("builders").clip(0, 3)).agg(pl.len()).sort("builders").collect()
+    )
+    return {
+        "openings": openings._counts_by_split(openings_kept),
+        "decisions": openings._counts_by_split(decisions),
+        "decisions_by_kind": dict(Counter(decisions["kind"].to_list()).most_common()),
+        "decisions_by_builders": {
+            ("3 or more" if count == 3 else str(count)): number
+            for count, number in by_builders.iter_rows()
+        },
+        "steps": steps,
+    }
+
+
 def _readme(manifest: Mapping[str, Any]) -> str:
     counts = manifest["counts"]
     lines = [
         f"# {manifest['name']}",
         "",
-        "Opening build orders of the re-simulated games of the context sample, one row per",
-        "order, with the state of the player's team and allies before it. Built by",
+        "Opening build orders and builders' jobs of the re-simulated games of the context",
+        "sample, one row per order and builder that got it, with the state of the player's",
+        "team and allies before it. Built by",
         "`uv run reason8 context build`; see docs/reference/context-dataset.md in the",
         "repository.",
         "",
@@ -591,13 +749,13 @@ def _readme(manifest: Mapping[str, Any]) -> str:
         f"- rows from: {manifest['source']['dataset']} built {manifest['source']['built_at']}",
         f"- games by status: {counts['games_by_status']}",
         "",
-        "| split | games | openings | rows |",
-        "| --- | --- | --- | --- |",
+        "| split | games | openings | decisions | rows |",
+        "| --- | --- | --- | --- | --- |",
     ]
     for split, _ in openings.SPLITS:
         lines.append(
-            f"| {split} | {counts['games'][split]} | {counts['openings'][split]} "
-            f"| {counts['rows'][split]} |"
+            f"| {split} | {counts['games'][split]} | {counts['openings'].get(split, 0)} "
+            f"| {counts['decisions'].get(split, 0)} | {counts['rows'][split]} |"
         )
     return "\n".join(lines) + "\n"
 
@@ -613,6 +771,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--source", type=Path, default=openings.dataset_dir(), help="the opening dataset"
     )
     parser.add_argument("--state-dir", type=Path, default=state_dir())
+    parser.add_argument(
+        "--tables", type=Path, default=None, help="the replay tables (default: <data dir>/tables)"
+    )
+    parser.add_argument(
+        "--content",
+        type=Path,
+        default=None,
+        help="the game's content directory with the game versions (default: <data dir>/bar)",
+    )
 
 
 def run(args: argparse.Namespace) -> int:
@@ -621,6 +788,8 @@ def run(args: argparse.Namespace) -> int:
         pl.read_parquet(args.sample),
         source=args.source,
         states=args.state_dir,
+        tables=args.tables,
+        content=args.content,
         sample_path=args.sample,
     )
     print(json.dumps(manifest["counts"], indent=2))

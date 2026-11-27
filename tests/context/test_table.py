@@ -5,13 +5,15 @@ import json
 import polars as pl
 import pytest
 
-from reason8.context import check, table
+from reason8.context import builders, check, table
 from reason8.headless import standing, tables
 from reason8.openings.dataset import ORDER_COLUMNS
 from tests.headless.test_tables import lines_v5, write_state
+from tests.synthetic import write_tables
 
 REPLAY = "2026-11-01_10-00-00-000_Test Valley 1.0_2026.09.03"
 ROLES = ["mex", "pw", "com", "other"]
+GAME = "Test 1"
 TEAMS = [
     {"team": 0, "ally_team": 0, "ai": False, "side": "armada", "gaia": False},
     {"team": 1, "ally_team": 0, "ai": False, "side": "armada", "gaia": False},
@@ -69,6 +71,8 @@ def state_tables() -> dict[str, pl.DataFrame]:
         event(0, "finished", 2, "armcom", 1),
         event(0, "created", 3, "corcom", 2),
         event(0, "finished", 3, "corcom", 2),
+        event(0, "created", 20, "armlab", 0),
+        event(0, "finished", 20, "armlab", 0),
         event(40, "created", 10, "armmex", 0, builder=1),
         event(50, "created", 11, "armmex", 1, builder=2),
         event(50, "created", 12, "cormex", 2, builder=3),
@@ -104,6 +108,7 @@ def state_tables() -> dict[str, pl.DataFrame]:
         "wind_min": 0.0,
         "wind_max": 20.0,
         "teams": TEAMS,
+        "game": GAME,
     }
     schemas = tables.TABLE_SCHEMAS
     return {
@@ -208,6 +213,9 @@ def write_source(directory, splits):
             pl.lit("front").alias("role"),
             pl.lit(31000, dtype=pl.Int32).alias("build"),
             pl.lit(None, dtype=pl.Int32).alias("opening_era"),
+            pl.lit(GAME).alias("game_version"),
+            pl.lit(180, dtype=pl.Int32).alias("cutoff_frame"),
+            (20.0 + pl.col("player_slot")).cast(pl.Float32).alias("skill"),
         )
     )
     for split in ("train", "validation", "test"):
@@ -229,9 +237,122 @@ def write_state_tables(directory):
         frame.write_parquet(tables.table_path(stem, name))
 
 
-def test_build_table_and_check(tmp_path):
+def builder_types() -> pl.DataFrame:
+    rows = [
+        {
+            "game": GAME,
+            "unit_def": "armcom",
+            "builder_unit": "armcom",
+            "builder_kind": "commander",
+            "builder_moves": True,
+            "build_power": 300.0,
+            "can_assist": True,
+            "can_reclaim": True,
+            "can_repair": True,
+            "can_resurrect": False,
+            "build_options": ["armlab", "armmex"],
+        },
+        {
+            "game": GAME,
+            "unit_def": "armlab",
+            "builder_unit": "armlab",
+            "builder_kind": "factory",
+            "builder_moves": False,
+            "build_power": 150.0,
+            "can_assist": False,
+            "can_reclaim": False,
+            "can_repair": False,
+            "can_resurrect": False,
+            "build_options": ["armpw"],
+        },
+    ]
+    return pl.DataFrame(rows, schema=builders.BUILDER_TYPE_SCHEMA)
+
+
+def write_replay_tables(directory):
+    """The commands of ORDERS, with the selections they go to, and two jobs: a reclaim of
+    an area by player 0's commander, and a guard order to an army unit only."""
+
+    def select(frame, player, units):
+        return {"frame": frame, "type": "select", "player": player, "units": units}
+
+    def build(frame, player, unit, opts=(), params=()):
+        record = {
+            "frame": frame,
+            "type": "cmd",
+            "player": player,
+            "via": "COMMAND",
+            "team": player,
+            "cmd": "BUILD",
+            "cmd_id": -1,
+            "unit": unit,
+            "params": list(params),
+        }
+        return record | ({"opts": list(opts)} if opts else {})
+
+    def job(frame, player, command, params):
+        return {
+            "frame": frame,
+            "type": "cmd",
+            "player": player,
+            "via": "COMMAND",
+            "team": player,
+            "cmd": command,
+            "cmd_id": 1,
+            "params": params,
+        }
+
+    events = [
+        {"frame": 0, "type": "start"},
+        select(0, 0, [1]),
+        build(0, 0, "armmex", params=[1000, 0, 100, 0]),
+        build(0, 0, "armmex", ["shift"], [1100, 0, 100, 0]),
+        select(10, 1, [2]),
+        build(30, 1, "armmex", params=[1000, 0, 100, 0]),
+        select(50, 0, [20]),
+        build(60, 0, "armpw"),
+        build(61, 0, "armpw", ["right"]),
+        select(80, 0, [1]),
+        job(90, 0, "RECLAIM", [500.0, 0.0, 500.0, 200.0]),
+        build(121, 0, "armmex", params=[1400, 0, 100, 0]),
+        select(130, 0, [13]),
+        job(140, 0, "GUARD", [1.0]),
+        select(145, 0, [1]),
+        build(151, 0, "armlab", params=[1500, 0, 100, 0]),
+    ]
+    players = [
+        {"playerId": team, "teamId": team, "allyTeamId": 0 if team < 2 else 1} for team in range(3)
+    ]
+    document = {
+        "format": "reason8.replay/1",
+        "meta": {"map": "Test Valley 1.0", "game": GAME, "serverMatchId": "7"},
+        "allyTeams": [],
+        "players": players,
+        "ais": [],
+        "modoptions": {},
+        "events": events,
+    }
+    return write_tables(directory, {REPLAY: document})
+
+
+def build(tmp_path, sample):
     write_source(tmp_path / "source", {7: "train"})
     write_state_tables(tmp_path / "state")
+    write_replay_tables(tmp_path / "tables")
+    out = tmp_path / "context"
+    manifest = table.build_table(
+        out,
+        sample,
+        source=tmp_path / "source",
+        states=tmp_path / "state",
+        tables=tmp_path / "tables",
+        types=builder_types(),
+        log=lambda _: None,
+    )
+    return out, manifest
+
+
+def test_build_table_and_check(tmp_path):
     sample = pl.DataFrame(
         {
             "match_id": [7, 8],
@@ -240,13 +361,12 @@ def test_build_table_and_check(tmp_path):
             "split": ["train", "test"],
         }
     )
-    out = tmp_path / "context"
-    manifest = table.build_table(
-        out, sample, source=tmp_path / "source", states=tmp_path / "state", log=lambda _: None
-    )
+    out, manifest = build(tmp_path, sample)
     assert manifest["counts"]["games_by_status"] == {"ok": 1, table.NOT_SIMULATED: 1}
-    assert manifest["counts"]["rows"] == {"train": len(ORDERS), "validation": 0, "test": 0}
-    assert manifest["counts"]["steps"] == 5
+    # the build orders and the reclaim; the guard order went to an army unit only
+    assert manifest["counts"]["rows"] == {"train": len(ORDERS) + 1, "validation": 0, "test": 0}
+    assert manifest["counts"]["decisions_by_kind"] == {"structure": 5, "factory": 2, "job": 1}
+    assert manifest["counts"]["steps"] == 6
     assert set(manifest["groups"]) == set(table.GROUPS)
     rows = check.load_rows(out)
     for columns in manifest["groups"].values():
@@ -255,42 +375,49 @@ def test_build_table_and_check(tmp_path):
     games = pl.read_parquet(out / "games.parquet")
     assert games.filter(pl.col("match_id") == 8)["status"].item() == table.NOT_SIMULATED
 
+    first = rows.filter(pl.col("player_slot") == 0)
+    assert first["answer"].to_list() == [
+        "armmex",
+        "armmex",
+        "armpw",
+        None,  # taken out of the factory's queue
+        "reclaim",
+        "armmex",
+        "armlab",
+    ]
+    assert (
+        first["builder_kind"].to_list() == ["commander"] * 2 + ["factory"] * 2 + ["commander"] * 3
+    )
+    assert first["builder_previous"].to_list() == [
+        "<start>",
+        "armmex",
+        "<start>",
+        None,
+        "armmex",
+        "reclaim",
+        "armmex",
+    ]
+    assert first["builder_build_power"].to_list() == [300, 300, 150, 150, 300, 300, 300]
+    assert first["team_build_power"].to_list() == [450] * 7
+    assert first["skill"].to_list() == [20.0] * 7
+    assert first["step_idx"].to_list() == [0, None, 1, None, 2, 3, 4]
+
     roles = manifest["unit_roles"]["roles"]
-    result = check.check_game(rows, tmp_path / "state" / "date=2026-11-01" / REPLAY, roles)
+    first_rows = rows.filter(pl.col("kind") != "job")
+    result = check.check_game(first_rows, tmp_path / "state" / "date=2026-11-01" / REPLAY, roles)
     assert result["rows"] == len(ORDERS)
     for name in ("resources_frame_differs", "resources_differ", "own_units_differ"):
         assert result[name] == 0, name
     assert result["allies_units_differ"] == 0
 
-    created = check.ordered_and_created(rows, state_tables()["events"])
+    created = check.ordered_and_created(first_rows, state_tables()["events"])
     assert created.height == 5  # structure orders that add a unit
     # the order on the spot of armmex 10 (x 1000), made 40 frames later; nothing on the others
     assert created["created_frame"].to_list() == [40, None, None, None, None]
-
-
-def test_load_steps(tmp_path):
-    from reason8.context import measure
-
-    write_source(tmp_path / "source", {7: "train"})
-    write_state_tables(tmp_path / "state")
-    sample = pl.DataFrame(
-        {"match_id": [7], "replay_file_name": [REPLAY + ".sdfz"], "map": ["M"], "split": ["train"]}
-    )
-    out = tmp_path / "context"
-    table.build_table(
-        out, sample, source=tmp_path / "source", states=tmp_path / "state", log=lambda _: None
-    )
-    steps = measure.load_steps(out)
-    assert steps.frame.height == 5
-    assert [opening.steps for opening in steps.openings["train"]] == [
-        ("armmex", "armpw", "armmex", "armlab"),
-        ("armmex",),
-    ]
-    first_player = steps.frame.filter(pl.col("player_slot") == 0)
-    assert first_player["previous_1"].to_list() == ["<start>", "armmex", "armpw", "armmex"]
-    # two mex orders (one drag) before the third step, none counting the step itself
-    assert first_player["ordered_mex"].to_list() == [0, 2, 2, 3]
-    assert set(steps.groups) == {"history", *table.GROUPS}
+    by_builder = check.builders_and_creators(rows, state_tables()["events"])
+    matched = by_builder.filter("matched")
+    # armmex 10 started by the commander that got the order; armpw 13 not by the factory
+    assert matched.select("kind", "by_builder").rows() == [("structure", True)]
 
 
 def test_time_since_an_earlier_frame():

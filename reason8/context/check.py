@@ -41,6 +41,7 @@ from reason8.context.table import (
     state_stem,
     unit_counts_columns,
 )
+from reason8.game.versions import UNIT_RENAMES
 from reason8.headless import standing
 from reason8.headless import tables as state_tables
 from reason8.openings.dataset import SPLITS, step_index
@@ -54,11 +55,122 @@ def load_rows(directory: Path, match_ids: Sequence[int] | None = None) -> pl.Dat
     rows = pl.concat(frames, how="diagonal_relaxed")
     if match_ids is not None:
         rows = rows.filter(pl.col("match_id").is_in(list(match_ids)))
+    if "answer" not in rows.collect_schema().names():  # a table without builders
+        return (
+            rows.sort(*PLAYER, "order_index")
+            .with_columns(step_index(PLAYER).alias("step_idx"))
+            .collect()
+        )
+    steps = (
+        rows.filter(pl.col("builder_index") == 0)
+        .sort(*PLAYER, "decision_index")
+        .select(
+            *PLAYER,
+            "decision_index",
+            step_index(PLAYER, answer="answer", decides=pl.col("answer").is_not_null()).alias(
+                "step_idx"
+            ),
+        )
+    )
     return (
-        rows.sort(*PLAYER, "order_index")
-        .with_columns(step_index(PLAYER).alias("step_idx"))
+        rows.join(steps, on=[*PLAYER, "decision_index"])
+        .sort(*PLAYER, "decision_index", "builder_index")
         .collect()
     )
+
+
+def builders_and_creators(rows: pl.DataFrame, events: pl.DataFrame) -> pl.DataFrame:
+    """Per build order that adds a unit and has a builder: whether the unit that then
+    built the thing is one of the order's builders.
+
+    A structure order is matched with the unit of its type the player's team created on
+    its spot after it (as `ordered_and_created`), whose ``created`` line names the builder
+    that started it. A factory order is matched with the units of its type that its
+    builder (the factory) created after it. Returns one row per order: ``kind``,
+    ``builders``, ``builder_kind`` (of the order's first builder), ``matched`` (something
+    was created for it) and ``by_builder`` (by one of its builders)."""
+    decision = [*PLAYER, "decision_index"]
+    orders = rows.filter(
+        pl.col("kind").is_in(["structure", "factory"]),
+        pl.col("count") > 0,
+        pl.col("builder_id").is_not_null(),
+    )
+    builder_sets = orders.group_by(decision).agg(pl.col("builder_id").alias("builder_ids"))
+    first = orders.filter(pl.col("builder_index") == 0).join(builder_sets, on=decision)
+    created = events.filter(pl.col("kind") == "created").select(
+        pl.col("replay").cast(pl.String),
+        pl.col("team").cast(pl.Int32),
+        pl.col("unit_def").cast(pl.String).replace(UNIT_RENAMES).alias("unit"),
+        pl.col("frame").alias("created_frame"),
+        pl.col("x").alias("created_x"),
+        pl.col("z").alias("created_z"),
+        pl.col("builder").alias("created_by"),
+    )
+    structure_orders = first.filter(pl.col("kind") == "structure")
+    structures = (
+        structure_orders.with_columns(pl.col("player_slot").cast(pl.Int32).alias("team"))
+        .join(created, on=["replay", "team", "unit"], how="left")
+        .filter(
+            pl.col("created_frame").is_null()
+            | (
+                (pl.col("created_frame") >= pl.col("frame"))
+                & ((pl.col("created_x") - pl.col("x")).abs() <= SPOT_DISTANCE)
+                & ((pl.col("created_z") - pl.col("z")).abs() <= SPOT_DISTANCE)
+            )
+        )
+        .sort("created_frame", nulls_last=True)
+        .group_by(decision, maintain_order=True)
+        .agg(
+            pl.col("kind", "builders", "builder_kind", "builder_ids").first(),
+            pl.col("created_frame").first(),
+            pl.col("created_by").first(),
+        )
+        .select(
+            *decision,
+            "kind",
+            "builders",
+            "builder_kind",
+            pl.col("created_frame").is_not_null().alias("matched"),
+            pl.col("builder_ids")
+            .list.contains(pl.col("created_by"))
+            .fill_null(False)
+            .alias("by_builder"),
+        )
+    )
+    # orders whose type the team made only elsewhere were filtered out above: not matched
+    structures = (
+        structure_orders.select(*decision, "kind", "builders", "builder_kind")
+        .join(
+            structures.select(*decision, "matched", "by_builder"),
+            on=decision,
+            how="left",
+            maintain_order="left",
+        )
+        .with_columns(pl.col("matched", "by_builder").fill_null(False))
+    )
+    factories = (
+        first.filter(pl.col("kind") == "factory")
+        .join(
+            created.rename({"created_by": "builder_id"}).drop("team"),
+            on=["replay", "builder_id", "unit"],
+            how="left",
+        )
+        .group_by(decision, maintain_order=True)
+        .agg(
+            pl.col("kind", "builders", "builder_kind").first(),
+            (pl.col("created_frame") >= pl.col("frame")).any().alias("by_builder"),
+        )
+        .with_columns(pl.col("by_builder").fill_null(False))
+        .select(
+            *decision,
+            "kind",
+            "builders",
+            "builder_kind",
+            pl.col("by_builder").alias("matched"),
+            "by_builder",
+        )
+    )
+    return pl.concat([structures, factories], how="vertical_relaxed")
 
 
 def standing_counts(
@@ -239,16 +351,25 @@ def check(directory: Path, states: Path, games: int, seed: int) -> str:
         )
     )
     rows = load_rows(directory, chosen)
+    with_builders = "builder_index" in rows.columns
     totals: Counter[str] = Counter()
-    structure_parts, factory_parts = [], []
+    structure_parts, factory_parts, builder_parts = [], [], []
     for match_id in chosen:
-        game_rows = rows.filter(pl.col("match_id") == match_id)
+        all_rows = rows.filter(pl.col("match_id") == match_id)
+        # one row per decision, and only build orders, for the checks of the first table
+        game_rows = (
+            all_rows.filter(pl.col("builder_index") == 0, pl.col("kind") != "job")
+            if with_builders
+            else all_rows
+        )
         replay = game_rows["replay"][0]
         stem = state_stem(states, replay)
         totals.update(check_game(game_rows, stem, roles))
         events = pl.read_parquet(state_tables.table_path(stem, "events"))
         structure_parts.append(ordered_and_created(game_rows, events))
         factory_parts.append(factory_orders_and_units(game_rows, events))
+        if with_builders:
+            builder_parts.append(builders_and_creators(all_rows, events))
 
     lines = [
         f"{len(chosen)} games of `{manifest['name']}` (built {manifest['built_at']}), "
@@ -306,7 +427,49 @@ def check(directory: Path, states: Path, games: int, seed: int) -> str:
         f"simulated 10 minutes ({100 * created / max(ordered, 1):.0f}%; quota and repeat "
         "orders can order more than gets built, and later orders add to what is created).",
     ]
+    if builder_parts:
+        lines += builder_lines(pl.concat(builder_parts, how="vertical_relaxed"))
     return "\n".join(lines)
+
+
+def builder_lines(found: pl.DataFrame) -> list[str]:
+    """The table of `builders_and_creators` over some games."""
+    lines = ["", "## The builders", ""]
+    rows = []
+    for (kind, builder_kind), part in sorted(
+        found.group_by("kind", "builder_kind"), key=lambda item: str(item[0])
+    ):
+        matched = part.filter("matched")
+        single = matched.filter(pl.col("builders") == 1)
+        rows.append(
+            [
+                kind,
+                builder_kind,
+                part.height,
+                f"{100 * matched.height / max(part.height, 1):.1f}%",
+                f"{100 * matched['by_builder'].mean():.1f}%" if matched.height else "-",
+                f"{100 * single['by_builder'].mean():.1f}%" if single.height else "-",
+            ]
+        )
+    lines += markdown.table(
+        [
+            "order",
+            "builder",
+            "orders",
+            "something built for it",
+            "built by one of its builders",
+            "the same, orders to one builder",
+        ],
+        rows,
+    )
+    lines += [
+        "",
+        "A structure counts as built for an order when the team created a unit of its type "
+        f"within {SPOT_DISTANCE} map units of the order's spot after it; the unit that "
+        "started it is in its `created` line. A factory order counts when its factory "
+        "created a unit of that type after it.",
+    ]
+    return lines
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
