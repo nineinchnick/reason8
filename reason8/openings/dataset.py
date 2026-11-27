@@ -877,17 +877,31 @@ def _quantiles(values: Sequence[int]) -> tuple[int, int, int]:
 
 
 PLAYER = ("match_id", "player_slot")
+# An order this many frames (0.2 s) or fewer after an order of the same unit is part of its
+# step: quick runs of clicks on one unit (ADR 0013).
+STEP_FRAMES = 6
 
 
 def step_starts(player: Sequence[str] = PLAYER) -> pl.Expr:
     """Whether an order starts a step of its opening, the unit a model predicts next (ADR
     0013); null for orders that add no units.
 
-    An order that repeats the one before it in the same frame (``repeat``: one drag or
-    click) is part of the same step. The rows must be sorted by `player` and order.
+    An order that adds the same unit as the order before it (the player's last order that
+    added units) at most `STEP_FRAMES` frames later is part of that order's step: one drag
+    of buildings, one run of quick clicks. Runs chain: each order is compared with the
+    order directly before it. The rows need ``seq_idx``, ``frame`` and ``unit`` and must be
+    sorted by `player` and order.
     """
     added = pl.col("seq_idx").is_not_null()
-    return pl.when(added).then(~pl.col("repeat").fill_null(False))
+    by_player = list(player)
+
+    def before(column: str) -> pl.Expr:
+        return pl.when(added).then(pl.col(column)).shift(1).forward_fill().over(by_player)
+
+    continues = (pl.col("unit") == before("unit")) & (
+        pl.col("frame") - before("frame") <= STEP_FRAMES
+    )
+    return pl.when(added).then(~continues.fill_null(False))
 
 
 def step_index(player: Sequence[str] = PLAYER) -> pl.Expr:

@@ -192,7 +192,6 @@ def load_candidates(
             "unit",
             "kind",
             "count",
-            "repeat",
             "x",
             "z",
         )

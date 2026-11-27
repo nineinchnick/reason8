@@ -18,22 +18,21 @@ UNIT_DEFS = {
 }
 
 
-def test_opening_steps_merges_drags_and_counts_factory_units():
+def test_opening_steps_merges_drags_and_clicks_and_counts_factory_units():
     rows = pl.DataFrame(
         {
-            "unit": ["armmex", "armmex", "armmex", "armlab", "armpw", "armwin", "armwin"],
-            "kind": ["structure"] * 4 + ["factory"] + ["structure"] * 2,
-            "count": [1, 1, 1, 1, 5, 1, 1],
-            "frame": [0, 0, 0, 90, 300, 400, 600],
-            "repeat": [False, True, True, False, False, False, False],
-            "x": [10.0, 20.0, 30.0, 40.0, 40.0, 50.0, 60.0],
-            "z": [1.0, 2.0, 3.0, 4.0, 4.0, 5.0, 6.0],
+            "unit": ["armmex", "armmex", "armmex", "armlab", "armpw", "armpw", "armwin", "armwin"],
+            "kind": ["structure"] * 4 + ["factory"] * 2 + ["structure"] * 2,
+            "count": [1, 1, 1, 1, 5, 1, 1, 1],
+            "frame": [0, 0, 0, 90, 300, 304, 400, 600],
+            "x": [10.0, 20.0, 30.0, 40.0, 40.0, 40.0, 50.0, 60.0],
+            "z": [1.0, 2.0, 3.0, 4.0, 4.0, 4.0, 5.0, 6.0],
         }
     )
     assert opening_steps(rows) == (
         Step("armmex", "structure", 3, ((10.0, 1.0), (20.0, 2.0), (30.0, 3.0))),
         Step("armlab", "structure", 1, ((40.0, 4.0),)),
-        Step("armpw", "factory", 5),
+        Step("armpw", "factory", 6),
         Step("armwin", "structure", 1, ((50.0, 5.0),)),
         Step("armwin", "structure", 1, ((60.0, 6.0),)),
     )

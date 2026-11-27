@@ -286,7 +286,7 @@ def report(
         summary = summarize(score(raw_model, raw_held_out), rounds=rounds)
         lines += [
             "",
-            f"`{REFERENCE_MODEL}` on raw orders (drags not merged), for comparison with the "
+            f"`{REFERENCE_MODEL}` on raw orders (no orders merged), for comparison with the "
             "measurements in docs/research/game-versions.md and docs/research/maps/: "
             + ", ".join(_summary_cells(summary))
             + f" over {summary.steps} orders.",
