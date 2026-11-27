@@ -8,6 +8,8 @@ from types import ModuleType
 
 from reason8.analysis import apm, map_meta, opening_shift, reactions
 from reason8.bot import build, check, export, game
+from reason8.context import check as context_check
+from reason8.context import table as context_table
 from reason8.data import download, sync
 from reason8.evaluation import games as evaluation_games
 from reason8.evaluation import openings as evaluation_openings
@@ -52,6 +54,14 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
     ("contact", contact, "measure first contact in re-simulated replays"),
     ("dataset", dataset, "build the opening dataset from parsed replays"),
     ("baseline", evaluate, "fit, score and save the next-build baselines"),
+    (
+        "context",
+        "the decision table: opening orders with the game state (docs/research/context.md)",
+        [
+            ("build", context_table, "join the orders of re-simulated games with their state"),
+            ("check", context_check, "check the joined state against the state tables"),
+        ],
+    ),
     (
         "bot",
         "the Reason8 AI, a BARb variant",
