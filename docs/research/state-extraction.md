@@ -20,8 +20,15 @@ State snapshots from a spectator widget?
   progress every 5 s; an event for every unit created / finished / destroyed /
   given / gone idle and for every first hit between two enemy units; every
   reclaimable feature as it appears and goes, the metal and energy each team
-  reclaimed from it, and what each builder works on, sampled every 5 frames
-  (section 4). Converted to Parquet tables after the run
+  reclaimed from it, what each builder works on, sampled every 5 frames, each
+  time an enemy unit enters or leaves an ally team's sight or radar, and the
+  unit types as the game loaded them (section 4). Converted to Parquet tables
+  after the run
+
+What each team saw?
+: Yes, exactly, from the engine's call-ins: on five 8v8 openings every enter
+  has its leave, death or the end, and 81% of the units an enemy hit first
+  were in its sight, 15% on its radar only
 
 Reclaim right?
 : Yes, against the game's own count where the game version keeps one: within
@@ -40,7 +47,7 @@ Is the re-run the same game?
 Disk per game (snapshot every 5 s, gzip)
 : 1v1 (13 min): 86 KB. 8v8 (26 min): 6.0 MB (format 1). First 10 minutes of an
   8v8 in format 5: 39 KB of gzipped JSON lines and 28 KB of Parquet tables per
-  game minute; format 6 adds 42% and 26% to them
+  game minute; format 6 adds 42% and 26% to them, format 7 another 28% and 15%
 
 Replays per hour per core
 : 1v1: 80 to 100. 8v8: 5 to 8
@@ -105,7 +112,8 @@ arguments; nothing is committed from `data/`.
 `tables`
 : Converts state files to Parquet tables (`tables.py`); with `--check`
   compares the units rebuilt from the events with every snapshot
-  (`standing.py`)
+  (`standing.py`) and checks features, reclaim and work (`features.py`) and
+  sight and radar (`visibility.py`)
 
 `widgets/reason8_state_export.lua`
 : The widget that writes the state file
@@ -303,14 +311,17 @@ watches as a full-view spectator, and writes JSON lines to
 `LuaUI/Config/reason8_state.jsonl` in the run's write dir. That folder is one
 of the two that BAR allows a user widget to write to.
 
-Format 6 (the `v` of the header) writes these lines:
+Format 7 (the `v` of the header) writes these lines:
 
 `header`
 : *When:* once
 : *Content:* game, map, engine, map size, the map's wind range and tidal
   strength, teams (number, ally team, AI or not, side), unit type id to name,
   the types that cannot move (`static`), the types whose work is sampled
-  (`builders`), how often resource, snapshot and work lines come
+  (`builders`), how often resource, snapshot and work lines come, whether
+  sight and radar are written, and every unit type as the game loaded it
+  (`loaded`: build power, the types it can build, and whether it can move,
+  assist, repair, reclaim and resurrect)
 
 `r`
 : *When:* every second (30 frames)
@@ -380,21 +391,27 @@ Format 6 (the `v` of the header) writes these lines:
 : *Content:* frame, builder, team, task (build, repair, reclaim, resurrect,
   capture, restore, none), the unit or feature worked on
 
+`los`, `radar`
+: *When:* an enemy unit enters or leaves an ally team's sight or radar
+: *Content:* frame, unit, the ally team, in or out, position
+
 `end`
 : *When:* game over or last frame
 : *Content:* frame, reason, winning ally teams, how the attackers were told
-  (below), when in the frame resources and snapshots were taken, and each
-  team's reclaim as the game counts it (only newer game versions count it:
-  seen in `test-31836` and `test-32018`, not in `test-30903` or older)
+  (below), when in the frame resources and snapshots were taken, each team's
+  reclaim as the game counts it (only newer game versions count it: seen in
+  `test-31836` and `test-32018`, not in `test-30903` or older), and how many
+  sight and radar call-ins the widget could not put down to one ally team
 
 Resource and snapshot lines are written in `GameFramePost`, after everything
 the frame did, so a line of frame F shows the world after the unit lines up to
 frame F (`"sampled":"frame_end"`). An engine without that call-in gets them at
 the start of the frame (`"frame_start"`); every engine we use has it.
 
-Format 5 had the same lines without the features, reclaim and work and the new
-fields of `created`, `destroyed`, the header and `end`. Up to format 4 the
-snapshot held the wind and the resources too, listed every unit, and was
+Format 6 had the same lines without sight and radar and the new fields of the
+header and `end`. Format 5 had them without the features, reclaim and work and
+the new fields of `created`, `destroyed`, the header and `end`. Up to format 4
+the snapshot held the wind and the resources too, listed every unit, and was
 written in `GameFrame`, at the start of its frame (formats 2 to 4 add the
 `hit` and `damage` lines and the wind, the exact attacker, and `idle`).
 `read_records()` in `state.py` reads every format the same way: the snapshots
@@ -479,7 +496,8 @@ to it, `<name>.<table>.parquet`, in the date partition of the replay:
 
 `game`
 : one row: format, versions, map, wind range, intervals, teams, unit types
-  (with `static`), last frame, how the game ended
+  (with `static`, and from format 7 as loaded: build power, build options,
+  what they can do), last frame, how the game ended
 
 `resources`
 : per team and resource line: metal and energy (stored, storage, income,
@@ -511,6 +529,10 @@ to it, `<name>.<table>.parquet`, in the date partition of the replay:
 `work` (format 6)
 : builders' work changes. Sorted by builder and frame
 
+`visibility` (format 7)
+: an enemy unit entering or leaving an ally team's sight or radar, with
+  position. Sorted by unit and frame
+
 Unit types are names, dictionary-encoded, so tables of different game versions
 can be read together; teams are 16-bit, frames, ids and positions 32-bit
 integers, money and damage 32-bit floats; zstd level 19. Sorting the units by
@@ -520,9 +542,10 @@ tables 13% smaller; writing a game's tables takes 0.07 s. `tables.scan()`
 reads one table of many games as a lazy Polars frame, by date range;
 `read_records()` reads a game's tables as if they were its JSON lines (with
 the units of a snapshot sorted by id). Games written before format 6 have no
-`features`, `reclaim` and `work` files and fewer `events` columns;
-`tables.scan()` and `tables.read_game()` read them with the full schema, as
-empty tables and null columns.
+`features`, `reclaim` and `work` files and fewer `events` columns, those
+before format 7 no `visibility` file and fewer `game` columns and unit type
+fields; `tables.scan()` and `tables.read_game()` read them with the full
+schema, as empty tables and null columns.
 
 Size of the first 10 minutes of the same 8v8 replay (Rosetta, 16 players,
 engine 2026.09.03), per game minute:
@@ -753,46 +776,161 @@ instead of per game would save about a tenth.
   no. They need the simulation. The replay's commands say what builders were
   ordered to reclaim, repair or resurrect, not what they did or got.
 
-#### Line of sight per ally team: what it would cost
+### Sight, radar and loaded unit types (format 7)
 
-Not in the export; measured with a separate probe widget on two of the games
-(first 10 minutes, 2 ally teams):
+The bot plays on what a player could see, so the state has to say which enemy
+units each ally team saw, and when. Format 7 records it as events, and also
+writes the unit types as the game loaded them, which the builders and the mask
+of the decision table need
+([ADR 0010](../decisions/0010-re-simulate-replays-headlessly-for-game-state.md)).
 
-Enter and leave line of sight, a line per event
-: *Lines:* 4,000 to 4,300
-: *Probe time:* 0.03 s
-: *Size:* 20 KB gzipped, 13 to 14 KB as a table
+#### How the widget learns what each team sees
 
-Enter and leave radar, a line per event
-: *Lines:* 3,400 to 3,600
-: *Probe time:* 0.02 s
-: *Size:* 18 KB gzipped, 12 to 13 KB as a table
+From the engine's source (Recoil 2025.06.19 and 2026.09.03, the same in both):
 
-Per unit of each snapshot (every 5 s), a mask of the ally teams that see it and one of those that have it on radar
-: *Rows:* 24,000
-: *Probe time:* 0.09 s
-: *Size:* 16 to 19 KB gzipped, 5.5 KB as two columns of the `units` table
+- Every frame, the unit handler recomputes each unit's state for each ally
+  team in turn (`UpdateUnitLosStates`). When the sight or radar bit changes it
+  calls `UnitEnteredLos`, `UnitLeftLos`, `UnitEnteredRadar` or `UnitLeftRadar`
+  with the unit and that ally team. It sets the new bit before an "entered"
+  call and clears it before a "left" call.
+- The event handler passes a call to every Lua handle that can read that ally
+  team. A spectator with full view can read them all, so the widget's handle
+  gets the call for every ally team, with the ally team as its third argument.
+- BAR's widget handler (`luaui/barwidgets.lua`) passes a widget only the unit
+  and its team.
 
-The same for every unit, buildings too
-: *Rows:* 63,000 to 85,000
-: *Probe time:* 0.12 to 0.17 s
-: *Size:* 23 to 28 KB gzipped, 7.5 to 8 KB as two columns
+So the widget reads the unit's raw state for every ally team
+(`Spring.GetUnitLosState(unit, allyTeam, true)`) and writes the ally team
+whose bit differs from what it wrote last. Ally teams the engine has not come
+to yet in that frame have not changed, and those before it were written at
+their own call, so one ally team differs at each call. A unit in sight is on
+radar too, as the engine counts it (the radar bit is set with the sight bit).
+A unit's own ally team is left out. The engine sends nothing when a unit dies;
+the widget skips dying units, whose `destroyed` line ends their being seen.
 
-All are cheap next to the 346 KB of tables per game. They differ in what they
-tell:
+When a unit changes team, the engine works its state out again for every enemy
+ally team, and announces it again to those that already saw it, before the
+`given` call-in. The widget writes nothing then and does not count it as a
+call without a change (it knows each unit's team from `created` and `given`).
+A unit given to the ally team that saw it is that team's own from then on.
 
-- **Events** say exactly when a unit was first seen and lost, which is what
-  scouting and contact need. BAR's widget handler passes a widget only the
-  unit and its team, not the ally team that saw it (the engine gives a
-  full-view spectator both), so the widget would read the unit's state for
-  every ally team (`Spring.GetUnitLosState`) on each event and write the
-  masks; or hook the handler, which newer game versions close to user widgets.
-  Whether the call-ins come for every ally team, or only the spectator's, was
-  not checked.
-- **Masks per snapshot** fit the `units` table as two small columns, but at 5
-  s they miss a scout that passes in between and buildings seen only once; the
-  buildings need the every-unit variant.
-- **Radar** is a second stream of the same size either way.
+#### Checks on real games
+
+The same five 8v8 games, first 10 minutes, played again with the format 7
+widget. Each has 16 players in two ally teams.
+`reason8 headless tables --check` (`visibility.py`):
+
+| Game                          | Sight in / out | Radar in / out | Ended by leave / death / end | Hit first: in sight / radar only / neither | Destroyed: in sight / radar only / neither |
+| ----------------------------- | -------------- | -------------- | ---------------------------- | ------------------------------------------ | ------------------------------------------ |
+| Supreme Isthmus, 2026.07.04   | 2,075 / 1,735  | 1,769 / 1,327  | 3,062 / 641 / 141            | 358 / 117 / 32                             | 232 / 31 / 11                              |
+| All That Glitters, 2026.07.04 | 2,130 / 1,847  | 1,861 / 1,492  | 3,339 / 496 / 156            | 379 / 62 / 36                              | 216 / 11 / 5                               |
+| Supreme Isthmus, 2025.06.24   | 2,157 / 1,839  | 1,920 / 1,521  | 3,360 / 618 / 99             | 320 / 76 / 7                               | 229 / 15 / 1                               |
+| Rosetta, 2026.06.12           | 4,165 / 3,592  | 3,181 / 2,491  | 6,083 / 1,020 / 243          | 677 / 58 / 13                              | 409 / 15 / 4                               |
+| Supreme Isthmus, 2026.09.03   | 1,819 / 1,610  | 1,234 / 875    | 2,485 / 374 / 194            | 249 / 56 / 8                               | 143 / 15 / 3                               |
+
+- **Pairs.** Every enter is followed by a leave, the unit's death, or the end
+  of the run; no leave comes without an enter, and no unit is seen twice
+  without leaving in between. No unit was given to an ally team that saw it.
+- **Sight within radar.** Every one of the 10,346 entries into sight came
+  while the unit was on radar.
+- **The widget's own count.** No call matched several ally teams. Four games
+  had no call that matched none; the first had two, both for one unit given
+  twice in one frame, the second time to the team that already owned it, which
+  the engine announced again. Nothing was missed.
+- **Independent of the call-ins:** of the 2,448 units that an enemy team hit
+  for the first time, 81% were in that team's sight and 15% on its radar only;
+  of the 1,340 units an enemy destroyed (not counting units reclaimed by their
+  own side), 92% and 6%. The rest, 3.9% and 1.8%, were hit out of sight:
+  artillery and splash, and shots at other targets.
+- **Same output.** The other lines are byte-identical to the format 6 widget's
+  on all five games.
+- **More than two ally teams.** With two, only one ally team can be the one
+  that changed. A game of four BARb AIs, each its own ally team, on All That
+  Glitters (engine 2026.09.03, 12 minutes): 9,000 lines spread over all four
+  ally teams, no call matched none or several, every enter paired, and in 8
+  frames a unit entered the sight of two ally teams at once, written as one
+  line each.
+
+#### Cost against format 6
+
+The same five games, each played with the format 6 and the format 7 widget,
+one engine at a time while 8 engines of another batch ran on the machine:
+
+| Per game (average of 5) | Format 6 | Format 7 | Change  |
+| ----------------------- | -------- | -------- | ------- |
+| Simulation              | 150.7 s  | 148.1 s  | noise   |
+| Widget's own time       | 0.93 s   | 1.00 s   | +0.07 s |
+| JSON lines, raw         | 2.69 MB  | 3.30 MB  | +23%    |
+| JSON lines, gzip        | 504 KB   | 643 KB   | +28%    |
+| Tables                  | 351 KB   | 403 KB   | +15%    |
+
+Of the 52 KB of tables added, the `visibility` table is 37 to 77 KB per game
+(5,500 to 13,400 rows) and the unit types as loaded add 5 KB to the `game`
+table. The sight and radar lines are 49 to 112 KB gzipped. The unit types make
+the header 56 KB instead of 14 KB raw, 10 KB gzipped.
+
+The position of each row is about half of the `visibility` table: without it
+the table is 17 to 39 KB, close to the estimate of the probe below. It is kept
+because a unit that can move is otherwise only placed by the snapshots, every
+5 s, and where a scout was seen is what scouting is about. Sorting the table
+by unit and frame, as `units` and `work` are, makes it 18% smaller than in the
+order of the game.
+
+Before format 7, a probe widget measured three ways of recording sight on two
+of the games: events as above (13 to 14 KB of table for sight, 12 to 13 KB for
+radar, without positions), a mask of the ally teams that see each unit of each
+5 s snapshot (5.5 KB, but a scout that passes between two snapshots is lost),
+and the same mask for every unit, buildings too (7.5 to 8 KB). Events were
+chosen because scouting contacts are often shorter than a snapshot interval.
+
+#### Unit types as the game loaded them
+
+Compared with the unit files of the same game version as `reason8` reads them
+(`reason8.game.unitdefs`, as the decision table does):
+
+| Game version | Types with build power, loaded | Only loaded | Only in the files | Build lists that differ |
+| ------------ | ------------------------------ | ----------- | ----------------- | ----------------------- |
+| `test-31836` | 191                            | 67          | 94                | 18                      |
+| `test-30903` | 205                            | 67          | 94                | 7                       |
+| `test-30318` | 205                            | 67          | 86                | 20                      |
+| `test-30664` | 275                            | 87          | 43                | 5                       |
+| `test-32018` | 191                            | 67          | 94                | 6                       |
+
+- **Only loaded:** types from files that build their units with code, which
+  the reader skips: commander levels, assist drones, respawners.
+- **Only in the files:** types the game did not load at all in that lobby:
+  Legion's units in the three games whose lobby left Legion off, and types
+  behind other options (experimental factories, the commander and raptor
+  bosses, the raptors).
+- **Build lists:** the higher commander levels lose two units, naval builders
+  gain turrets in two game versions and a Cortex shipyard loses a submarine in
+  two others; with Legion off, the Legion types that are still loaded keep one
+  option.
+- **Build power** matched for every type in both. The job flags differed for
+  two to three types (loot pods and a Legion extractor that builds); factories
+  can move and repair as the engine counts it, which the decision table's rule
+  that factories do no jobs already overrides.
+
+The decision table still reads the unit files: the games of the context sample
+are of formats 5 and 6.
+
+#### Builder and factory queues: what they would cost
+
+Not in the export. The replay has every order a player gave, but not what is
+left of a queue when its unit finished, failed or skipped an order. A probe
+copy of the format 7 widget wrote a builder's or factory's whole queue at the
+end of each frame in which it got an order or finished one (`UnitCommand`,
+`UnitCmdDone`, `UnitIdle`, `UnitFinished`), when it changed; two of the games:
+
+- 7,600 to 9,100 lines from 238 units, 2.1 to 2.4 MB raw and 165 to 171 KB
+  gzipped: two thirds more JSON and a quarter more gzipped. Factories with
+  long repeat queues make most of it (up to 387 orders in one queue).
+- As a table of one row per order of each queue written, 101,000 rows and 128
+  KB: a third more tables.
+- The widget's own time doubles, from 1.0 s to 1.95 s per game; still about 1%
+  of the simulation.
+- Written as changes (orders added and removed against the previous queue of
+  the unit), the same queues are about 28,000 rows, a quarter of the above.
 
 ## 5. Per engine: RAM, CPU, throughput
 
@@ -980,13 +1118,11 @@ What the pipeline must do, all of it already in `reason8/headless/`:
 
 ## Open items
 
-- Record what each player could see (line of sight per ally team); needed
-  before the state is used for training. Three ways are costed in section 4.
 - Reclaim between allies on the same feature is split by reclaim speed at the
   samples. Each builder's own income (`Spring.GetUnitResources`, which
   includes what it reclaims, summed over the engine's last 30 frames) would
   split it exactly, at the price of a line per reclaiming builder and second.
-- Nine table files per game: if tens of thousands get slow to list or sync,
+- Ten table files per game: if tens of thousands get slow to list or sync,
   merge the tables of a day into one file per table.
 - The cloud cost per 1,000 replays. `reason8 headless batch` runs a list of
   replays with N engines at once and skips what is done, on one machine.
