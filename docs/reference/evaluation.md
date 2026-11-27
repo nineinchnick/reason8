@@ -9,7 +9,8 @@ stock BARb, and what the games cost. Code: `reason8/evaluation/`.
 ## Running it
 
 ```sh
-# once: the AI with the current openings (reason8 bot export), in a copy of the engine
+# once: the AI with the current openings (reason8 bot export), in a copy of the
+# engine, on our BARb library (built the first time, 5 to 7 minutes)
 uv run reason8 bot build --data-dir data/bar \
     --game "Beyond All Reason test-32018-ad135b9" \
     --engine-copy data/bar/engine-variants/reason8
@@ -394,6 +395,63 @@ under the same limits (`reason8 bot build --limits-only`,
   bot's builds from human ones 89–92% of the time with delays, against 92%
   without, the intervals overlapping: what is built, and in what order, gives
   the bot away, not when.
+
+## Our BARb library
+
+`reason8 bot build` installs our build of BARb's library, whose governor holds
+the commands over the action budget of ADR 0008 and sends them later
+([`in-game.md`](in-game.md#our-barb-library)). To see whether that costs
+anything, the same AI was built twice, on our library (`Reason8`) and on the
+engine's (`--library stock --short-name Reason8Stock`), and the two played
+each other: 10 seeds, 20 games, all played to the end, one game at a time.
+
+| measure at 4:00 | Reason8 | Reason8Stock | share                 | seeds for 10% |
+| --------------- | ------- | ------------ | --------------------- | ------------- |
+| metal income    | 9.3     | 9.6          | 96.7% (92.7%–101.1%)  | 6             |
+| energy income   | 154.3   | 153.9        | 100.2% (93.9%–107.4%) | 13            |
+| built metal     | 4137.5  | 4136.9       | 100.0% (97.2%–103.2%) | 3             |
+| built energy    | 35991.9 | 36197.8      | 99.4% (96.4%–102.8%)  | 3             |
+| units           | 16.1    | 16.6         | 97.2% (91.4%–103.9%)  | 11            |
+
+| what was built, classified against human builds | classified right    |
+| ----------------------------------------------- | ------------------- |
+| Reason8, our library                            | 80.3% (74.8%–85.4%) |
+| Reason8Stock, the engine's library              | 81.2% (76.2%–85.5%) |
+
+- **No regression.** Under the budget the bot builds as much as without it:
+  every interval covers 100%, and built metal, the measure the A/A test finds
+  most sensitive, is within 3% either way. Its openings are in order as often
+  (110 and 109 of 160 teams), and a classifier tells its builds from human
+  ones as well as the other's.
+- **It now keeps the budget.** Counted in the replays, Reason8Stock's teams
+  took a median of 101 actions a minute and up to 565 in a minute; Reason8's
+  took 37 and at most 89 by its governor's log, which also shows no command
+  lost
+  ([`command-governor.md`](../research/command-governor.md#in-team-games)).
+- The classifier scores are lower than the 90% of the 30-seed runs above,
+  probably because the classifier has 160 bot openings to learn from instead
+  of about 470; the two rows come from the same games and compare like with
+  like.
+- Contact before the end: 78% of Reason8's teams and 75% of Reason8Stock's, at
+  a median of 4:11 and 4:35.
+
+ADR 0003's second measure, against `BARbLimited` with both on our library (so
+both keep the budget), 10 seeds, 20 games, all played to the end:
+
+| measure at 4:00 | Reason8 | BARbLimited | share                  |
+| --------------- | ------- | ----------- | ---------------------- |
+| metal income    | 9.5     | 10.4        | 91.6% (88.0%–95.5%)    |
+| energy income   | 151.7   | 125.6       | 120.7% (113.3%–128.0%) |
+| built metal     | 4143.9  | 4308.4      | 96.2% (94.8%–97.6%)    |
+| built energy    | 35921.1 | 38664.6     | 92.9% (91.2%–94.6%)    |
+| units           | 16.5    | 17.5        | 94.5% (90.4%–98.4%)    |
+
+- **As before, narrowly short.** Built metal at 4:00 is 96.2% of
+  BARbLimited's, against 97.2% (96.2%–98.2%) in the 30 seeds on the engine's
+  library ([Under human-like limits](#under-human-like-limits)); the intervals
+  overlap. The classifier on builds is right 82.5% (77.2%–86.8%) of the time.
+- The governors of all 320 teams, both AIs', kept the budget and lost no
+  command.
 
 ## What the games cost
 
