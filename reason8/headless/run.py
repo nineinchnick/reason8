@@ -14,6 +14,11 @@ speed, stops the run at game over or at the replay's last frame, and with
 --snapshots writes the game state. For a start script, --speed is written
 into the script as the MinSpeed/MaxSpeed mod options.
 
+A Windows engine (spring-headless.exe, in a folder on the Windows drive) runs
+from WSL the same way: the paths it is given are turned into Windows paths,
+and the run dir should be on the Windows drive too. Its CPU time, peak memory
+and threads are not measured (they would be WSL's, not the engine's).
+
 Prints one JSON object: frames simulated, wall time, speed, peak memory, CPU
 time and desync warnings. A replay that desyncs was not re-simulated
 correctly (wrong engine or game version), so the exit code is then non-zero.
@@ -47,17 +52,31 @@ BASE_SETTINGS = {
 }
 
 
+#: The headless engine's file name: on Linux, and on Windows.
+HEADLESS_NAMES = ("spring-headless", "spring-headless.exe")
+
+
+def headless_executable(engine_dir: Path) -> Path | None:
+    """The engine's headless executable, Linux or Windows, or None."""
+    for name in HEADLESS_NAMES:
+        if (engine_dir / name).is_file():
+            return engine_dir / name
+    return None
+
+
 def find_engine(data_dir: Path, version: str | None) -> Path:
     engines = data_dir / "engine"
     if version:
         tag = version.split()[0]
         for name in (f"recoil_{tag}", tag):
-            if (engines / name / "spring-headless").is_file():
+            if headless_executable(engines / name):
                 return engines / name
         raise SystemExit(
             f"engine {tag} is not installed under {engines} (see `reason8 headless setup`)"
         )
-    found = sorted(executable.parent for executable in engines.glob("*/spring-headless"))
+    found = sorted(
+        {executable.parent for name in HEADLESS_NAMES for executable in engines.glob(f"*/{name}")}
+    )
     if not found:
         raise SystemExit(f"no engine under {engines} (see `reason8 headless setup`)")
     return found[-1]
@@ -187,14 +206,21 @@ def play(args: argparse.Namespace) -> dict:
     if cache.is_dir() and not (run_dir / "cache").exists():
         shutil.copytree(cache, run_dir / "cache")
 
+    executable = headless_executable(engine_dir)
+    if executable is None:
+        raise SystemExit(f"{engine_dir} has no {' or '.join(HEADLESS_NAMES)}")
+    windows = executable.suffix == ".exe"
+    as_argument = windows_path if windows else str
     command = [
-        str(engine_dir / "spring-headless"),
+        str(executable),
         "--isolation",
         "--write-dir",
-        str(run_dir),
-        str(launch),
+        as_argument(run_dir),
+        as_argument(launch),
     ]
     environment = {**os.environ, "SPRING_DATADIR": str(data_dir)}
+    if windows:
+        environment["WSLENV"] = wslenv_with(environment.get("WSLENV", ""), "SPRING_DATADIR/p")
     start_time = time.monotonic()
     timed_out = False
     with (run_dir / "stdout.txt").open("w") as stdout_file:
@@ -224,6 +250,8 @@ def play(args: argparse.Namespace) -> dict:
                 pass
             if time.monotonic() > deadline:
                 timed_out = True
+                if windows:
+                    stop_windows_engine(run_dir)
                 os.killpg(process.pid, signal.SIGKILL)
                 deadline = float("inf")
             time.sleep(0.5)
@@ -234,7 +262,10 @@ def play(args: argparse.Namespace) -> dict:
     load_seconds, sim_seconds, frames = sim_window(infolog)
     frames = max(frames, 0)
     sim_seconds = max(sim_seconds, 1e-9)
-    cpu_seconds = (usage.ru_utime + usage.ru_stime) if usage else 0.0
+    if windows:
+        usage = None  # WSL's process that relays to the engine, not the engine
+        peak_threads = None
+    cpu_seconds = (usage.ru_utime + usage.ru_stime) if usage else None
     desync_count, first_desync = desyncs(infolog)
     result = {
         "target": target.name,
@@ -250,8 +281,8 @@ def play(args: argparse.Namespace) -> dict:
         # game minutes per wall minute: simulation only, and including load + shutdown
         "speed_x": round(frames / 30 / sim_seconds, 1),
         "speed_x_with_load": round(frames / 30 / wall_seconds, 1),
-        "cpu_seconds": round(cpu_seconds, 1),
-        "cores_used": round(cpu_seconds / wall_seconds, 2),
+        "cpu_seconds": round(cpu_seconds, 1) if cpu_seconds is not None else None,
+        "cores_used": round(cpu_seconds / wall_seconds, 2) if cpu_seconds is not None else None,
         "peak_rss_mb": round(usage.ru_maxrss / 1024) if usage else None,
         "peak_threads": peak_threads,
         "desyncs": desync_count,
@@ -278,6 +309,34 @@ def play(args: argparse.Namespace) -> dict:
         shutil.rmtree(run_dir, ignore_errors=True)
         result["run_dir"] = None
     return result
+
+
+def windows_path(path: Path) -> str:
+    """A path as a Windows program started from WSL needs it (``C:\\...``)."""
+    return subprocess.run(
+        ["wslpath", "-w", str(path)], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def wslenv_with(wslenv: str, entry: str) -> str:
+    """WSLENV with `entry` (``NAME/flags``), which passes NAME on to Windows programs."""
+    name = entry.split("/")[0]
+    kept = [item for item in wslenv.split(":") if item and item.split("/")[0] != name]
+    return ":".join([*kept, entry])
+
+
+def stop_windows_engine(run_dir: Path) -> None:
+    """Stop the Windows engine of this run: the one whose command line has its write dir.
+
+    Killing WSL's relay process does not stop the Windows program it started.
+    """
+    name = windows_path(run_dir).replace("'", "''")
+    script = (
+        "Get-CimInstance Win32_Process -Filter \"Name='spring-headless.exe'\" | "
+        f"Where-Object {{ $_.CommandLine -like '*{name}*' }} | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+    )
+    subprocess.run(["powershell.exe", "-NoProfile", "-Command", script], check=False)
 
 
 def widget_config(widgets: list[Path]) -> str:
