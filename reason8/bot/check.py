@@ -23,7 +23,17 @@ Built (--state): the state file comes from playing the replay again with
 
 Log (--infolog): whether the AI loaded, which version and scripts, and script
   errors. An AI that fails to load or compile does not stop the game: its team
-  stands still.
+  stands still. With our BARb library (`reason8 bot build`), also the command
+  governor of each team (`reason8.bot.budget`): that the library was built for
+  the engine it ran in, that every command the AI gave was sent, replaced by a
+  newer order to the same unit, or still held at the end (none dropped), and
+  that the actions it sent kept every window of the budget of ADR 0008.
+
+Budget in the replay (always): each team's commands in the replay, counted as
+  actions the way a player's are, and the most in each window of the budget.
+  A cross-check of the governor's own count, not part of the verdict: a
+  headless game's replay records a command 12 to 30 frames after the AI
+  gave it.
 
 Prints one JSON object. The exit code is non-zero when a team did not play its
 opening, no team was played by the AI, or the log shows the AI did not load
@@ -38,6 +48,8 @@ import re
 from collections.abc import Mapping
 from pathlib import Path
 
+from reason8.analysis.apm import ActionCounter
+from reason8.bot import budget, live_state
 from reason8.headless.state import read_records
 from reason8.paths import REPO_ROOT
 from reason8.replays.parse import default_parser, parse_replay
@@ -186,6 +198,21 @@ def choose_opening(
     return next((o for o in openings if o["side"] == side and not o.get("map")), None)
 
 
+def replay_budget(replay: Replay, team: int, band: str = budget.DEFAULT_BAND) -> dict:
+    """One team's commands in the replay, counted as actions, against the band's windows."""
+    counter = ActionCounter()
+    commands = 0
+    for event in replay.events:
+        if event.get("type") == "cmd" and event.get("team") == team:
+            commands += 1
+            counter.command(event["frame"], event.get("units") or ())
+    return {
+        "commands": commands,
+        "actions": len(counter.frames),
+        "windows": budget.windows_kept(counter.frames, band),
+    }
+
+
 def check_replay(
     replay: Replay,
     openings: dict,
@@ -206,6 +233,7 @@ def check_replay(
             continue
         side = (ai.get("faction") or "").lower()
         result = {"team": ai["teamId"], "side": side, "version_in_replay": ai.get("version")}
+        result["replay_budget"] = replay_budget(replay, ai["teamId"])
         team = teams.get(ai["teamId"])
         opening = choose_opening(
             openings.get("openings", []),
@@ -280,6 +308,8 @@ def check_infolog(infolog: Path, ai_short_name: str) -> dict:
     errors: list[str] = []
     opening_lines = 0
     teams: dict[int, dict] = {}
+    governor_messages: list[str] = []
+    state_lines: dict[int, list[dict]] = {}
     with infolog.open(encoding="utf-8", errors="replace") as file:
         for line in file:
             if any(needle in line for needle in ENGINE_ERRORS):
@@ -291,18 +321,29 @@ def check_infolog(infolog: Path, ai_short_name: str) -> dict:
             message = match.group(2).rstrip()
             if message.startswith("Load script: "):
                 scripts.append(message.removeprefix("Load script: "))
+            if message.startswith(("Reason8 governor:", "Reason8 library:")):
+                governor_messages.append(message)
             if message.startswith("Reason8 opening:"):
+                team_line = OPENING_LINE.match(message.removeprefix("Reason8 opening: "))
+                if team_line and (state := live_state.parse_line(team_line.group(2))):
+                    state_lines.setdefault(int(team_line.group(1)), []).append(state)
+                    continue
                 opening_lines += 1
                 count_opening_line(teams, message.removeprefix("Reason8 opening: "))
             if any(needle in message for needle in SCRIPT_ERRORS):
                 errors.append(message[:300])
     if not scripts:
         errors.append(f"the log has no script loaded by {ai_short_name}")
+    governor = budget.governor_log(governor_messages)
+    for team, checked in governor.items():
+        errors += [f"governor of team {team}: {problem}" for problem in checked["problems"]]
     return {
         "versions_loaded": sorted(versions),
         "scripts_loaded": sorted(set(scripts)),
         "opening_log_lines": opening_lines,
         "opening_by_team": dict(sorted(teams.items())),
+        "governor_by_team": governor,
+        "live_state_by_team": dict(sorted(state_lines.items())),
         "errors": errors,
     }
 
@@ -332,6 +373,14 @@ def run(args: argparse.Namespace) -> int:
     result: dict = {"teams": teams}
     ok = bool(teams) and all(team["matches"] for team in teams)
     if log is not None:
+        state_lines = log.pop("live_state_by_team")
+        if args.state:
+            log["live_state_by_team"] = {
+                team: live_state.compare(lines, read_records(args.state, snapshots=True), team)
+                for team, lines in state_lines.items()
+            }
+        else:
+            log["live_state_lines"] = {team: len(lines) for team, lines in state_lines.items()}
         result["log"] = log
         ok = ok and not log["errors"]
     result["ok"] = ok
