@@ -65,6 +65,7 @@ from reason8.models.ngram import START, UNKNOWN
 from reason8.openings.dataset import SPLITS, step_index
 
 HISTORY = 3
+GAMES_PER_CHUNK = 300
 HISTORY_GROUP = "history"
 REFERENCE_GROUPS = ("builder",)
 #: The inputs of the first model (ADR 0019) besides the order history and the builder.
@@ -111,16 +112,47 @@ def history_features(roles: Sequence[str], history: int = HISTORY) -> list[str]:
     ]
 
 
-def load_builder_steps(directory: Path) -> BuilderSteps:
-    """The steps of every split of a ``context_v2`` table, in the ask view."""
+def load_builder_steps(
+    directory: Path,
+    groups: Sequence[str] | None = None,
+    splits: Sequence[str] | None = None,
+    games_per_chunk: int = GAMES_PER_CHUNK,
+) -> BuilderSteps:
+    """The steps of a ``context_v2`` table, one row per builder an order went to, with the
+    columns of the context `groups` (default: all of them) and the rows of the `splits`
+    (default: all); the order history is always there. The games are read a chunk at a
+    time: joining all their decisions with the context columns at once took 13 GB, for 3 GB
+    of steps."""
     manifest = json.loads((directory / "manifest.json").read_text())
     roles = manifest["unit_roles"]["roles"]
-    groups = {name: list(columns) for name, columns in manifest["groups"].items()}
-    scans = [
-        pl.scan_parquet(directory / f"{split}.parquet").with_columns(pl.lit(split).alias("split"))
-        for split, _ in SPLITS
-    ]
-    rows = pl.concat(scans, how="diagonal_relaxed")
+    loaded = {
+        name: list(columns)
+        for name, columns in manifest["groups"].items()
+        if groups is None or name in groups
+    }
+    loaded = {HISTORY_GROUP: history_features(roles), **loaded}
+    frames = []
+    for split, _ in SPLITS:
+        if splits is not None and split not in splits:
+            continue
+        scan = pl.scan_parquet(directory / f"{split}.parquet")
+        games = scan.select(pl.col("match_id").unique().sort()).collect()["match_id"].to_list()
+        for start in range(0, len(games), games_per_chunk):
+            chunk = scan.filter(pl.col("match_id").is_in(games[start : start + games_per_chunk]))
+            frames.append(
+                _steps_of(chunk.with_columns(pl.lit(split).alias("split")), roles, loaded)
+            )
+    frame = pl.concat(frames, how="diagonal_relaxed").sort(*PLAYER, "step_idx", "builder_index")
+    del frames
+    categorical = tuple(dict.fromkeys([*HISTORY_CATEGORICAL, *manifest.get("categorical", [])]))
+    types = pl.read_parquet(directory / "builder_types.parquet")
+    return BuilderSteps(frame, loaded, categorical, manifest, builders.answers_of(types))
+
+
+def _steps_of(
+    rows: pl.LazyFrame, roles: Sequence[str], loaded: Mapping[str, Sequence[str]]
+) -> pl.DataFrame:
+    """The steps of some games' rows, with their order history and the `loaded` columns."""
     decides = pl.col("answer").is_not_null()
     decisions = (
         rows.filter(pl.col("builder_index") == 0)
@@ -153,8 +185,6 @@ def load_builder_steps(directory: Path) -> BuilderSteps:
             *[f"ordered_{name}" for name, _ in counted],
         )
     )
-    groups = {HISTORY_GROUP: history_features(roles), **groups}
-    categorical = tuple(dict.fromkeys([*HISTORY_CATEGORICAL, *manifest.get("categorical", [])]))
     # only what the models and the report read, numbers as 32-bit, to keep the steps of
     # every split in memory at once
     wanted = [
@@ -170,12 +200,14 @@ def load_builder_steps(directory: Path) -> BuilderSteps:
         "role",
         "game_version",
         "builder_unit",
+        "builder_kind",
+        "builder_previous",
         "builder_idle",
         "builders",
         "via",
         *[
             column
-            for name, columns in groups.items()
+            for name, columns in loaded.items()
             if name != HISTORY_GROUP
             for column in columns
         ],
@@ -187,7 +219,7 @@ def load_builder_steps(directory: Path) -> BuilderSteps:
         for name in wanted
         if schema[name] in (pl.Float64, pl.Int64) and name not in (*PLAYER, "decision_index")
     ]
-    frame = (
+    return (
         rows.select(wanted)
         .with_columns(narrow)
         .join(ordered, on=[*PLAYER, "decision_index"])
@@ -196,11 +228,8 @@ def load_builder_steps(directory: Path) -> BuilderSteps:
             is_job.alias("is_job"),
             pl.col("builder_kind").fill_null("none"),
         )
-        .sort(*PLAYER, "step_idx", "builder_index")
         .collect(engine="streaming")
     )
-    types = pl.read_parquet(directory / "builder_types.parquet")
-    return BuilderSteps(frame, groups, categorical, manifest, builders.answers_of(types))
 
 
 # --- the mask
