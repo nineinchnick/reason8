@@ -54,10 +54,10 @@ class OpeningSteps:
     steps: tuple[str, ...]
 
 
-def merge_repeats(units: Sequence[str], repeats: Sequence[bool]) -> tuple[str, ...]:
-    """The steps of an opening: an order that repeats the one before it in the same frame
-    (one drag or click) is part of the same step."""
-    return tuple(unit for unit, repeat in zip(units, repeats, strict=True) if not repeat)
+def merge_steps(units: Sequence[str], starts: Sequence[bool]) -> tuple[str, ...]:
+    """The steps of an opening: the units of the orders that start a step
+    (`reason8.openings.dataset.step_starts`)."""
+    return tuple(unit for unit, start in zip(units, starts, strict=True) if start)
 
 
 def load_openings(
@@ -68,7 +68,7 @@ def load_openings(
     openings = []
     for row in sequences.iter_rows(named=True):
         units = row["units"]
-        steps = merge_repeats(units, row["repeats"]) if merge else tuple(units)
+        steps = merge_steps(units, row["starts"]) if merge else tuple(units)
         openings.append(
             OpeningSteps(
                 match_id=row["match_id"],

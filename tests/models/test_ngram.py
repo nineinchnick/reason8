@@ -11,7 +11,7 @@ from reason8.models.ngram import (
     chain,
     check_model,
     load_model,
-    merge_repeats,
+    merge_steps,
     save_model,
 )
 
@@ -32,10 +32,10 @@ def opening(match_id, steps=BOTS, faction="Armada", position="P1", build=31000):
     )
 
 
-def test_merge_repeats():
+def test_merge_steps():
     units = ["armmex", "armwin", "armwin", "armwin", "armmex", "armmex"]
-    repeats = [False, False, True, True, False, False]
-    assert merge_repeats(units, repeats) == ("armmex", "armwin", "armmex", "armmex")
+    starts = [True, True, False, False, True, True]
+    assert merge_steps(units, starts) == ("armmex", "armwin", "armmex", "armmex")
 
 
 def test_chain():

@@ -24,6 +24,7 @@ def test_opening_steps_merges_drags_and_counts_factory_units():
             "unit": ["armmex", "armmex", "armmex", "armlab", "armpw", "armwin", "armwin"],
             "kind": ["structure"] * 4 + ["factory"] + ["structure"] * 2,
             "count": [1, 1, 1, 1, 5, 1, 1],
+            "frame": [0, 0, 0, 90, 300, 400, 600],
             "repeat": [False, True, True, False, False, False, False],
             "x": [10.0, 20.0, 30.0, 40.0, 40.0, 50.0, 60.0],
             "z": [1.0, 2.0, 3.0, 4.0, 4.0, 5.0, 6.0],

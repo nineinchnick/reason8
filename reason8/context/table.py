@@ -264,11 +264,9 @@ def running_counts(
 
 
 def with_steps(orders: pl.DataFrame) -> pl.DataFrame:
-    """Add ``step_idx`` (the step of the opening an order starts, numbered from 0, as
-    `reason8.models.ngram.merge_repeats` counts them; null for orders that repeat the one
-    before and for removals), ``state_frame``, ``time_s`` and ``since_previous_s`` (the
-    time since the player's last build order in an earlier frame)."""
-    step = pl.col("seq_idx").is_not_null() & ~pl.col("repeat")
+    """Add ``step_idx`` (`reason8.openings.dataset.step_index`), ``state_frame``,
+    ``time_s`` and ``since_previous_s`` (the time since the player's last build order in an
+    earlier frame)."""
     # the player's last order in an earlier frame: the orders of one frame are given at once,
     # and an order in the frame of the step before it starts a new step only if its unit
     # differs, so the time since an order of the same frame would give the unit away
@@ -277,7 +275,7 @@ def with_steps(orders: pl.DataFrame) -> pl.DataFrame:
     return (
         orders.sort(*PLAYER, "order_index")
         .with_columns(
-            pl.when(step).then(step.cast(pl.Int32).cum_sum().over(PLAYER) - 1).alias("step_idx"),
+            openings.step_index(PLAYER).alias("step_idx"),
             pl.max_horizontal(pl.col("frame") - 1, pl.lit(0)).cast(pl.Int32).alias("state_frame"),
             (pl.col("frame") / GAME_SPEED).cast(pl.Float32).alias("time_s"),
             ((pl.col("frame") - earlier_frame) / GAME_SPEED)

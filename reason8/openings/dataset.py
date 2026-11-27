@@ -876,8 +876,33 @@ def _quantiles(values: Sequence[int]) -> tuple[int, int, int]:
     return at(0.1), at(0.5), at(0.9)
 
 
+PLAYER = ("match_id", "player_slot")
+
+
+def step_starts(player: Sequence[str] = PLAYER) -> pl.Expr:
+    """Whether an order starts a step of its opening, the unit a model predicts next (ADR
+    0013); null for orders that add no units.
+
+    An order that repeats the one before it in the same frame (``repeat``: one drag or
+    click) is part of the same step. The rows must be sorted by `player` and order.
+    """
+    added = pl.col("seq_idx").is_not_null()
+    return pl.when(added).then(~pl.col("repeat").fill_null(False))
+
+
+def step_index(player: Sequence[str] = PLAYER) -> pl.Expr:
+    """The step of the opening an order starts, numbered from 0 (`step_starts`); null for
+    orders that are part of the step before them and for orders that add no units. The
+    rows must be sorted by `player` and order."""
+    starts = step_starts(player)
+    return pl.when(starts).then(
+        starts.fill_null(False).cast(pl.Int32).cum_sum().over(list(player)) - 1
+    )
+
+
 def load_sequences(out_dir: Path, splits: Sequence[str] | None = None) -> pl.DataFrame:
-    """One row per opening: its columns and `units`, the units it added, in order."""
+    """One row per opening: its columns, `units` (the units it added, in order), `starts`
+    (whether each of them starts a step, `step_starts`) and `frames`."""
     names = [split for split, _ in SPLITS] if splits is None else list(splits)
     return (
         pl.concat(
@@ -888,12 +913,13 @@ def load_sequences(out_dir: Path, splits: Sequence[str] | None = None) -> pl.Dat
         )
         .filter(pl.col("seq_idx").is_not_null())
         .sort("match_id", "player_slot", "seq_idx")
+        .with_columns(step_starts().alias("starts"))
         .group_by("match_id", "player_slot", maintain_order=True)
         .agg(
             pl.col("split", "map", "faction", "position", "role", "on_spot", "skill").first(),
             pl.col("opening_era", "build").first(),
             pl.col("unit").alias("units"),
-            pl.col("repeat").alias("repeats"),
+            pl.col("starts"),
             pl.col("frame").alias("frames"),
         )
         .collect()
@@ -995,7 +1021,7 @@ def stats(out_dir: Path) -> str:
     for map_name in sorted(sequences["map"].unique().to_list()):
         group = sequences.filter(pl.col("map") == map_name)
         lengths = [len(units) for units in group["units"].to_list()]
-        steps = [sum(not repeat for repeat in repeats) for repeats in group["repeats"].to_list()]
+        steps = [sum(starts) for starts in group["starts"].to_list()]
         rows.append([map_name, group.height, *_quantiles(lengths), *_quantiles(steps)])
     lines += markdown.table(
         ["map", "openings", "orders p10", "median", "p90", "steps p10", "median", "p90"], rows

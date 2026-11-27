@@ -37,9 +37,9 @@ What shapes the protocol:
 A model predicts the unit of the **next step** of an opening from the steps
 before it and what is known before the game: faction, map, start position and
 its role. A step is one order, with the orders that repeat its unit in the
-same frame merged into it (`OpeningSteps`, `merge_repeats()` in
-`reason8.models.ngram`). Scoring is `reason8.models.evaluate`, run by
-`reason8 baseline`.
+same frame merged into it (`step_starts()` in `reason8.openings.dataset`,
+which every model, the evaluation, the decision table and the bot's export
+use). Scoring is `reason8.models.evaluate`, run by `reason8 baseline`.
 
 - **Scored steps:** the first 30 steps of every opening of the held-out split,
   off-spot starts included (their position is the nearest spawn point). An

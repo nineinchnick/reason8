@@ -60,12 +60,12 @@ Every column of the opening dataset's rows
 : The replay's name without `.sdfz`: the name the state tables use.
 
 `step_idx`
-: The step of the opening the order starts, from 0, counted as
-  `reason8.models.ngram.merge_repeats` counts them: the order adds a unit and
-  does not repeat the unit of the order before it in the same frame. Null for
-  repeats and for orders that take units out of a factory queue. The scored
-  steps of [ADR 0013](../decisions/0013-evaluate-on-held-out-games.md) are the
-  rows with `step_idx` below 30.
+: The step of the opening the order starts, from 0, counted by
+  `reason8.openings.dataset.step_index`: the order adds a unit and does not
+  repeat the unit of the order before it in the same frame. Null for repeats
+  and for orders that take units out of a factory queue. The scored steps of
+  [ADR 0013](../decisions/0013-evaluate-on-held-out-games.md) are the rows
+  with `step_idx` below 30.
 
 `state_frame`, `resources_frame`
 : The frame whose state the row has, and the frame of its resources line.
