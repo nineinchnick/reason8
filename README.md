@@ -321,6 +321,11 @@ the first results and the costs.
   learned model can hook in.
 - See [`related-work.md`](docs/research/related-work.md) for what Apex changed
   in BARb, what it measured, and what we reuse or do differently.
+- See
+  [`builder-model-prior-work.md`](docs/research/builder-model-prior-work.md)
+  for what prior work says about drift, skill as an input, action masking, map
+  inputs and how hand-written AIs pick builder jobs, for the first learned
+  model.
 - See [`in-game.md`](docs/reference/in-game.md) for how a model's decisions
   get into a running game, and how to build and run the Reason8 AI headlessly.
 
