@@ -18,8 +18,15 @@ Faster than real time?
 State snapshots from a spectator widget?
 : Yes. Resources and wind every second; units, positions, health and build
   progress every 5 s; an event for every unit created / finished / destroyed /
-  given / gone idle and for every first hit between two enemy units. Converted
-  to Parquet tables after the run
+  given / gone idle and for every first hit between two enemy units; every
+  reclaimable feature as it appears and goes, the metal and energy each team
+  reclaimed from it, and what each builder works on, sampled every 5 frames
+  (section 4). Converted to Parquet tables after the run
+
+Reclaim right?
+: Yes, against the game's own count where the game version keeps one: within
+  0.05% and 0.24% of the metal reclaimed; between allies sharing a feature up
+  to 2% of a team's reclaim is split differently
 
 What stands at any frame?
 : Rebuilt from the unit events alone; it matches the snapshots of real games
@@ -33,7 +40,7 @@ Is the re-run the same game?
 Disk per game (snapshot every 5 s, gzip)
 : 1v1 (13 min): 86 KB. 8v8 (26 min): 6.0 MB (format 1). First 10 minutes of an
   8v8 in format 5: 39 KB of gzipped JSON lines and 28 KB of Parquet tables per
-  game minute
+  game minute; format 6 adds 42% and 26% to them
 
 Replays per hour per core
 : 1v1: 80 to 100. 8v8: 5 to 8
@@ -296,14 +303,14 @@ watches as a full-view spectator, and writes JSON lines to
 `LuaUI/Config/reason8_state.jsonl` in the run's write dir. That folder is one
 of the two that BAR allows a user widget to write to.
 
-Format 5 (the `v` of the header) writes these lines:
+Format 6 (the `v` of the header) writes these lines:
 
 `header`
 : *When:* once
 : *Content:* game, map, engine, map size, the map's wind range and tidal
   strength, teams (number, ally team, AI or not, side), unit type id to name,
-  the types that cannot move (`static`), how often resource and snapshot lines
-  come
+  the types that cannot move (`static`), the types whose work is sampled
+  (`builders`), how often resource, snapshot and work lines come
 
 `r`
 : *When:* every second (30 frames)
@@ -318,7 +325,8 @@ Format 5 (the `v` of the header) writes these lines:
 
 `created`
 : *When:* unit placed
-: *Content:* frame, unit, type, team, position, builder
+: *Content:* frame, unit, type, team, position, builder; for a resurrected
+  unit the feature it came from
 
 `finished`
 : *When:* unit completed
@@ -327,7 +335,8 @@ Format 5 (the `v` of the header) writes these lines:
 `destroyed`
 : *When:* unit died
 : *Content:* frame, unit, type, team, position, whether it was finished,
-  attacker's team
+  attacker's team, the attacking unit, the engine's weapon number (negative:
+  no weapon, such as a crash) and whether the attacker reclaimed it
 
 `given`
 : *When:* unit changed team
@@ -346,22 +355,51 @@ Format 5 (the `v` of the header) writes these lines:
 : *When:* every second in which one team damaged units of an enemy team
 : *Content:* frame, damaged team, attacking team, number of hits, damage
 
+`fdef`
+: *When:* before the first feature of a type
+: *Content:* feature type id, name, metal, energy, reclaim time
+
+`fcreated`
+: *When:* a feature with metal or energy appears; the map's own when the
+  widget starts
+: *Content:* frame, feature, type, position, metal, energy, for a wreck the
+  unit type it can be resurrected as
+
+`fdestroyed`
+: *When:* such a feature goes
+: *Content:* frame, feature, metal and energy left, reclaim left (0: reclaimed
+  away)
+
+`reclaim`
+: *When:* a team stops reclaiming a feature, the feature goes, or the game
+  ends
+: *Content:* frame, feature, team, first frame, metal and energy taken
+
+`work`
+: *When:* every 5 frames, for each builder whose work changed
+: *Content:* frame, builder, team, task (build, repair, reclaim, resurrect,
+  capture, restore, none), the unit or feature worked on
+
 `end`
 : *When:* game over or last frame
 : *Content:* frame, reason, winning ally teams, how the attackers were told
-  (below), when in the frame resources and snapshots were taken
+  (below), when in the frame resources and snapshots were taken, and each
+  team's reclaim as the game counts it (only newer game versions count it:
+  seen in `test-31836` and `test-32018`, not in `test-30903` or older)
 
 Resource and snapshot lines are written in `GameFramePost`, after everything
 the frame did, so a line of frame F shows the world after the unit lines up to
 frame F (`"sampled":"frame_end"`). An engine without that call-in gets them at
 the start of the frame (`"frame_start"`); every engine we use has it.
 
-Up to format 4 the snapshot held the wind and the resources too, listed every
-unit, and was written in `GameFrame`, at the start of its frame (formats 2 to
-4 add the `hit` and `damage` lines and the wind, the exact attacker, and
-`idle`). `read_records()` in `state.py` reads every format the same way: the
-snapshots of format 5 come back whole, with the wind and resources of the same
-frame and the finished buildings rebuilt from the unit lines (health unknown).
+Format 5 had the same lines without the features, reclaim and work and the new
+fields of `created`, `destroyed`, the header and `end`. Up to format 4 the
+snapshot held the wind and the resources too, listed every unit, and was
+written in `GameFrame`, at the start of its frame (formats 2 to 4 add the
+`hit` and `damage` lines and the wind, the exact attacker, and `idle`).
+`read_records()` in `state.py` reads every format the same way: the snapshots
+of format 5 come back whole, with the wind and resources of the same frame and
+the finished buildings rebuilt from the unit lines (health unknown).
 
 The `finished` lines are the **finished builds** that the opening model needs:
 what was actually built and when, not just what was ordered.
@@ -462,6 +500,17 @@ to it, `<name>.<table>.parquet`, in the date partition of the replay:
 `damage`
 : hits and damage per damaged and attacking team, per second
 
+`features` (format 6)
+: one row per reclaimable feature: type, position, metal and energy when it
+  appeared, resurrect type, when it went, what it had left and how it went
+  (reclaimed, resurrected, destroyed)
+
+`reclaim` (format 6)
+: metal and energy per feature, team and stretch of reclaiming it
+
+`work` (format 6)
+: builders' work changes. Sorted by builder and frame
+
 Unit types are names, dictionary-encoded, so tables of different game versions
 can be read together; teams are 16-bit, frames, ids and positions 32-bit
 integers, money and damage 32-bit floats; zstd level 19. Sorting the units by
@@ -470,7 +519,10 @@ unit's rows repeat each other's values), and level 19 instead of 9 makes all
 tables 13% smaller; writing a game's tables takes 0.07 s. `tables.scan()`
 reads one table of many games as a lazy Polars frame, by date range;
 `read_records()` reads a game's tables as if they were its JSON lines (with
-the units of a snapshot sorted by id).
+the units of a snapshot sorted by id). Games written before format 6 have no
+`features`, `reclaim` and `work` files and fewer `events` columns;
+`tables.scan()` and `tables.read_game()` read them with the full schema, as
+empty tables and null columns.
 
 Size of the first 10 minutes of the same 8v8 replay (Rosetta, 16 players,
 engine 2026.09.03), per game minute:
@@ -546,20 +598,201 @@ it apart. Everything else matches, including units given, units destroyed
 before they were finished, and the commanders created by the game at the
 start.
 
-### Not recorded yet
+### Features, reclaim and builders' work (format 6)
 
-- What each player could **see** (line of sight). The spectator sees
-  everything; the bot must learn from what its player saw. The widget can ask
-  the engine per ally team; this is the main addition needed for milestone 2.
-- Wrecks and other reclaimable features, unit orders, and the map's metal
-  spots.
+The next models choose what to reclaim, resurrect and assist. Reclaim and
+resurrection are among the decisions that set experienced players apart, so
+format 6 records what a spectator widget can read of them. What each item
+comes from, read in the engine's Lua API (Recoil 2026.09.03 source) and BAR's
+widget handler, and checked on every engine we use (2025.06.19 to 2026.09.03):
 
-Each fits the format as lines and a table of their own, without changing the
-others: visibility as a line per ally team and interval (units in line of
-sight and in radar, by id) and a `visibility` table (frame, ally team, unit,
-LOS or radar); command queues as a line per order a unit is given and an
-`orders` table; static map data (metal spots, features at the start) once in
-the header and a `map` table per map rather than per game.
+Features the map starts with
+: *Exact.* `Spring.GetAllFeatures()` when the widget starts: type, position,
+  metal and energy (`GetFeatureResources`). Only features with metal or energy
+  that can be reclaimed are written
+
+Features that appear (wrecks, heaps, gadget-made ones)
+: *Exact.* `FeatureCreated` call-in, with the same fields and, for a wreck,
+  the unit type it can be resurrected as (`GetFeatureResurrect`)
+
+Features that go, and how
+: *Exact.* `FeatureDestroyed` runs in the feature handler's update, after the
+  units of the frame and before the feature is freed, so its metal, energy and
+  reclaim progress can still be read: reclaim progress 0 means it was
+  reclaimed away. A resurrected one is named by the unit made from it (below);
+  every other one was blown up, crushed or burnt
+
+Which unit a wreck came from
+: *Not given.* The call-in has only the feature and its ally team. Matched in
+  the check by type and position against the deaths of the 300 frames before:
+  682 of 683 wrecks in five games
+
+Metal and energy reclaimed, per feature and team
+: *Exact per feature, sampled between teams.* The engine has no reclaim
+  call-in for widgets (`AllowFeatureBuildStep` is synced only) and no reclaim
+  figure in the team statistics. The widget reads, at every work sample, what
+  each feature being reclaimed has left, and gives what it lost to the teams
+  whose builders work on it, split by their reclaim speed. What a feature had
+  left when reclaimed away goes to the builders still pointing at it in that
+  frame (`GetUnitWorkerTask` in `FeatureDestroyed`), which is exact. A loss
+  without reclaim progress or without a builder on the feature is not reclaim:
+  BAR's tree feller takes the energy of trees that explosions fell
+
+What every builder works on
+: *Sampled* (every 5 frames). `Spring.GetUnitWorkerTask` tells what a builder
+  is doing, not what it was ordered to: building (with the unit; assisting
+  when someone else started it), repairing, reclaiming a unit or feature,
+  resurrecting, capturing, restoring ground. No call-in tells when it changes.
+  Factories are left out: what they make is in the unit lines
+
+Builder of a unit
+: *Exact,* as before (`UnitCreated`), now with the feature for a resurrected
+  unit: while the unit is made, its resurrector still points at the feature
+
+Units reclaimed
+: *Exact.* `UnitDestroyed` gives the attacker, which for a reclaimed unit is
+  the builder still pointing at it. The metal it gives back is not written; it
+  follows from the unit's cost and build progress
+
+Orders to builders (command queues)
+: *Not recorded.* The orders are in the replay itself; the `UnitCommand`
+  call-in could write them too
+
+#### Checks on real games
+
+`reason8 headless tables --check` checks the units against the snapshots and,
+from format 6, the features, reclaim and work (`features.py`). Five 8v8 games
+of the context sample, first 10 minutes, three maps, engines 2025.06.24 to
+2026.09.03:
+
+| Game                          | Features | At start | Reclaimed | Resurrected | Work lines | Built by builders, seen building |
+| ----------------------------- | -------- | -------- | --------- | ----------- | ---------- | -------------------------------- |
+| Supreme Isthmus, 2026.07.04   | 2,914    | 2,638    | 1,708     | 15          | 10,335     | 757 of 758                       |
+| All That Glitters, 2026.07.04 | 330      | 158      | 240       | 1           | 7,571      | 1,114 of 1,115                   |
+| Supreme Isthmus, 2025.06.24   | 2,918    | 2,638    | 1,814     | 0           | 10,795     | 918 of 918                       |
+| Rosetta, 2026.06.12           | 459      | 132      | 334       | 7           | 8,943      | 664 of 664                       |
+| Supreme Isthmus, 2026.09.03   | 2,801    | 2,638    | 1,783     | 1           | 9,344      | 818 of 818                       |
+
+- **Reclaim against the game's count.** Newer game versions count each team's
+  reclaim themselves, in a synced gadget that sees every reclaim step, and
+  leave it in team rules params; the widget writes them in its `end` line. Two
+  of the five games have them. Supreme Isthmus on 2026.07.04: 15,083.7 metal
+  and 296,214 energy reclaimed against the game's 15,076.3 and 296,193; no
+  team differs by more than 3 metal and 148 energy. On 2026.09.03: 14,177
+  metal against 14,143 (0.24%) and 307,987 energy against 307,469; per team up
+  to 32 metal (2.2% of a team's reclaim) and 752 energy (1.3%) move between
+  allies. Those games had 82 and 43 features reclaimed by more than one team,
+  all but one by allies; the split between them by reclaim speed at the
+  samples is where the difference comes from, the totals hold. The game
+  credits a step at the next step on the feature, a frame later, which
+  explains the few metal left over at the last frame.
+- **Reclaim against the features.** Every feature reclaimed away (5,879) was
+  credited exactly its metal and energy; no other feature was credited more
+  than it lost.
+- **Wrecks and deaths.** 682 of 683 wrecks match a death of their unit type
+  within 64 map units in the 300 frames before. 665 features were destroyed
+  otherwise; 306 of them left a feature in their place in the same frame (a
+  wreck blown up into a heap, a tree into a falling tree).
+- **Resurrection.** All 24 resurrected units name their feature, the feature
+  went as resurrected, and the unit is the feature's resurrect type.
+- **Builders' work.** Of the 4,273 units that builders (not factories) built,
+  4,271 have a work line of their builder building them; 4,033 units were
+  assisted by another builder. All 133 units reclaimed have a work line of
+  their reclaimer on them.
+- **Units.** The units against the snapshots differ as in format 5 (the same
+  two `corwin` made between frames in one game, units still dying).
+- **Same output.** The state written next to the line-of-sight probe (below)
+  was byte-identical to the run without it.
+
+#### How often to sample builders' work
+
+On the first game, with the work sampled every 1, 5, 15 and 30 frames:
+
+| Every     | Widget time | Work lines | Raw work lines | Built, seen building | Reclaimed metal | Largest team difference to the game |
+| --------- | ----------- | ---------- | -------------- | -------------------- | --------------- | ----------------------------------- |
+| 1 frame   | 2.65 s      | 11,888     | 770 KB         | 758 of 758           | 15,083.7        | 3.0 metal, 145 energy               |
+| 5 frames  | 0.83 s      | 10,335     | 664 KB         | 757 of 758           | 15,083.7        | 3.0 metal, 148 energy               |
+| 15 frames | 0.68 s      | 9,250      | 597 KB         | 757 of 758           | 15,083.7        | 6.9 metal, 141 energy               |
+| 30 frames | 0.55 s      | 8,244      | 538 KB         | 752 of 758           | 15,076.2        | 9.9 metal, 133 energy               |
+
+Five frames lose almost nothing against every frame and cost a third of the
+time; 30 frames start to miss short jobs and reclaim.
+
+#### Cost against format 5
+
+The same five games and first 10 minutes, each played with the format 5 and
+the format 6 widget, one engine at a time while 8 engines of another batch ran
+on the machine (which sets the wall and simulation times):
+
+| Per game (average of 5) | Format 5 | Format 6 | Change |
+| ----------------------- | -------- | -------- | ------ |
+| Simulation              | 120.9 s  | 118.6 s  | noise  |
+| Widget's own time       | 0.26 s   | 0.75 s   | +0.5 s |
+| JSON lines, raw         | 1.68 MB  | 2.69 MB  | +60%   |
+| JSON lines, gzip        | 355 KB   | 504 KB   | +42%   |
+| Tables                  | 275 KB   | 346 KB   | +26%   |
+
+The widget's own time (summed with `Spring.GetTimer` in its call-ins) grows by
+half a second, under 0.5% of the simulation. Of the 71 KB of tables added,
+`work` is 28 to 38 KB, `features` 11 to 36 KB and `reclaim` 5 to 16 KB; the
+features are mostly the trees and rocks a map starts with (2,638 on Supreme
+Isthmus, 30 KB), the same in every game of the map (below), so a table per map
+instead of per game would save about a tenth.
+
+#### What the games of format 5 can get without playing them again
+
+- **The features a map starts with:** yes. They were identical in type,
+  position, metal and energy in three Supreme Isthmus games from June to
+  November 2026, so one format 6 game per map (and game version, to be safe)
+  gives them to every game.
+- **Wrecks:** only approximately. The `destroyed` lines give the unit type,
+  place and frame, and the unit definition its wreck and metal, but not
+  whether a wreck was left (units destroyed unfinished, self-destructed or
+  blown apart leave a heap or nothing), when it appeared, or when it went.
+- **Reclaim, resurrection, builders' work, the attacker of a destroyed unit:**
+  no. They need the simulation. The replay's commands say what builders were
+  ordered to reclaim, repair or resurrect, not what they did or got.
+
+#### Line of sight per ally team: what it would cost
+
+Not in the export; measured with a separate probe widget on two of the games
+(first 10 minutes, 2 ally teams):
+
+Enter and leave line of sight, a line per event
+: *Lines:* 4,000 to 4,300
+: *Probe time:* 0.03 s
+: *Size:* 20 KB gzipped, 13 to 14 KB as a table
+
+Enter and leave radar, a line per event
+: *Lines:* 3,400 to 3,600
+: *Probe time:* 0.02 s
+: *Size:* 18 KB gzipped, 12 to 13 KB as a table
+
+Per unit of each snapshot (every 5 s), a mask of the ally teams that see it and one of those that have it on radar
+: *Rows:* 24,000
+: *Probe time:* 0.09 s
+: *Size:* 16 to 19 KB gzipped, 5.5 KB as two columns of the `units` table
+
+The same for every unit, buildings too
+: *Rows:* 63,000 to 85,000
+: *Probe time:* 0.12 to 0.17 s
+: *Size:* 23 to 28 KB gzipped, 7.5 to 8 KB as two columns
+
+All are cheap next to the 346 KB of tables per game. They differ in what they
+tell:
+
+- **Events** say exactly when a unit was first seen and lost, which is what
+  scouting and contact need. BAR's widget handler passes a widget only the
+  unit and its team, not the ally team that saw it (the engine gives a
+  full-view spectator both), so the widget would read the unit's state for
+  every ally team (`Spring.GetUnitLosState`) on each event and write the
+  masks; or hook the handler, which newer game versions close to user widgets.
+  Whether the call-ins come for every ally team, or only the spectator's, was
+  not checked.
+- **Masks per snapshot** fit the `units` table as two small columns, but at 5
+  s they miss a scout that passes in between and buildings seen only once; the
+  buildings need the every-unit variant.
+- **Radar** is a second stream of the same size either way.
 
 ## 5. Per engine: RAM, CPU, throughput
 
@@ -748,8 +981,12 @@ What the pipeline must do, all of it already in `reason8/headless/`:
 ## Open items
 
 - Record what each player could see (line of sight per ally team); needed
-  before the state is used for training.
-- Six table files per game: if tens of thousands get slow to list or sync,
+  before the state is used for training. Three ways are costed in section 4.
+- Reclaim between allies on the same feature is split by reclaim speed at the
+  samples. Each builder's own income (`Spring.GetUnitResources`, which
+  includes what it reclaims, summed over the engine's last 30 frames) would
+  split it exactly, at the price of a line per reclaiming builder and second.
+- Nine table files per game: if tens of thousands get slow to list or sync,
   merge the tables of a day into one file per table.
 - The cloud cost per 1,000 replays. `reason8 headless batch` runs a list of
   replays with N engines at once and skips what is done, on one machine.
