@@ -256,15 +256,15 @@ The builder model's table (`context_v2`) gives every order the builders it
 went to and adds the builders' jobs (assist, reclaim, repair, resurrect) as
 answers, with build power and skill
 ([ADR 0019](decisions/0019-first-model-trees-asked-by-every-builder.md)). Its
-steps are not those of the scores above: a fifth of them are jobs. On 800
-games (72 in test, 32,544 steps), with the mask of answers a builder cannot
-give:
+steps are not those of the scores above: a fifth of them are jobs. On the
+whole context sample (2,996 games; 286 in test, 129,525 steps), with the mask
+of answers a builder cannot give:
 
-| model                                | trained on      | top-1             | top-3             | log-loss            |
-| ------------------------------------ | --------------- | ----------------- | ----------------- | ------------------- |
-| trees: order history                 | 633 table games | 54.3% (53.6–55.1) | 84.0% (83.4–84.7) | 1.327 (1.305–1.348) |
-| trees: order history and the builder | 633 table games | 58.5% (57.8–59.3) | 86.7% (86.2–87.3) | 1.206 (1.182–1.229) |
-| trees: the inputs of ADR 0019        | 633 table games | 61.4% (60.7–62.3) | 88.2% (87.6–88.8) | 1.128 (1.104–1.152) |
+| model                                | trained on        | top-1             | top-3             | log-loss            |
+| ------------------------------------ | ----------------- | ----------------- | ----------------- | ------------------- |
+| trees: order history                 | 2,411 table games | 56.0% (55.6–56.4) | 85.5% (85.2–85.9) | 1.260 (1.247–1.272) |
+| trees: order history and the builder | 2,411 table games | 60.5% (60.1–60.9) | 88.2% (87.9–88.5) | 1.131 (1.118–1.145) |
+| trees: the inputs of ADR 0019        | 2,411 table games | 63.8% (63.3–64.2) | 89.9% (89.6–90.1) | 1.039 (1.026–1.053) |
 
 What each group adds per kind of builder, how well a job is told from a build,
 skill, the mask and the two ways of scoring an order to several builders:
