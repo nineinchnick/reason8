@@ -1,3 +1,5 @@
+diff --git a/src/AIExport.cpp b/src/AIExport.cpp
+index 6e9da12..7ced2e5 100644
 --- a/src/AIExport.cpp
 +++ b/src/AIExport.cpp
 @@ -9,6 +9,7 @@
@@ -8,7 +10,7 @@
  
  #include <stdexcept>
  #include <map>
-@@ -38,6 +39,7 @@
+@@ -38,6 +39,7 @@ EXPORT(int) init(int skirmishAIId, const struct SSkirmishAICallback* innerCallba
  	try {
  		circuit::CProfiler::GetInstance().InitNames(skirmishAIId);
  
@@ -16,11 +18,20 @@
  		springai::OOAICallback* clb = springai::WrappOOAICallback::GetInstance(innerCallback, skirmishAIId);
  		circuit::CCircuitAI* ai = new circuit::CCircuitAI(clb);
  
-@@ -63,6 +65,7 @@
+@@ -63,6 +65,7 @@ EXPORT(int) release(int skirmishAIId) {
  
  		delete ai;
  		delete clb;
 +		reason8::ReleaseGovernor(skirmishAIId);  // Reason8
  
  		circuit::CProfiler::GetInstance().ReleaseNames(skirmishAIId);
+ 
+@@ -77,6 +80,8 @@ EXPORT(int) handleEvent(int skirmishAIId, int topic, const void* data) {
+ 	int ret = ERROR_SHIFT + 1;
+ 
+ 	try {
++		if (topic == EVENT_UPDATE)  // Reason8: send held commands first
++			reason8::UpdateGovernor(skirmishAIId, static_cast<const SUpdateEvent*>(data)->frame);
+ 		ret = myAIs[skirmishAIId]->HandleEvent(topic, data);
+ 	} CATCH_CPP_AI_EXCEPTION(ret);
  

@@ -6,8 +6,11 @@
 #
 #   ai/native/build.sh <work dir> [engine tag] [engine commit]
 #
-# Leaves the library at <work dir>/build/AI/Skirmish/BARb/data/libSkirmishAI.so
-# (its path in the build tree; printed at the end).
+# Leaves the library, stripped, at
+# <work dir>/libSkirmishAI.so (with it in build/AI/Skirmish/BARb/data/), and
+# <work dir>/reason8_library.json, which says what it was built from: the
+# engine tag and commit, and the SHA-256 of the library and of the files in
+# ai/native.
 #
 # Everything downloaded is checked before it runs: micromamba and the
 # toolchain packages against the SHA-256 recorded here and in toolchain.lock,
@@ -84,12 +87,23 @@ if [ ! -d spring-static-libs ]; then
 fi
 verify_commit spring-static-libs "$static_libs_commit"
 
-# 3. the governor: two new files and three lines in AIExport.cpp
+# 3. our changes: the governor (new files), the engine tag the library is
+#    built for, and the patch to BARb's AIExport.cpp
 barb=recoil/AI/Skirmish/BARb
-cp "$here/Governor.h" "$here/Governor.cpp" "$barb/src/"
-if ! grep -q 'reason8::InstallGovernor' "$barb/src/AIExport.cpp"; then
-	patch -d "$barb" -p1 <"$here/AIExport.patch"
+cp "$here/Budget.h" "$here/Governor.h" "$here/Governor.cpp" "$barb/src/"
+build_header="#define REASON8_ENGINE_TAG \"$tag\""
+if [ "$(cat "$barb/src/Reason8Build.h" 2>/dev/null)" != "$build_header" ]; then
+	echo "$build_header" >"$barb/src/Reason8Build.h"
 fi
+if ! grep -q 'reason8::UpdateGovernor' "$barb/src/AIExport.cpp"; then
+	git -C "$barb" checkout -q src/AIExport.cpp
+	patch -s -d "$barb" -p1 <"$here/AIExport.patch"
+fi
+
+# the command budget's own tests, with the same compiler
+x86_64-conda-linux-gnu-g++ -std=c++20 -O2 -Wall -Wextra -Werror -I "$here" \
+	"$here/test_budget.cpp" -o test_budget
+./test_budget
 
 # 4. configure the engine tree for the AI only, then build the one target
 export PKG_CONFIG_LIBDIR=$work_dir/spring-static-libs/lib/pkgconfig:$work_dir/tools/env/lib/pkgconfig
@@ -105,4 +119,21 @@ cmake -S recoil -B build -G Ninja -Wno-dev \
 	-DBUILD_TESTING=OFF -DBUILD_spring-legacy=OFF -DBUILD_spring-headless=OFF \
 	-DBUILD_spring-dedicated=OFF >/dev/null
 ninja -C build -j "$jobs" BARb
-find "$work_dir/build/AI/Skirmish/BARb" -name libSkirmishAI.so
+
+# 5. the library to install, stripped, and what it was
+#    built from. The hash of our files is over "<sha256>  <name>" lines in
+#    byte order of the names, as reason8.bot.library computes it
+x86_64-conda-linux-gnu-strip --strip-unneeded -o libSkirmishAI.so \
+	"$work_dir/build/AI/Skirmish/BARb/data/libSkirmishAI.so"
+library=$work_dir/libSkirmishAI.so
+sources_sha256=$(cd "$here" && find . -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort |
+	xargs sha256sum -- | sha256sum | cut -d' ' -f1)
+cat >reason8_library.json <<EOF
+{
+ "engine_tag": "$tag",
+ "engine_commit": "$commit",
+ "library_sha256": "$(sha256sum "$library" | cut -d' ' -f1)",
+ "sources_sha256": "$sources_sha256"
+}
+EOF
+echo "$library"
