@@ -275,10 +275,10 @@ In `data/datasets/context_v2/`:
 `README.md`
 : The counts, for a reader of the data directory.
 
-A build of 2,025 games takes 5 minutes with up to 32 threads and at most 9.4
-GB of memory (100 games per chunk; it reads 50 now). The table has about 3,000
-rows per game: 2,800 decisions, of which 1,400 build orders and the rest jobs,
-most of them reclaims of single features sent by widgets.
+A build of the 2,996 games of the sample took 7 minutes with up to 32 threads,
+in chunks of 50 games. The table has about 3,000 rows per game: 2,700
+decisions, of which 1,400 build orders and the rest jobs, most of them
+reclaims of single features sent by widgets.
 
 ## Checking the join
 
