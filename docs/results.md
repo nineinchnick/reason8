@@ -225,6 +225,32 @@ The middle row is `reason8 baseline --split test --train-dataset` with the
 8-minute build. On validation the first and the last row are 50.1%, 76.5% and
 1.730 against 51.1%, 78.0% and 1.668.
 
+## With the game state (preliminary)
+
+Preliminary, on the 503 games of the context sample re-simulated by 2026-11-27
+(411 train, 47 validation, 45 test): the decision table
+([`context-dataset.md`](reference/context-dataset.md)) joins the same rows
+with the state just before each order, and gradient-boosted trees are scored
+with the protocol above on its 45 test games, 19,933 steps. Method, the other
+groups and the breakdowns: [`context.md`](research/context.md).
+
+```sh
+uv run reason8 context build
+uv run reason8 context measure --split test
+```
+
+| model                                    | trained on           | top-1             | top-3             | log-loss            |
+| ---------------------------------------- | -------------------- | ----------------- | ----------------- | ------------------- |
+| 4-gram, faction, map and position        | 411 table games      | 47.4% (46.6–48.3) | 74.1% (73.1–75.0) | 2.031 (1.970–2.095) |
+| 4-gram, faction, map and position, saved | 33,657 dataset games | 51.0% (50.0–52.0) | 78.2% (77.2–79.2) | 1.649 (1.608–1.692) |
+| trees: order history                     | 411 table games      | 51.3% (50.3–52.2) | 79.0% (77.9–80.1) | 1.589 (1.548–1.634) |
+| trees: order history and the state       | 411 table games      | 54.0% (52.9–55.1) | 82.4% (81.3–83.4) | 1.465 (1.422–1.514) |
+
+The state (game time, the team's economy and units, the allies' economy and
+units) adds 2.7 points of top-1 (2.2 to 3.3, paired) and 0.124 nats over the
+same trees with the order history alone; the economy and the team's own units
+carry most of it, the wind nothing.
+
 ## Findings
 
 - **Counting sets a high bar.** The chosen n-gram predicts the next step right

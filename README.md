@@ -232,7 +232,11 @@ re-run the replay through the engine; models learn each decision with that
 context
 ([ADR 0005](docs/decisions/0005-learn-decisions-with-their-context.md)).
 [`state-extraction.md`](docs/research/state-extraction.md) shows how to
-recover the state with a headless engine and what it costs.
+recover the state with a headless engine and what it costs. The decision table
+joins the opening orders with the state just before each, and
+[`context.md`](docs/research/context.md) measures what the state adds to
+predicting the next build: a few points, mostly from the team's economy and
+its own units.
 
 ### Game versions
 
