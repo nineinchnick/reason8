@@ -889,13 +889,26 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="compare the units rebuilt from the events with every snapshot instead",
+        help="check the state instead: the units rebuilt from the events against every "
+        "snapshot, and the features, reclaim and builders' work",
     )
 
 
-def run(args: argparse.Namespace) -> int:
-    from reason8.headless import standing
+def check_file(path: str | Path) -> dict:
+    """The checks of a state file, converted in memory (nothing is written): the units
+    rebuilt from the events against the snapshots (`reason8.headless.standing`) and, from
+    format 6, the features, reclaim and builders' work (`reason8.headless.features`)."""
+    from reason8.headless import features, standing
 
+    game_tables = to_tables(read_lines(path, snapshots=True), replay_name(path))
+    result = {"state_file": str(path), **standing.check(game_tables)}
+    feature_checks = features.check(game_tables)
+    if feature_checks:
+        result["features"] = feature_checks
+    return result
+
+
+def run(args: argparse.Namespace) -> int:
     paths = list(args.paths)
     if args.state_dir:
         paths += find_files(args.state_dir, "*.jsonl.gz", since=args.since, until=args.until)
@@ -903,7 +916,7 @@ def run(args: argparse.Namespace) -> int:
     for path in state_files(paths):
         try:
             if args.check:
-                result = {"state_file": str(path), **standing.check_file(path)}
+                result = check_file(path)
             else:
                 result = convert(path, force=args.force)
         except (OSError, ValueError, pl.exceptions.PolarsError) as error:
