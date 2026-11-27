@@ -92,6 +92,11 @@ Stock BARb against itself, 30 seeds, 60 games, all of them played to the end.
 
 ## Reason8 against stock BARb
 
+This section and the ones after it, up to
+[Our BARb library](#our-barb-library), measured earlier versions of the AI,
+with openings chosen when every click on a unit was its own step. They were
+not played again with the current openings; they record what each change did.
+
 The openings of `reason8 bot export` (the 4-gram's most typical human opening
 of each position, [`results.md`](../results.md#using-it-in-the-game)), 30
 seeds, 60 games, all played to the end.
@@ -403,62 +408,78 @@ the commands over the action budget of ADR 0008 and sends them later
 ([`in-game.md`](in-game.md#our-barb-library)). To see whether that costs
 anything, the same AI was built twice, on our library (`Reason8`) and on the
 engine's (`--library stock --short-name Reason8Stock`), and the two played
-each other: 10 seeds, 20 games, all played to the end, one game at a time.
+each other: 10 seeds, 20 games, all played to the end, one game at a time,
+with the current openings.
 
 | measure at 4:00 | Reason8 | Reason8Stock | share                 | seeds for 10% |
 | --------------- | ------- | ------------ | --------------------- | ------------- |
-| metal income    | 9.3     | 9.6          | 96.7% (92.7%–101.1%)  | 6             |
-| energy income   | 154.3   | 153.9        | 100.2% (93.9%–107.4%) | 13            |
-| built metal     | 4137.5  | 4136.9       | 100.0% (97.2%–103.2%) | 3             |
-| built energy    | 35991.9 | 36197.8      | 99.4% (96.4%–102.8%)  | 3             |
-| units           | 16.1    | 16.6         | 97.2% (91.4%–103.9%)  | 11            |
+| metal income    | 10.2    | 10.0         | 102.0% (97.2%–107.0%) | 6             |
+| energy income   | 146.4   | 149.0        | 98.2% (92.6%–104.8%)  | 11            |
+| built metal     | 4101.0  | 4142.2       | 99.0% (97.4%–100.5%)  | 1             |
+| built energy    | 35649.3 | 35956.5      | 99.1% (97.7%–100.4%)  | 1             |
+| units           | 16.2    | 16.6         | 97.4% (93.1%–101.3%)  | 6             |
 
 | what was built, classified against human builds | classified right    |
 | ----------------------------------------------- | ------------------- |
-| Reason8, our library                            | 80.3% (74.8%–85.4%) |
-| Reason8Stock, the engine's library              | 81.2% (76.2%–85.5%) |
+| Reason8, our library                            | 83.8% (79.1%–87.9%) |
+| Reason8Stock, the engine's library              | 84.4% (80.0%–87.9%) |
 
 - **No regression.** Under the budget the bot builds as much as without it:
   every interval covers 100%, and built metal, the measure the A/A test finds
-  most sensitive, is within 3% either way. Its openings are in order as often
-  (110 and 109 of 160 teams), and a classifier tells its builds from human
-  ones as well as the other's.
+  most sensitive, is within 3% either way. Its openings are in order a little
+  less often (108 against 124 of 160 teams), and a classifier tells its builds
+  from human ones as well as the other's. With the openings chosen before
+  quick runs of clicks were merged, the same seeds gave 100.0% (97.2%–103.2%)
+  for built metal, 110 and 109 teams in order, and a classifier score of 84.4%
+  and 85.6% when scored the same way today.
 - **It now keeps the budget.** Counted in the replays, Reason8Stock's teams
-  took a median of 101 actions a minute and up to 565 in a minute; Reason8's
-  took 37 and at most 89 by its governor's log, which also shows no command
+  took a median of 94 actions a minute and up to 689 in a minute; Reason8's
+  took 36 and at most 89 by its governor's log, which also shows no command
   lost
   ([`command-governor.md`](../research/command-governor.md#in-team-games)).
 - The classifier scores are lower than the 90% of the 30-seed runs above,
   probably because the classifier has 160 bot openings to learn from instead
   of about 470; the two rows come from the same games and compare like with
   like.
-- Contact before the end: 78% of Reason8's teams and 75% of Reason8Stock's, at
-  a median of 4:11 and 4:35.
+- Contact before the end: 75% of Reason8's teams and 70% of Reason8Stock's, at
+  a median of 4:50 and 5:03.
 
 ADR 0003's second measure, against `BARbLimited` with both on our library (so
-both keep the budget), 10 seeds, 20 games, all played to the end:
+both keep the budget), 10 seeds, 20 games, all played to the end, with the
+current openings:
 
 | measure at 4:00 | Reason8 | BARbLimited | share                  |
 | --------------- | ------- | ----------- | ---------------------- |
-| metal income    | 9.5     | 10.4        | 91.6% (88.0%–95.5%)    |
-| energy income   | 151.7   | 125.6       | 120.7% (113.3%–128.0%) |
-| built metal     | 4143.9  | 4308.4      | 96.2% (94.8%–97.6%)    |
-| built energy    | 35921.1 | 38664.6     | 92.9% (91.2%–94.6%)    |
-| units           | 16.5    | 17.5        | 94.5% (90.4%–98.4%)    |
+| metal income    | 10.3    | 10.2        | 101.4% (98.4%–104.3%)  |
+| energy income   | 146.1   | 127.5       | 114.6% (106.7%–122.1%) |
+| built metal     | 4198.2  | 4380.2      | 95.8% (92.9%–98.6%)    |
+| built energy    | 36182.5 | 38470.1     | 94.1% (91.7%–96.6%)    |
+| units           | 16.8    | 17.4        | 96.4% (92.0%–100.9%)   |
 
-- **As before, narrowly short.** Built metal at 4:00 is 96.2% of
-  BARbLimited's, against 97.2% (96.2%–98.2%) in the 30 seeds on the engine's
-  library ([Under human-like limits](#under-human-like-limits)); the intervals
-  overlap. The classifier on builds is right 82.5% (77.2%–86.8%) of the time.
-- The governors of all 320 teams, both AIs', kept the budget and lost no
-  command.
+- **As before, narrowly short.** Built metal at 4:00 is 95.8% of
+  BARbLimited's. With the openings chosen before quick runs of clicks were
+  merged into one step, the same seeds gave 96.2% (94.8%–97.6%): a little
+  lower now, the intervals overlapping. Metal income went from 91.6% to 101.4%
+  and energy income from 120.7% to 114.6%, so the new openings put a little
+  more into metal, but what was built is no more.
+- **The builds are no harder to tell from human ones.** The classifier on
+  builds is right 85.9% (82.0%–89.6%) of the time, against 83.4% (78.8%–87.7%)
+  for the games with the earlier openings scored the same way today (82.5%
+  when they were played, against fewer re-simulated human games): slightly
+  worse, the intervals overlapping.
+- 116 of 160 Reason8 teams built their opening in order (113 before). The
+  governors of all 320 teams, both AIs', kept the budget and lost no command.
+- Contact before the end: 77.5% of Reason8's teams and 95.0% of BARbLimited's,
+  at a median of 5:01 and 4:33 (4:44 and 4:11 before).
 
 ### On Windows
 
 The same AI with our `SkirmishAI.dll` instead, in a copy of the Windows engine
 `spring-headless.exe` started from WSL
 ([`in-game.md`](in-game.md#on-windows-from-wsl)), against stock BARb: 3 seeds,
-6 games, all played to the end, one at a time.
+6 games, all played to the end, one at a time. These games, and the Linux
+numbers they are compared with, are from the openings chosen before quick runs
+of clicks were merged; they were not played again.
 
 | measure at 4:00 | Reason8 | BARb    | share               |
 | --------------- | ------- | ------- | ------------------- |

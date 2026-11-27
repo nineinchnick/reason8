@@ -265,8 +265,8 @@ The AI lives in [`ai/Reason8`](../../ai/Reason8):
         681,
         7376
       ],
-      "candidates": 1977,
-      "log_likelihood": -9.197,
+      "candidates": 1965,
+      "log_likelihood": -9.262,
       "commander": [
         "armmex",
         "armmex",
@@ -726,44 +726,53 @@ fixed it; the loss may simply not have come up.*
 Two 8v8 games of 6 minutes, eight Reason8 teams against eight stock BARb
 teams, each team on its recommended position (`reason8 bot game`), with the
 openings of `reason8 bot export`: Reason8 as Armada on Supreme Isthmus with
-seed 1, and as Cortex on All That Glitters with seed 2. Counted from each
-team's log lines (`reason8 bot check --infolog`, `opening_by_team`). "Built"
-is the commander steps finished; a skipped step was given up after five tries.
+seed 1, and as Cortex on All That Glitters with seed 2. The AI is the current
+one: one of five openings per position picked at random, the reaction delays
+of [ADR 0008](../decisions/0008-play-under-human-like-limits.md) and our BARb
+library. Counted from each team's log lines (`reason8 bot check --infolog`,
+`opening_by_team`). "Built" is the commander steps finished; a skipped step
+was given up after five tries.
 
 | Map             | Position | Steps | Built | Skipped | Factory units made |
 | --------------- | -------- | ----- | ----- | ------- | ------------------ |
-| Supreme Isthmus | P1       | 30    | 28    | 0       | 6                  |
-| Supreme Isthmus | P2       | 30    | 17    | 0       | 0                  |
-| Supreme Isthmus | P3       | 30    | 25    | 2       | 7                  |
-| Supreme Isthmus | P4       | 30    | 24    | 3       | 0                  |
-| Supreme Isthmus | P5       | 6     | 3     | 3       | 25                 |
-| Supreme Isthmus | P6       | 8     | 6     | 2       | 19                 |
-| Supreme Isthmus | P7       | 30    | 14    | 3       | 10                 |
-| Supreme Isthmus | P8       | 30    | 18    | 6       | 14                 |
-| Glitters        | P1       | 30    | 27    | 3       | 18                 |
-| Glitters        | P2       | 30    | 28    | 1       | 8                  |
-| Glitters        | P3       | 30    | 28    | 0       | 9                  |
-| Glitters        | P4       | 29    | 24    | 5       | 0                  |
-| Glitters        | P5       | 30    | 26    | 4       | 9                  |
-| Glitters        | P6       | 30    | 24    | 4       | 20                 |
-| Glitters        | P7       | 30    | 22    | 6       | 18                 |
-| Glitters        | P8       | 30    | 18    | 7       | 16                 |
+| Supreme Isthmus | P1       | 27    | 12    | 0       | 6                  |
+| Supreme Isthmus | P2       | 30    | 19    | 0       | 4                  |
+| Supreme Isthmus | P3       | 30    | 18    | 0       | 8                  |
+| Supreme Isthmus | P4       | 30    | 14    | 0       | 0                  |
+| Supreme Isthmus | P5       | 14    | 8     | 0       | 13                 |
+| Supreme Isthmus | P6       | 30    | 6     | 1       | 10                 |
+| Supreme Isthmus | P7       | 30    | 9     | 1       | 8                  |
+| Supreme Isthmus | P8       | 30    | 11    | 0       | 7                  |
+| Glitters        | P1       | 30    | 14    | 2       | 7                  |
+| Glitters        | P2       | 30    | 15    | 0       | 10                 |
+| Glitters        | P3       | 30    | 14    | 2       | 8                  |
+| Glitters        | P4       | 30    | 17    | 1       | 9                  |
+| Glitters        | P5       | 30    | 16    | 0       | 14                 |
+| Glitters        | P6       | 26    | 14    | 0       | 13                 |
+| Glitters        | P7       | 30    | 15    | 0       | 6                  |
+| Glitters        | P8       | 30    | 11    | 0       | 10                 |
 
-- **Every team found its position.** Each of the 16 Reason8 teams chose the
+- **Every team found its position.** Each of the 16 Reason8 teams chose an
   opening of the position it started on. Fifteen started within 170 map units
   of the median start of that position's human players. Isthmus `P4`, the
   pond, started 800 units from it, because the map list's spot is that far
   from where its human players stand; it was still nearest to its own.
-- **No script errors and no desyncs.** The Isthmus game took 114 s of wall
-  time (9.5 times real time), the Glitters game 45 s.
-- **Most skipped steps are extractors** (46 of 49): BARb offered another task
-  five times in a row, usually when no free metal spot was near. One was a
-  geothermal plant and two a second bot lab that BARb's limit held back.
-- **Six minutes are not enough for the long openings.** The commander works
-  through 30 structures one at a time, where a human shares them with the
-  first constructors. Isthmus `P2` ordered its bot lab as the 18th structure,
-  and its wind economy had not paid for it when the game ended; Glitters `P4`
-  is the one opening with no factory before first contact.
+- **No script errors and no desyncs**, and the governor of every team kept the
+  budget and lost no command. The Isthmus game took 103 s of wall time, the
+  Glitters game 69 s.
+- **Few steps are given up.** 7 of 220 finished or skipped steps: five
+  extractors, a geothermal plant and an energy storage. Extractors have their
+  own metal spot (see [How the hooks work](#how-the-hooks-work)).
+- **Six minutes are not enough for the long openings, and fewer steps are
+  built than before.** The commander works through up to 30 structures one at
+  a time, where a human shares them with the first constructors, and under the
+  reaction delays each one waits as long as a player takes to notice the
+  commander is idle: it finished 6 to 19 of them, 213 of 457 in all. The first
+  version of the AI, with one opening per position, no delays and the engine's
+  library, finished 332 of 433 in the same two games; the delays came in
+  between, so these two games do not tell how much of the drop is the
+  openings'. Isthmus `P4` drew an opening of eight tidal generators before its
+  extractors, and its vehicle plant, the 17th structure, was not reached.
 - **A task that fails at once needs a pause.** In a first run the tidal
   generators of Isthmus `P4` failed the moment they were queued and used up
   their five tries in a second each, and 28 of its 30 steps were skipped. The
