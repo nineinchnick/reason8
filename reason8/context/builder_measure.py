@@ -75,6 +75,11 @@ VIEWS = ("ask", "order")
 SKILL_QUANTILES = (0.1, 0.9)
 SKILL_BANDS = 3
 TOP_ANSWER_SHARE = 0.10  # ADR 0019: the bot samples among answers of at least 10%
+#: The trees' settings that differ from the first table's measurement: on the 1.9 million
+#: training rows of the whole sample, leaves of a few rows on splits of the categorical
+#: history columns made the boosting diverge from the second round (the training loss
+#: rose); leaves of at least 50 rows' weight train as on smaller tables.
+TREE_PARAMETERS = {"min_child_weight": 50}
 
 
 @dataclass
@@ -356,14 +361,18 @@ def measure_builders(
     trees: dict[str, TreeModel] = {}
     scored: dict[str, Scored] = {}
     for name, features in variants(steps.groups, roles):
-        tree = TreeModel(name, features, threads, device, steps.categorical).fit(train, validation)
+        tree = TreeModel(name, features, threads, device, steps.categorical, TREE_PARAMETERS).fit(
+            train, validation
+        )
         trees[name] = tree
         scored[name] = score_tree(tree, held_out, steps.answers, keep=name == MODEL)
         log(f"{name}: {tree.rounds} rounds, {tree.seconds:.0f} s")
     # the model of ADR 0019 trained on the order view, for the comparison of the views
     order_name = f"{MODEL}, trained on the order view"
     model_features = dict(variants(steps.groups, roles))[MODEL]
-    tree = TreeModel(order_name, model_features, threads, device, steps.categorical).fit(
+    tree = TreeModel(
+        order_name, model_features, threads, device, steps.categorical, TREE_PARAMETERS
+    ).fit(
         train.filter(pl.col("builder_index") == 0),
         validation.filter(pl.col("builder_index") == 0),
     )
