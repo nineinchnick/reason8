@@ -9,6 +9,10 @@ The file is JSON lines (see the widget for the fields):
     {"t":"created"|"finished"|"destroyed"|"given"|"idle", "f":frame, "u":unitID, ...}
     {"t":"hit","f":frame,"u":unitID,...,"by":unitID,"by_team":team}   first hit by an enemy
     {"t":"damage","f":frame,"team":team,"by_team":team,"hits":n,"damage":sum}   per second
+    {"t":"fdef","d":featureDefID,"name":...}   a feature type, before its first feature (format 6)
+    {"t":"fcreated"|"fdestroyed","f":frame,"id":featureID,...}   a reclaimable feature
+    {"t":"reclaim","f":frame,"id":featureID,"team":team,"metal":m,"energy":e}   reclaimed
+    {"t":"work","f":frame,"u":unitID,"team":team,"task":...}   a builder's work changed
     {"t":"end","f":frame,"reason":...,"winners":[allyTeam,...],"attackers":...}
 
 `read_records()` reads every format the same way, from the JSON lines or from the Parquet
@@ -44,7 +48,19 @@ SNAPSHOT_TEAM_FIELDS = (
     "energy_income",
     "energy_expense",
 )
-EVENT_KINDS = ("created", "finished", "destroyed", "given", "idle", "hit", "damage")
+EVENT_KINDS = (
+    "created",
+    "finished",
+    "destroyed",
+    "given",
+    "idle",
+    "hit",
+    "damage",
+    "fcreated",
+    "fdestroyed",
+    "reclaim",
+    "work",
+)
 #: From this format on resources are lines of their own ("r") and snapshots leave out
 #: finished units that cannot move (the header lists their types as "static").
 RESOURCE_LINES_FORMAT = 5
