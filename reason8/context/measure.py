@@ -230,12 +230,18 @@ class TreeModel:
     """Gradient-boosted trees over the order history and the chosen context groups."""
 
     def __init__(
-        self, name: str, features: Sequence[str], threads: int, device: str = "cpu"
+        self,
+        name: str,
+        features: Sequence[str],
+        threads: int,
+        device: str = "cpu",
+        categorical: Sequence[str] = CATEGORICAL,
     ) -> None:
         self.name = name
         self.features = list(features)
         self.threads = threads
         self.device = device
+        self.categorical = tuple(categorical)
         self.categories: dict[str, dict[str, int]] = {}
         self.classes: list[str] = []
         self.vocabulary: list[str] = []
@@ -280,7 +286,7 @@ class TreeModel:
     def fit(self, train: pl.DataFrame, validation: pl.DataFrame) -> TreeModel:
         started = time.monotonic()
         for name in self.features:
-            if name in CATEGORICAL:
+            if name in self.categorical:
                 values = sorted(set(train[name].cast(pl.String).drop_nulls().to_list()))
                 self.categories[name] = {value: code for code, value in enumerate(values)}
         counts = Counter(train["unit"].to_list())
