@@ -577,3 +577,33 @@ def test_format_6_tables_read_with_format_7(tmp_path):
     every = tables.scan(state_dir, "game").collect()
     assert every.get_column("visibility").to_list() == [None, True]
     assert list(read_records(game_path, True)) == list(read_records(old, True))
+
+
+def test_check_of_visibility(tmp_path):
+    result = tables.check_file(write_state(tmp_path / "game.jsonl.gz", lines_v7()))
+    checks = result["visibility"]
+    assert checks["rows"] == {"los_enter": 2, "los_leave": 1, "radar_enter": 2}
+    assert checks["widget"] == {"unmatched": 0, "multiple": 0}
+    # the extractor is given to the ally team that sees it, the bot dies on its radar
+    assert checks["pairs"] == {
+        "leave": 1,
+        "death": 1,
+        "given": 2,
+        "end": 0,
+        "unexplained": 0,
+        "leave_first": 0,
+        "examples": [],
+    }
+    assert checks["radar_covers_sight"] == {"sight_entered": 2, "not_on_radar": 0}
+    # the bot is hit in sight of the commander's ally team and destroyed on its radar
+    assert checks["hits"] == {"units": 1, "in_sight": 1, "on_radar_only": 0, "neither": 0}
+    assert checks["kills"] == {"units": 1, "in_sight": 0, "on_radar_only": 1, "neither": 0}
+    # a leave without an enter, and a unit seen again without leaving or dying
+    lines = lines_v7()
+    lines.insert(-1, sight("los", 150, 2, 0, False, 900, 900))
+    lines.insert(-1, sight("los", 160, 1, 1, True, 100, 100))
+    lines.insert(-1, sight("los", 170, 1, 1, True, 100, 100))
+    checks = tables.check_file(write_state(tmp_path / "other.jsonl.gz", lines))["visibility"]
+    assert (checks["pairs"]["leave_first"], checks["pairs"]["unexplained"]) == (1, 1)
+    assert checks["pairs"]["end"] == 1
+    assert checks["radar_covers_sight"]["not_on_radar"] == 2
