@@ -241,12 +241,14 @@ class TreeModel:
         threads: int,
         device: str = "cpu",
         categorical: Sequence[str] = CATEGORICAL,
+        parameters: Mapping[str, Any] | None = None,
     ) -> None:
         self.name = name
         self.features = list(features)
         self.threads = threads
         self.device = device
         self.categorical = tuple(categorical)
+        self.parameters = PARAMETERS | dict(parameters or {})
         self.categories: dict[str, dict[str, int]] = {}
         self.classes: list[str] = []
         self.vocabulary: list[str] = []
@@ -280,7 +282,7 @@ class TreeModel:
         return xgboost.QuantileDMatrix(
             self.matrix(frame),
             ref=reference,
-            max_bin=PARAMETERS["max_bin"],
+            max_bin=self.parameters["max_bin"],
             label=labels,
             feature_names=self.features,
             feature_types=["c" if name in self.categories else "q" for name in self.features],
@@ -310,7 +312,7 @@ class TreeModel:
             class_index = {unit: position for position, unit in enumerate(self.classes)}
             return np.array([class_index.get(unit, other) for unit in frame["unit"].to_list()])
 
-        parameters = PARAMETERS | {
+        parameters = self.parameters | {
             "num_class": other + 1,
             "nthread": self.threads,
             "device": self.device,
