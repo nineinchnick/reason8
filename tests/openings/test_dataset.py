@@ -26,6 +26,8 @@ from reason8.openings.dataset import (
     removed_units,
     split_of,
     stats,
+    step_index,
+    step_starts,
 )
 from reason8.openings.extract import opening_orders
 from reason8.replays import widgets
@@ -148,6 +150,74 @@ def test_extract_game_ends_openings_at_first_contact():
     extract = extract_game(replay, 77, map_list={}, position_cutoffs={})
     assert extract.game["contact_measured"] is False
     assert {player["cutoff_source"] for player in extract.players} == {WINDOW}
+
+
+def starts_of(*orders: tuple[int, str, bool]) -> list[bool | None]:
+    """`step_starts` of one player's orders, given as (frame, unit, adds units)."""
+    rows = pl.DataFrame(
+        {
+            "match_id": [1] * len(orders),
+            "player_slot": [0] * len(orders),
+            "frame": [frame for frame, _, _ in orders],
+            "unit": [unit for _, unit, _ in orders],
+            "added": [added for _, _, added in orders],
+        }
+    ).with_columns(
+        seq_idx=pl.when("added").then(pl.col("added").cast(pl.Int32).cum_sum() - 1),
+    )
+    return rows.select(step_starts()).to_series().to_list()
+
+
+def test_step_starts_merges_orders_of_one_frame():
+    """One drag of buildings: the same unit in the same frame is one step."""
+    assert starts_of((0, "armmex", True), (0, "armmex", True), (0, "armwin", True)) == [
+        True,
+        False,
+        True,
+    ]
+
+
+def test_step_starts_merges_quick_clicks_up_to_six_frames():
+    assert starts_of((0, "armpw", True), (6, "armpw", True)) == [True, False]
+    assert starts_of((0, "armpw", True), (7, "armpw", True)) == [True, True]
+
+
+def test_step_starts_chains_runs_of_clicks():
+    """Each order is compared with the one before it, not with the first of the run."""
+    clicks = [(4 * index, "armpw", True) for index in range(5)]
+    assert starts_of(*clicks) == [True, False, False, False, False]
+    assert starts_of((0, "armpw", True), (6, "armpw", True), (13, "armpw", True)) == [
+        True,
+        False,
+        True,
+    ]
+
+
+def test_step_starts_needs_the_same_unit_directly_before():
+    assert starts_of((0, "armpw", True), (2, "armck", True), (4, "armpw", True)) == [
+        True,
+        True,
+        True,
+    ]
+
+
+def test_step_starts_skips_orders_that_add_nothing():
+    """A removal from a factory queue is no step and does not break a run."""
+    orders = ((0, "armpw", True), (2, "armck", False), (4, "armpw", True))
+    assert starts_of(*orders) == [True, None, False]
+
+
+def test_step_index_counts_steps_per_player():
+    rows = pl.DataFrame(
+        {
+            "match_id": [1, 1, 1, 1, 1],
+            "player_slot": [0, 0, 0, 1, 1],
+            "seq_idx": [0, 1, None, 0, 1],
+            "frame": [0, 3, 5, 0, 30],
+            "unit": ["armpw", "armpw", "armpw", "cormex", "cormex"],
+        }
+    )
+    assert rows.select(step_index()).to_series().to_list() == [0, None, None, 0, 1]
 
 
 def test_ordered_faction_and_removed_units():

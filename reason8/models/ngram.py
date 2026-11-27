@@ -3,7 +3,8 @@
 Before any learned model we need to know what counting scores. Every model here predicts
 the unit of the next step of an opening from the steps before it and what is known before
 the game: the player's faction, the map and the start position. A step is one decision:
-the orders of one drag (the same unit in the same frame) are merged into one step. The
+one drag of buildings or one quick run of clicks on a unit (the same unit at most 0.2 s
+after the order before, `reason8.openings.dataset.step_starts`) is one step. The
 dataset is `reason8.openings.dataset` (ADR 0012: an opening ends at the player's first
 contact with the enemy); how the models are scored is
 `reason8.models.evaluate` (ADR 0013).

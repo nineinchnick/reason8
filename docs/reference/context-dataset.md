@@ -82,10 +82,10 @@ pace
   before this one: orders of one frame are given at once, and an order in the
   frame of the step before it starts a new step only when its unit differs, so
   that time would give the answer away. Even so, it describes how the order
-  being predicted was given (a step that follows the one before by a tenth of
-  a second is nearly always the same unit again, clicked in a quick run) more
-  than the game, and the measurement keeps it out of the model with all
-  context ([`context.md`](../research/context.md)).
+  being predicted was given more than the game (a step within 0.2 s of the
+  order before is a different unit, one a few seconds after it often the same
+  unit again), and the measurement keeps it out of the model with all context
+  ([`context.md`](../research/context.md)).
 
 economy
 : The team's `metal` and `energy`: stored, `_storage`, `_income` and

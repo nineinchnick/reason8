@@ -54,10 +54,11 @@ Models of the opening learn from and are scored on the **decision table**
   measured on its own against the same model with the order history alone.
 - **The time since the player's previous order is not context.** The table
   keeps it (the `pace` group), but it says how the order being predicted was
-  clicked, not what the game looked like: a step a tenth of a second after the
-  one before is nearly always the same unit again, and the time since an order
-  of the same frame gives the unit away entirely. Models are judged without
-  it.
+  clicked, not what the game looked like: a step within 0.2 s of the order
+  before is a different unit by the rule that forms steps
+  ([ADR 0013](0013-evaluate-on-held-out-games.md)), and a step a few seconds
+  after it is much likelier to repeat the unit than one after a long pause.
+  Models are judged without it.
 
 ## Consequences
 
@@ -71,10 +72,12 @@ Models of the opening learn from and are scored on the **decision table**
   decides when to act (the reaction delays of
   [ADR 0008](0008-play-under-human-like-limits.md)), and the state is what the
   bot reads at that moment.
-- Quick runs of clicks of one unit are separate steps under
-  [ADR 0013](0013-evaluate-on-held-out-games.md), and they are what the pace
-  of the orders predicts. Merging them into one step, as drags are, would
-  change the protocol and every baseline, and is left to that record.
+- Quick runs of clicks of one unit are one step, as drags are
+  ([ADR 0013](0013-evaluate-on-held-out-games.md)), and the table numbers its
+  steps when it is loaded, by the same rule as the opening models, so a change
+  of what a step is needs no new build. With quick runs merged, the pace still
+  adds about two thirds of what it added before
+  ([`context.md`](../research/context.md)), so it stays out of the context.
 - The openings end where `openings_v2` ends them, mostly at the usual contact
   of the position, not at the re-simulated game's own contact. A dataset that
   ends them at the measured contact is a new version of both datasets.
