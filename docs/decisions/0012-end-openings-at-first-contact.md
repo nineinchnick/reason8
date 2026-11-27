@@ -96,9 +96,10 @@ parameters of the builder; `--cutoff window` builds the 8-minute openings
 
 - The orders kept are the ones a commands-only model can be expected to
   predict: 66% of the orders of the 8-minute window. An opening has a median
-  of 33 to 39 steps once drags are merged, and 68% of the openings reach the
-  30 scored steps of [ADR 0013](0013-evaluate-on-held-out-games.md), so the
-  later steps are scored mostly on back positions.
+  of 28 to 34 steps once drags and quick runs of clicks are merged, and 56% of
+  the openings reach the 30 scored steps of
+  [ADR 0013](0013-evaluate-on-held-out-games.md), so the later steps are
+  scored mostly on back positions.
 - A cutoff by position is an estimate: 8 to 11% of the orders it keeps were
   given after the player's own contact, and 8 to 16% of the orders given
   before it are dropped. Every re-simulated game replaces the estimate with a

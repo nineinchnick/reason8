@@ -27,24 +27,24 @@ once the batch is done.
 
 - **The join is exact.** On 20 games (28,895 rows) every row has the resources
   line of the second before its order with the same values, and the same units
-  for the team and its allies as `standing_units()`. 99.5% of the structure
+  for the team and its allies as `standing_units()`. 99.4% of the structure
   orders that start one of the scored steps are built on their spot within the
-  simulated 10 minutes, a median of 22 s later.
+  simulated 10 minutes, a median of 23 s later.
 - **The state adds a little, clearly.** Gradient-boosted trees given the
   team's economy, its own units, its allies and the game time predict the next
-  step right 54.0% of the time on test, against 51.3% with the order history
-  alone: +2.7 points (2.2 to 3.3), and 0.124 nats less log-loss (0.113 to
-  0.136). The economy and the team's own units carry most of it, about +2
-  points each, and they overlap. The allies add about a point, game time 1.4,
-  and wind nothing.
-- **More on Supreme Isthmus**: +3.5 points there, +2.2 on All That Glitters,
-  +2.6 on Rosetta (6 test games).
+  step right 51.4% of the time on test, against 48.1% with the order history
+  alone: +3.2 points (2.6 to 3.8), and 0.135 nats less log-loss (0.123 to
+  0.148). The economy and the team's own units carry most of it, +2.3 and +3.0
+  points, and they overlap. The allies and the game time add about a point
+  each, and wind nothing.
+- **More on Supreme Isthmus**: +3.9 points there, +2.8 on All That Glitters,
+  +2.8 on Rosetta (6 test games).
 - **Trees on 411 games match the n-gram on 33,657.** With the order history
-  alone the trees reach 51.3% top-1 and 1.589 nats; the saved 4-gram, trained
-  on 80 times as many games, 51.0% and 1.649. The same 4-gram trained on the
-  411 games gets 47.4% and 2.031: the n-gram needs the data, the trees use it
+  alone the trees reach 48.1% top-1 and 1.698 nats; the saved 4-gram, trained
+  on 80 times as many games, 48.3% and 1.759. The same 4-gram trained on the
+  411 games gets 44.1% and 2.187: the n-gram needs the data, the trees use it
   better.
-- **The time since the previous order is not context.** On its own it adds 7.7
+- **The time since the previous order is not context.** On its own it adds 5.1
   points, but it says how the order being predicted was clicked, not what the
   game looked like; it is kept out of the model with all context (below).
 
@@ -86,7 +86,7 @@ What players ordered shows up afterwards:
 | orders                                      | count  | built on the spot | median delay | p90 delay |
 | ------------------------------------------- | ------ | ----------------- | ------------ | --------- |
 | every structure order                       | 23,861 | 62.3%             | 59 s         | 283 s     |
-| orders that start one of the first 30 steps | 4,863  | 99.5%             | 22 s         | 116 s     |
+| orders that start one of the first 30 steps | 5,321  | 99.4%             | 23 s         | 126 s     |
 
 A structure order is matched with a unit of the same type that the player's
 team started within 16 map units of the order's spot, after the order and
@@ -154,47 +154,54 @@ A first version had the time since the player's previous order in the time
 group, and it raised top-1 by six points on its own, more than everything else
 together. It does not come from the game:
 
-- Orders of one frame are given at once. An order in the frame of the step
-  before it starts a new step only when its unit differs from the order before
-  (otherwise it is part of the drag), so "0 seconds since the previous order"
-  says "a different unit". On 100 games, 8% of the steps after the first were
-  in the frame of the order before, and none of them repeated the previous
-  step's unit, against 43% of all steps.
-- Taking the time since the last order of an earlier frame instead removes
-  that, but the time still describes the order being predicted. A step that
-  follows the one before by 0.05 to 0.2 seconds repeats its unit 94% of the
-  time: one run of quick clicks of the same building, which the protocol
-  counts as several steps. After 10 to 30 seconds, 17% do.
+- Orders of one frame are given at once, and an order that repeats the unit of
+  the order before it at most 0.2 s (6 frames) later is part of its step
+  ([ADR 0013](../decisions/0013-evaluate-on-held-out-games.md)). So a step
+  that follows an order within that time is a different unit, and the time
+  since the order before gives that away. The table takes the time since the
+  player's last order in an earlier frame, which hides the orders of one
+  frame, but not the quick clicks: 1.5% of the steps after the first follow
+  the previous order by 1 to 6 frames, and 0.2% of them repeat the unit of the
+  step before, against 34% of all steps.
+- The time still describes the order being predicted. A step that follows the
+  previous order by a quarter of a second to 3 seconds repeats the unit of the
+  step before 50 to 57% of the time: a run of the same building with short
+  pauses, placed one by one. After 10 seconds, 15% do.
+
+Before quick runs of clicks were merged into one step, the pace added 7.7
+points of top-1 on test, most of it from those runs: a step 0.05 to 0.2 s
+after the one before repeated its unit 94% of the time. With them merged it
+adds 5.1 points (4.4 to 5.7), 5.4 on validation: about two thirds of the
+effect remains, from the two reasons above.
 
 The table keeps that time (`since_previous_s`, the `pace` group) and the
 measurement reports it, but the model with all context leaves it out: the bot
 will not click like that, and a gain from it would not be a gain from the
-state. Merging quick runs of the same unit into one step would change the
-protocol of ADR 0013 and every baseline, and is not done here.
+state.
 
 ## Results
 
-On the test split: 45 games, 716 openings, 19,933 steps. The trees are
+On the test split: 45 games, 716 openings, 18,943 steps. The trees are
 compared with the trees on the order history alone, with paired intervals.
 
 | model                                     | trained on           | top-1             | top-3             | log-loss            | top-1 vs history    | log-loss vs history       |
 | ----------------------------------------- | -------------------- | ----------------- | ----------------- | ------------------- | ------------------- | ------------------------- |
-| n-gram: trigram, faction                  | 411 table games      | 46.7% (45.6–47.7) | 73.5% (72.4–74.6) | 1.901 (1.851–1.957) | -4.6 (-5.2 to -4.0) | +0.311 (+0.290 to +0.333) |
-| n-gram: 4-gram, faction, map and position | 411 table games      | 47.4% (46.6–48.3) | 74.1% (73.1–75.0) | 2.031 (1.970–2.095) | -3.9 (-4.4 to -3.3) | +0.441 (+0.415 to +0.468) |
-| the same 4-gram, saved                    | 33,657 dataset games | 51.0% (50.0–52.0) | 78.2% (77.2–79.2) | 1.649 (1.608–1.692) | -0.3 (-0.8 to +0.3) | +0.059 (+0.038 to +0.076) |
-| trees: history                            | 411 table games      | 51.3% (50.3–52.2) | 79.0% (77.9–80.1) | 1.589 (1.548–1.634) |                     |                           |
-| trees: history + time                     | 411 table games      | 52.7% (51.7–53.6) | 80.6% (79.6–81.6) | 1.532 (1.488–1.578) | +1.4 (+1.0 to +1.9) | -0.058 (-0.065 to -0.051) |
-| trees: history + economy                  | 411 table games      | 53.3% (52.2–54.5) | 81.5% (80.4–82.5) | 1.491 (1.445–1.541) | +2.1 (+1.4 to +2.7) | -0.099 (-0.111 to -0.086) |
-| trees: history + wind                     | 411 table games      | 51.6% (50.7–52.6) | 79.1% (77.9–80.1) | 1.582 (1.539–1.627) | +0.4 (-0.1 to +0.7) | -0.008 (-0.014 to -0.003) |
-| trees: history + own units                | 411 table games      | 53.6% (52.7–54.6) | 81.6% (80.6–82.6) | 1.478 (1.435–1.525) | +2.4 (+1.8 to +2.9) | -0.111 (-0.123 to -0.101) |
-| trees: history + allies                   | 411 table games      | 52.2% (51.2–53.1) | 80.1% (79.1–81.2) | 1.542 (1.497–1.590) | +0.9 (+0.4 to +1.4) | -0.047 (-0.056 to -0.039) |
-| trees: history + all context              | 411 table games      | 54.0% (52.9–55.1) | 82.4% (81.3–83.4) | 1.465 (1.422–1.514) | +2.7 (+2.2 to +3.3) | -0.124 (-0.136 to -0.113) |
-| trees: history + pace (not context)       | 411 table games      | 59.0% (57.9–60.2) | 82.8% (81.8–83.8) | 1.310 (1.262–1.359) | +7.7 (+7.1 to +8.5) | -0.280 (-0.295 to -0.267) |
+| n-gram: trigram, faction                  | 411 table games      | 42.8% (41.8–43.8) | 69.7% (68.4–70.8) | 2.036 (1.981–2.092) | -5.3 (-6.1 to -4.6) | +0.337 (+0.313 to +0.362) |
+| n-gram: 4-gram, faction, map and position | 411 table games      | 44.1% (43.2–45.0) | 69.9% (69.0–70.9) | 2.187 (2.121–2.254) | -4.1 (-4.7 to -3.4) | +0.488 (+0.459 to +0.514) |
+| the same 4-gram, saved                    | 33,657 dataset games | 48.3% (47.3–49.3) | 75.0% (74.0–76.0) | 1.759 (1.715–1.802) | +0.1 (-0.5 to +0.7) | +0.061 (+0.038 to +0.080) |
+| trees: history                            | 411 table games      | 48.1% (47.2–49.1) | 75.6% (74.7–76.5) | 1.698 (1.654–1.748) |                     |                           |
+| trees: history + time                     | 411 table games      | 49.5% (48.4–50.7) | 77.2% (76.1–78.2) | 1.638 (1.589–1.690) | +1.4 (+0.9 to +1.9) | -0.060 (-0.068 to -0.053) |
+| trees: history + economy                  | 411 table games      | 50.4% (49.4–51.4) | 78.6% (77.4–79.7) | 1.593 (1.545–1.645) | +2.3 (+1.8 to +2.8) | -0.105 (-0.116 to -0.095) |
+| trees: history + wind                     | 411 table games      | 48.4% (47.5–49.3) | 75.9% (74.8–77.0) | 1.692 (1.646–1.742) | +0.2 (-0.2 to +0.7) | -0.006 (-0.013 to +0.000) |
+| trees: history + own units                | 411 table games      | 51.1% (50.2–52.0) | 78.7% (77.7–79.7) | 1.585 (1.538–1.638) | +3.0 (+2.4 to +3.6) | -0.113 (-0.125 to -0.102) |
+| trees: history + allies                   | 411 table games      | 49.5% (48.5–50.5) | 77.0% (75.9–78.1) | 1.643 (1.594–1.696) | +1.3 (+0.8 to +1.9) | -0.055 (-0.064 to -0.047) |
+| trees: history + all context              | 411 table games      | 51.4% (50.3–52.4) | 79.4% (78.3–80.3) | 1.563 (1.514–1.615) | +3.2 (+2.6 to +3.8) | -0.135 (-0.148 to -0.123) |
+| trees: history + pace (not context)       | 411 table games      | 53.2% (52.2–54.2) | 79.6% (78.5–80.6) | 1.501 (1.450–1.555) | +5.1 (+4.4 to +5.7) | -0.198 (-0.209 to -0.187) |
 
-On validation (47 games, 20,461 steps) the picture is the same: 52.1% top-1
-and 1.574 nats with the history, 54.8% and 1.443 with all context (+2.8, 2.2
-to 3.3); economy +2.0, own units +2.5, allies +0.9, time +1.2, wind +0.2; the
-saved 4-gram 52.0% and 1.640.
+On validation (47 games, 19,386 steps) the picture is the same: 48.6% top-1
+and 1.685 nats with the history, 52.0% and 1.543 with all context (+3.4, 2.8
+to 4.0); economy +2.8, own units +2.9, allies +0.8, time +1.3, wind -0.1, pace
++5.4; the saved 4-gram 48.5% and 1.756.
 
 ### By map
 
@@ -202,19 +209,19 @@ All context against the history alone, on test:
 
 | map                      | games | steps | history top-1     | all context top-1 | top-1 vs history    | log-loss vs history       |
 | ------------------------ | ----- | ----- | ----------------- | ----------------- | ------------------- | ------------------------- |
-| All That Glitters v2.2.3 | 21    | 9,722 | 52.6% (51.8–53.6) | 54.9% (53.6–56.4) | +2.2 (+1.5 to +3.0) | -0.121 (-0.136 to -0.102) |
-| Rosetta 1.4.4            | 6     | 2,576 | 53.4% (50.9–56.5) | 56.0% (53.2–59.8) | +2.6 (+1.7 to +3.4) | -0.090 (-0.099 to -0.082) |
-| Supreme Isthmus v2.1     | 18    | 7,635 | 48.8% (47.6–50.2) | 52.3% (50.6–54.0) | +3.5 (+2.6 to +4.3) | -0.140 (-0.157 to -0.122) |
+| All That Glitters v2.2.3 | 21    | 9,360 | 49.6% (48.6–50.5) | 52.3% (51.1–53.6) | +2.8 (+1.8 to +3.6) | -0.124 (-0.139 to -0.107) |
+| Rosetta 1.4.4            | 6     | 2,423 | 48.7% (47.4–50.0) | 51.5% (49.6–53.5) | +2.8 (+1.4 to +4.0) | -0.114 (-0.124 to -0.104) |
+| Supreme Isthmus v2.1     | 18    | 7,160 | 46.1% (44.3–47.8) | 50.0% (47.9–52.0) | +3.9 (+3.1 to +4.7) | -0.158 (-0.180 to -0.137) |
 
 Each group on its own, top-1 against the history, on test:
 
 | group     | All That Glitters   | Rosetta             | Supreme Isthmus     |
 | --------- | ------------------- | ------------------- | ------------------- |
-| time      | +1.5 (+0.9 to +2.2) | -0.6 (-1.2 to +0.0) | +1.9 (+1.3 to +2.4) |
-| economy   | +1.6 (+0.6 to +2.5) | +1.7 (+0.3 to +3.2) | +2.8 (+1.7 to +3.6) |
-| wind      | +0.3 (-0.4 to +0.9) | -0.0 (-0.7 to +0.6) | +0.6 (-0.0 to +1.1) |
-| own units | +1.7 (+1.0 to +2.4) | +1.5 (+1.3 to +1.7) | +3.5 (+2.8 to +4.2) |
-| allies    | +0.6 (-0.1 to +1.4) | +0.2 (-0.8 to +0.8) | +1.5 (+0.7 to +2.2) |
+| time      | +1.8 (+1.1 to +2.5) | +0.0 (-0.7 to +0.9) | +1.2 (+0.2 to +2.1) |
+| economy   | +2.0 (+1.4 to +2.7) | +1.7 (+0.2 to +3.1) | +2.8 (+2.0 to +3.6) |
+| wind      | +0.5 (-0.2 to +1.3) | -0.7 (-1.4 to -0.0) | +0.2 (-0.6 to +1.0) |
+| own units | +2.7 (+1.8 to +3.5) | +1.4 (+0.5 to +2.3) | +4.0 (+3.3 to +4.6) |
+| allies    | +1.3 (+0.5 to +2.0) | +0.0 (-1.3 to +1.3) | +1.8 (+0.9 to +2.7) |
 
 Rosetta has 6 test games: its intervals, from resampling those 6, are too
 narrow to trust.
@@ -225,16 +232,16 @@ The share of the total gain of the splits of the model with all context:
 
 | group     | columns | share of gain |
 | --------- | ------- | ------------- |
-| history   | 90      | 84.2%         |
-| time      | 1       | 1.2%          |
-| economy   | 8       | 4.8%          |
-| wind      | 3       | 0.6%          |
-| own units | 162     | 4.6%          |
-| allies    | 170     | 4.6%          |
+| history   | 90      | 81.3%         |
+| time      | 1       | 1.4%          |
+| economy   | 8       | 5.7%          |
+| wind      | 3       | 0.7%          |
+| own units | 162     | 5.4%          |
+| allies    | 170     | 5.5%          |
 
-The previous step alone has 48.8% of the gain, the two before it 13.2% and
-6.8%, then faction, position and its role. The first state columns are the
-game time (1.2%), the team's metal expense, stored energy and stored metal
+The previous step alone has 43.3% of the gain, the two before it 12.3% and
+7.5%, then faction, position and its role. The first state columns are the
+game time (1.4%), the team's stored energy, metal expense and stored metal
 (about 1% each). Which factories the player has ordered so far (`ordered_ap`,
 `ordered_vp`, `ordered_alab`) are among the history columns used most.
 
@@ -264,7 +271,7 @@ For the first learned model (the next step after the n-gram tables):
   the whole opening dataset, which needs no re-simulation, it is the first
   candidate.
 - **Give it the team's economy and own units.** They are the state that helps,
-  about +2 points each and overlapping (all context together +2.7), and both
+  +2.3 and +3.0 points and overlapping (all context together +3.2), and both
   are close to what BARb's scripts already see: the team's resources and its
   unit counts
   ([ADR 0007](../decisions/0007-ship-the-model-as-tables-in-a-barb-variant.md)).
@@ -294,6 +301,6 @@ uv run reason8 context measure --split test --out data/context-check/test.md
 The build reads every game whose state is there and takes about 30 s for 500
 games. The measurement fits eight tree models on all the steps of the training
 games, with 6 threads (`--threads`): on 503 games, 411 of them in training
-(250,000 steps), it took an hour and at most 5.6 GB of memory per split. Both
-grow about linearly with the games: on the whole sample expect five to six
-hours and 30 GB per split, or more threads once the machine is free.
+(230,000 steps), it took 55 minutes and at most 5.1 GB of memory per split.
+Both grow about linearly with the games: on the whole sample expect five to
+six hours and 30 GB per split, or more threads once the machine is free.

@@ -12,7 +12,7 @@ plays them from top to bottom whatever happens in the game.
 What we measured and built since:
 
 - The state of the game predicts the next order better than the order history
-  alone: the team's economy, its own units and the game time add about two
+  alone: the team's economy, its own units and the game time add one to three
   points of top-1 each over trees on the history, and trees trained on a few
   hundred games match the n-gram trained on the whole dataset
   ([`context.md`](../research/context.md), preliminary).
@@ -91,7 +91,7 @@ The first learned model is asked during the game what a builder does next.
   human states at fixed minutes, and the classifier of
   [ADR 0003](0003-define-success-as-in-game-measures.md).
 - In the game the order history is the model's own earlier answers, and a
-  model can learn to repeat them: repeating the last order is right for 40% of
+  model can learn to repeat them: repeating the last order is right for 32% of
   steps. A model with a shorter history is played next to the full one to see
   whether it drifts less.
 - The account's rating is a weak label of skill. A measure of how well someone

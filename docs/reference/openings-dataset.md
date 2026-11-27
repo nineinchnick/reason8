@@ -324,9 +324,9 @@ Games per opening era:
 
 | map                      | openings | orders p10 | median | p90 | steps p10 | median | p90 |
 | ------------------------ | -------- | ---------- | ------ | --- | --------- | ------ | --- |
-| All That Glitters v2.2.3 | 309350   | 37         | 71     | 143 | 25        | 39     | 60  |
-| Rosetta 1.4.4            | 16964    | 24         | 40     | 74  | 20        | 34     | 56  |
-| Supreme Isthmus v2.1     | 344470   | 23         | 65     | 212 | 18        | 33     | 57  |
+| All That Glitters v2.2.3 | 309350   | 37         | 71     | 143 | 22        | 34     | 52  |
+| Rosetta 1.4.4            | 16964    | 24         | 40     | 74  | 18        | 28     | 50  |
+| Supreme Isthmus v2.1     | 344470   | 23         | 65     | 212 | 15        | 29     | 51  |
 
 ### Where openings end
 
@@ -441,9 +441,10 @@ position.
   and the tech positions keep their 8 minutes.
 - **Half of all orders are drags.** 57% of the rows repeat the unit of the
   order before them in the same frame. An opening has a median of 40 to 71
-  orders, but 33 to 39 steps once those repeats are merged (48 to 63 steps in
-  the whole 8 minutes). The Isthmus pond positions (`P4`, `P12`) start with a
-  dragged line of tidal generators in 95% of openings.
+  orders, but 28 to 34 steps once those repeats and quick runs of clicks on
+  one unit are merged (42 to 54 steps in the whole 8 minutes). The Isthmus
+  pond positions (`P4`, `P12`) start with a dragged line of tidal generators
+  in 95% of openings.
 - **Few orders are queue edits.** 1.7% of the rows take units out of a factory
   queue, 0.8% are inserted into a queue and 0.05% come from the factory-quota
   widget; 73% were clicked and 80% were given with shift.

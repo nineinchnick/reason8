@@ -188,7 +188,7 @@ measure: the distribution of states the agent visits against the humans'.
   - The order history is the copycat risk: the model's inputs include the
     units of the three previous steps and the counts ordered so far, and in
     the game those are the model's own earlier answers. The repeat baseline
-    alone scores 40% top-1
+    alone scores 32% top-1
     ([ADR 0013](../decisions/0013-evaluate-on-held-out-games.md)), so the
     trees can lean on it. Held-out accuracy does not show this; play does.
   - A plan in the style of z fits our data: from each training game, take a
