@@ -377,7 +377,8 @@ that do nothing. In imitation the case differs (our reading):
   its own model.
 - Mask impossibility (build list, builder kind, unit limits, no target), not
   cost.
-- ADR 0019 should say this, since it decides how answers are chosen.
+- [ADR 0019](../decisions/0019-first-model-trees-asked-by-every-builder.md)
+  records the rule.
 
 ## 4. What the model sees of the map
 
@@ -550,22 +551,17 @@ if it is far, restrict the job to wrecks within a radius around the builder,
 as BARb already does in its other call (`isNear`). Use value, distance, threat
 and builders already assigned as the first candidate features.
 
-## Proposed changes to recorded decisions
+## What the records took from this
 
-Proposals for the maintainer; the records are unchanged.
+[ADR 0019](../decisions/0019-first-model-trees-asked-by-every-builder.md)
+states the mask, the check that keeps skill as an input, the measures of drift
+and the test with a shorter order history. This doc keeps the evidence for
+them.
 
-- **ADR 0019, choosing from the answer:** state that answers the asking
-  builder cannot give are masked and the rest renormalised before the 10%
-  threshold, and that models are scored with the same mask.
-- **ADR 0019, inputs:** say that the order history is kept short or tested
-  against a shorter one in the game, because of the copycat risk, and that the
-  skill input is kept only if a check shows the model uses it.
-- **ADR 0019, consequences:** name the drift measures (the share of asks
-  falling back to BARb by minute, the likelihood of the bot's choices under
-  the model, the distance of its state from human states at fixed minutes).
-- **ADR 0004 and the slice's skill filter:** once skill is an input, consider
-  training on a wider skill range and conditioning, as AlphaStar Unplugged's
-  results favour.
+Still proposals:
+
+- **The slice's skill filter:** consider training on a wider skill range and
+  conditioning on skill, as AlphaStar Unplugged's results favour.
 - **A new record when the target model is decided:** targets and placements as
   candidates ranked by trees.
 
