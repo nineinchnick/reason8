@@ -41,7 +41,7 @@ from reason8.models.ngram import (
     models_dir,
     save_model,
 )
-from reason8.openings.dataset import dataset_dir
+from reason8.openings.dataset import dataset_dir, load_sequences
 
 # Steps scored per opening. The first 30 hold the first factory and its first units, and
 # keep long openings from outweighing the others; an opening that ends at first contact
@@ -248,13 +248,14 @@ def report(
     held_out: Sequence[OpeningSteps],
     split: str,
     best: str,
-    raw: tuple[Sequence[OpeningSteps], Sequence[OpeningSteps]] | None = None,
+    raw: tuple[NgramModel, Sequence[OpeningSteps]] | None = None,
     rounds: int = BOOTSTRAP_ROUNDS,
 ) -> str:
     """The tables of docs/results.md for fitted models scored on `held_out`.
 
     `best` is the model the detailed tables are about, compared with `REFERENCE_MODEL`.
-    `raw` is (training, held-out) openings of raw orders, for one comparison row.
+    `raw` is `REFERENCE_MODEL` fitted on raw orders (`fit_raw`) and the held-out openings
+    as raw orders, for one comparison row.
     """
     any_model = next(iter(fitted.values()))
     trained = any_model.frequencies if isinstance(any_model, RepeatModel) else any_model
@@ -281,8 +282,8 @@ def report(
     ]
 
     if raw is not None:
-        raw_model = NgramModel(REFERENCE_MODEL, chain(3)).fit(raw[0])
-        summary = summarize(score(raw_model, raw[1]), rounds=rounds)
+        raw_model, raw_held_out = raw
+        summary = summarize(score(raw_model, raw_held_out), rounds=rounds)
         lines += [
             "",
             f"`{REFERENCE_MODEL}` on raw orders (drags not merged), for comparison with the "
@@ -385,17 +386,25 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--save", type=Path, default=None, help="where to save the chosen model")
 
 
+def fit_raw(training: Sequence[OpeningSteps]) -> NgramModel:
+    """`REFERENCE_MODEL` fitted on openings of raw orders, for the comparison row of
+    `report`."""
+    return NgramModel(REFERENCE_MODEL, chain(3)).fit(training)
+
+
 def run(args: argparse.Namespace) -> int:
     manifest = json.loads((args.dataset / "manifest.json").read_text())
     train_dataset = args.train_dataset or args.dataset
-    fitted = fit_models(load_openings(train_dataset, "train"))
+    # The training split is read once for both the steps and the raw orders: each read
+    # of it briefly takes several GB.
+    training = load_sequences(train_dataset, ["train"])
+    raw_model = fit_raw(load_openings(train_dataset, "train", merge=False, frame=training))
+    fitted = fit_models(load_openings(train_dataset, "train", frame=training))
+    del training
     validation = load_openings(args.dataset, "validation")
     best = choose_model(fitted, validation)
     held_out = validation if args.split == "validation" else load_openings(args.dataset, "test")
-    raw = (
-        load_openings(train_dataset, "train", merge=False),
-        load_openings(args.dataset, args.split, merge=False),
-    )
+    raw = (raw_model, load_openings(args.dataset, args.split, merge=False))
     print(
         f"Dataset `{manifest['name']}` built {manifest['built_at']} "
         f"(code {manifest['code']['commit']}).\n"

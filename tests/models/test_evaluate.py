@@ -6,6 +6,7 @@ import pytest
 from reason8.models.evaluate import (
     choose_model,
     fit_models,
+    fit_raw,
     paired_difference,
     report,
     score,
@@ -57,7 +58,7 @@ def test_choose_and_report():
     assert set(fitted) >= {"uniform", "trigram, faction", "trigram, faction, map and position"}
     best = choose_model(fitted, held_out)
     assert isinstance(fitted[best], NgramModel) and best != "uniform"
-    text = report(fitted, held_out, "validation", best, (training, held_out), rounds=20)
+    text = report(fitted, held_out, "validation", best, (fit_raw(training), held_out), rounds=20)
     assert "## All models" in text
     assert "### Test Valley 1.0" in text
     assert "| P2 |" in text
