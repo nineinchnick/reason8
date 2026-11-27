@@ -219,6 +219,21 @@ def lines_v6() -> list[dict]:
     return [lines[0], *body, end]
 
 
+#: Format 7 adds the unit types as the game loaded them.
+LOADED = {
+    str(COMMANDER): {"bp": 300, "options": [EXTRACTOR, BOT], "can": "mapr"},
+    str(EXTRACTOR): {"bp": 0, "options": [], "can": ""},
+    str(BOT): {"bp": 0.5, "options": [], "can": "m"},
+}
+
+
+def lines_v7() -> list[dict]:
+    """The game of format 6 in format 7, with the unit types as loaded."""
+    lines = lines_v6()
+    lines[0] = {**lines[0], "v": 7, "loaded": LOADED}
+    return lines
+
+
 def write_state(path: Path, lines: list[dict]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     with gzip.open(path, "wt", encoding="utf-8") as file:
@@ -273,7 +288,7 @@ def test_format_5_reads_like_format_4(tmp_path):
     assert units(new) == units(old)
 
 
-@pytest.mark.parametrize("make_lines", [lines_v6, lines_v5, lines_v4])
+@pytest.mark.parametrize("make_lines", [lines_v7, lines_v6, lines_v5, lines_v4])
 def test_tables_read_like_the_state_file(tmp_path, make_lines):
     path = write_state(tmp_path / "date=2026-11-21" / "2026-11-21_game.jsonl.gz", make_lines())
     result = tables.convert(path)
@@ -485,3 +500,42 @@ def test_check_of_features_and_work(tmp_path):
     assert result["features"]["reclaim"]["teams_differing_from_game"] == [
         {"team": 0, "metal": 50.0, "game": 80.0}
     ]
+
+
+def test_loaded_unit_types(tmp_path):
+    path = write_state(tmp_path / "2026-11-21_game.jsonl.gz", lines_v7())
+    tables.convert(path)
+    game = tables.read_game(path)
+    for table, schema in tables.TABLE_SCHEMAS.items():
+        assert dict(game[table].schema) == schema, table
+    row = game["game"].row(0, named=True)
+    assert row["version"] == 7
+    commander, extractor, bot = row["unit_defs"]
+    assert commander["build_options"] == ["armmex", "armpw"]
+    assert (commander["build_power"], commander["can_resurrect"], commander["can_assist"]) == (
+        300,
+        False,
+        True,
+    )
+    assert extractor["build_options"] == [] and not extractor["can_move"]
+    assert (bot["build_power"], bot["can_move"], bot["can_repair"]) == (0.5, True, False)
+
+
+def test_format_6_tables_read_with_format_7(tmp_path):
+    """Tables written before format 7 have fewer unit type columns."""
+    state_dir = tmp_path / "state"
+    old = write_state(state_dir / "date=2026-11-20" / "2026-11-20_old.jsonl.gz", lines_v6())
+    new = write_state(state_dir / "date=2026-11-21" / "2026-11-21_new.jsonl.gz", lines_v7())
+    tables.convert(old)
+    tables.convert(new)
+    game_path = tables.table_path(old, "game")
+    old_unit_def = pl.Struct({"unit_def_id": pl.Int32, "name": pl.String, "static": pl.Boolean})
+    pl.read_parquet(game_path).with_columns(
+        pl.col("unit_defs").cast(pl.List(old_unit_def))
+    ).write_parquet(game_path)
+    game = tables.read_game(old)
+    assert dict(game["game"].schema) == tables.TABLE_SCHEMAS["game"]
+    assert game["game"].row(0, named=True)["unit_defs"][0]["build_options"] is None
+    every = tables.scan(state_dir, "game").collect()
+    assert every.get_column("version").to_list() == [6, 7]
+    assert list(read_records(game_path, True)) == list(read_records(old, True))

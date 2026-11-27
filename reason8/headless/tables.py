@@ -50,9 +50,12 @@ by name, not by the game version's numbers, and every table is zstd-compressed. 
     started the unit), repair, reclaim, resurrect, capture, restore or none, and the unit
     or feature it worked on. Sampled every ``work_frames`` frames.
 
+From format 7 the ``game`` row also has each unit type as the game loaded it: build power,
+build options and what it can do (move, assist, repair, reclaim, resurrect).
+
 Games written before format 6 have no ``features``, ``reclaim`` and ``work`` files, and
-their ``events`` lack the format 6 columns: `scan()` and `read_game()` give them empty
-tables and empty columns.
+their ``events`` and ``game`` lack the later columns: `scan()` and `read_game()` give
+them empty tables and empty columns.
 
 `scan()` reads one table of many games as a lazy Polars frame; `read_records()` in
 `reason8.headless.state` reads a game's tables as if they were its JSON lines.
@@ -82,6 +85,16 @@ WORK_TASKS = ("none", "build", "repair", "reclaim", "resurrect", "capture", "res
 FEATURE_ENDS = ("reclaimed", "resurrected", "destroyed")
 #: The format that added features, reclaim and builders' work.
 FEATURES_FORMAT = 6
+#: The format that added the unit types as loaded.
+LOADED_FORMAT = 7
+#: What a unit type can do, in the widget's letters ("can"), as columns of ``unit_defs``.
+JOB_FLAGS = {
+    "m": "can_move",
+    "a": "can_assist",
+    "p": "can_repair",
+    "r": "can_reclaim",
+    "z": "can_resurrect",
+}
 COMPRESSION = "zstd"
 COMPRESSION_LEVEL = 19  # 13% smaller than 9; a game takes 0.07 s to write
 
@@ -94,7 +107,18 @@ _TEAM = pl.Struct(
         "gaia": pl.Boolean,
     }
 )
-_UNIT_DEF = pl.Struct({"unit_def_id": pl.Int32, "name": pl.String, "static": pl.Boolean})
+_UNIT_DEF = pl.Struct(
+    {
+        "unit_def_id": pl.Int32,
+        "name": pl.String,
+        "static": pl.Boolean,
+        # as the game loaded it (format 7): build power (workertime), the unit types it can
+        # build, and what it can do
+        "build_power": pl.Float32,
+        "build_options": pl.List(pl.String),
+        **dict.fromkeys(JOB_FLAGS.values(), pl.Boolean),
+    }
+)
 _FEATURE_DEF = pl.Struct(
     {
         "feature_def_id": pl.Int32,
@@ -292,6 +316,7 @@ def _game_row(
     static = set(header.get("static", ()))
     version = header.get("v", 1)
     unit_defs = header.get("unitdefs", {})
+    loaded = header.get("loaded", {})
     return {
         "replay": replay,
         "version": version,
@@ -321,6 +346,7 @@ def _game_row(
                 "unit_def_id": int(unit_def_id),
                 "name": name,
                 "static": (int(unit_def_id) in static) if "static" in header else None,
+                **_loaded_unit_def(loaded.get(unit_def_id), unit_defs),
             }
             for unit_def_id, name in sorted(
                 header.get("unitdefs", {}).items(), key=lambda item: int(item[0])
@@ -347,6 +373,19 @@ def _game_row(
         ]
         if end and "game_reclaimed" in end
         else None,
+    }
+
+
+def _loaded_unit_def(loaded: dict | None, names: dict[str, str]) -> dict:
+    """The columns of a unit type as loaded (format 7) from the widget's ``loaded`` entry;
+    all null before."""
+    if loaded is None:
+        return {"build_power": None, "build_options": None, **dict.fromkeys(JOB_FLAGS.values())}
+    can = loaded["can"]
+    return {
+        "build_power": float(loaded["bp"]),
+        "build_options": [names[str(option)] for option in loaded["options"]],
+        **{column: letter in can for letter, column in JOB_FLAGS.items()},
     }
 
 
@@ -581,7 +620,13 @@ def scan_files(paths: list[Path], table: str) -> pl.LazyFrame:
     `TABLE_SCHEMAS`: the columns a game's format did not have yet are null."""
     if not paths:
         return pl.LazyFrame(schema=TABLE_SCHEMAS[table])
-    return pl.scan_parquet(paths, schema=TABLE_SCHEMAS[table], missing_columns="insert")
+    return pl.scan_parquet(
+        paths,
+        schema=TABLE_SCHEMAS[table],
+        missing_columns="insert",
+        # format 7 added fields to the unit types of the ``game`` table
+        cast_options=pl.ScanCastOptions(missing_struct_fields="insert"),
+    )
 
 
 def read_game(path: str | Path) -> dict[str, pl.DataFrame]:
@@ -604,8 +649,8 @@ def read_table_records(path: str | Path, snapshots: bool = False) -> Iterator[di
 
     Each frame gives its unit events, features (appeared, reclaim, went), hits, damage,
     resource line, snapshot and builders' work, in that order; floats come back rounded as
-    the widget wrote them. Use
-    `reason8.headless.state.read_records`, which makes snapshots whole as well.
+    the widget wrote them. Use `reason8.headless.state.read_records`, which makes snapshots
+    whole as well.
     """
     tables = read_game(path)
     game = tables["game"].row(0, named=True)
@@ -646,6 +691,15 @@ def read_table_records(path: str | Path, snapshots: bool = False) -> Iterator[di
     if version >= FEATURES_FORMAT:
         header["work_frames"] = game["work_frames"]
         header["builders"] = [ids[name] for name in game["builder_types"] or [] if name in ids]
+    if version >= LOADED_FORMAT:
+        header["loaded"] = {
+            str(unit_def["unit_def_id"]): {
+                "bp": _short(unit_def["build_power"]),
+                "options": [ids[name] for name in unit_def["build_options"]],
+                "can": "".join(letter for letter, column in JOB_FLAGS.items() if unit_def[column]),
+            }
+            for unit_def in game["unit_defs"]
+        }
     yield header
 
     def unit_def_id(name: str | None) -> int:
@@ -851,6 +905,13 @@ def _round(value: float | None, digits: int) -> float | int | None:
         return None
     rounded = round(value, digits)
     return int(rounded) if digits == 0 else rounded
+
+
+def _short(value: float) -> float | int:
+    """A number the widget wrote with ``%.10g``, as JSON reads it back: an integer when it
+    is one."""
+    rounded = round(value, 6)
+    return int(rounded) if rounded == int(rounded) else rounded
 
 
 _RESOURCE_DIGITS = {"metal_income": 1, "metal_expense": 1, "energy_income": 0, "energy_expense": 0}

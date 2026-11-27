@@ -24,6 +24,9 @@
 -- what it had left when reclaimed away to the builders working on it in that
 -- frame, which the widget asks right then.
 --
+-- The header also has the unit types as the game loaded them (format 7), after its
+-- post-processing: build power, build options and what each can do.
+--
 -- Resource and snapshot lines are written in GameFramePost, after everything
 -- that happened in the frame, so a line of frame F shows the world after the
 -- unit lines of frames up to F. An engine without GameFramePost gets them in
@@ -63,8 +66,9 @@ end
 local OUT_PATH = "LuaUI/Config/reason8_state.jsonl"
 -- 2: hit and damage lines, wind; 3: exact attacker; 4: idle; 5: resource lines every
 -- second, snapshots at the end of the frame and without finished buildings; 6: features,
--- reclaim, builders' work, resurrected units' features, attacker of a destroyed unit
-local FORMAT_VERSION = 6
+-- reclaim, builders' work, resurrected units' features, attacker of a destroyed unit;
+-- 7: unit types as loaded
+local FORMAT_VERSION = 7
 
 local spGetGameFrame = Spring.GetGameFrame
 local spGetAllUnits = Spring.GetAllUnits
@@ -143,6 +147,40 @@ local function jsonString(value)
 	end) .. '"'
 end
 
+-- A unit type as the game loaded it, after its post-processing of the unit files, which
+-- changes build lists, build power and what a unit can do:
+--   "<unitDefID>": { "bp": build power (workertime), "options": the unit types it can
+--                   build, by id, "can": what it can do: "m" move, "a" assist,
+--                   "p" repair, "r" reclaim, "z" resurrect }
+local JOB_FLAGS = {
+	{ "canMove", "m" },
+	{ "canAssist", "a" },
+	{ "canRepair", "p" },
+	{ "canReclaim", "r" },
+	{ "canResurrect", "z" },
+}
+
+local function loadedUnitDef(unitDefID, unitDef)
+	local options = {}
+	for _, optionID in ipairs(unitDef.buildOptions or {}) do
+		options[#options + 1] = optionID
+	end
+	table.sort(options) -- the engine lists them in no fixed order
+	local flags = {}
+	for i = 1, #JOB_FLAGS do
+		if unitDef[JOB_FLAGS[i][1]] then
+			flags[#flags + 1] = JOB_FLAGS[i][2]
+		end
+	end
+	return format(
+		'"%d":{"bp":%.10g,"options":[%s],"can":"%s"}',
+		unitDefID,
+		unitDef.buildSpeed or 0,
+		concat(options, ","),
+		concat(flags)
+	)
+end
+
 local function writeHeader()
 	-- pairs() has no fixed order; the file must not depend on it
 	local unitDefIDs = {}
@@ -150,7 +188,7 @@ local function writeHeader()
 		unitDefIDs[#unitDefIDs + 1] = unitDefID
 	end
 	table.sort(unitDefIDs)
-	local unitDefNames, staticIDs, builderIDs = {}, {}, {}
+	local unitDefNames, staticIDs, builderIDs, loadedParts = {}, {}, {}, {}
 	for i = 1, #unitDefIDs do
 		local unitDefID = unitDefIDs[i]
 		local unitDef = UnitDefs[unitDefID]
@@ -168,6 +206,7 @@ local function writeHeader()
 			builderIDs[#builderIDs + 1] = unitDefID
 			maxBuildDistance = math.max(maxBuildDistance, unitDef.buildDistance or 0)
 		end
+		loadedParts[#loadedParts + 1] = loadedUnitDef(unitDefID, unitDef)
 	end
 	local teamParts = {}
 	for _, team in ipairs(Spring.GetTeamList()) do
@@ -188,7 +227,7 @@ local function writeHeader()
 			'{"t":"header","v":%d,"game":%s,"map":%s,"engine":%s,"mapx":%d,"mapz":%d,'
 				.. '"replay":%s,"snapshot_frames":%d,"resource_frames":%d,"work_frames":%d,'
 				.. '"wind_min":%.1f,"wind_max":%.1f,"tidal":%.1f,'
-				.. '"teams":[%s],"unitdefs":{%s},"static":[%s],"builders":[%s]}',
+				.. '"teams":[%s],"unitdefs":{%s},"static":[%s],"builders":[%s],"loaded":{%s}}',
 			FORMAT_VERSION,
 			jsonString(Game.gameName .. " " .. Game.gameVersion),
 			jsonString(Game.mapName),
@@ -205,7 +244,8 @@ local function writeHeader()
 			concat(teamParts, ","),
 			concat(unitDefNames, ","),
 			concat(staticIDs, ","),
-			concat(builderIDs, ",")
+			concat(builderIDs, ","),
+			concat(loadedParts, ",")
 		)
 	)
 end
