@@ -151,9 +151,11 @@ LINE_ORDER = {
     "fdestroyed": 3,
     "hit": 4,
     "damage": 5,
-    "r": 6,
-    "s": 7,
-    "work": 8,
+    "los": 6,
+    "radar": 6,
+    "r": 7,
+    "s": 8,
+    "work": 9,
 }
 
 
@@ -219,7 +221,20 @@ def lines_v6() -> list[dict]:
     return [lines[0], *body, end]
 
 
-#: Format 7 adds the unit types as the game loaded them.
+def sight(sense: str, frame: int, unit: int, ally: int, entered: bool, x: int, z: int) -> dict:
+    return {"t": sense, "f": frame, "u": unit, "ally": ally, "in": entered, "x": x, "z": z}
+
+
+#: Format 7 adds: the commander of team 1 (ally 1) sees the bot coming, and keeps it on
+#: radar after it leaves sight, until it dies; team 1 sees the extractor from the start and
+#: is given it.
+VISIBILITY = [
+    sight("radar", 0, 10, 1, True, 120, 140),
+    sight("los", 10, 10, 1, True, 120, 140),
+    sight("radar", 100, 11, 1, True, 400, 400),
+    sight("los", 100, 11, 1, True, 400, 400),
+    sight("los", 110, 11, 1, False, 405, 400),
+]
 LOADED = {
     str(COMMANDER): {"bp": 300, "options": [EXTRACTOR, BOT], "can": "mapr"},
     str(EXTRACTOR): {"bp": 0, "options": [], "can": ""},
@@ -228,10 +243,18 @@ LOADED = {
 
 
 def lines_v7() -> list[dict]:
-    """The game of format 6 in format 7, with the unit types as loaded."""
+    """The game of format 6 in format 7, with sight and radar and the unit types as loaded."""
     lines = lines_v6()
-    lines[0] = {**lines[0], "v": 7, "loaded": LOADED}
-    return lines
+    lines[0] = {**lines[0], "v": 7, "visibility": True, "loaded": LOADED}
+    # a feature type has no frame: it goes with the feature after it
+    keyed = [
+        (line["f"] if "f" in line else lines[i + 2]["f"], LINE_ORDER[line["t"]], line)
+        for i, line in enumerate(lines[1:-1])
+    ]
+    keyed += [(line["f"], LINE_ORDER[line["t"]], line) for line in VISIBILITY]
+    body = [line for *_, line in sorted(keyed, key=lambda item: item[:2])]
+    end = {**lines[-1], "visibility_unmatched": 0, "visibility_multiple": 0}
+    return [lines[0], *body, end]
 
 
 def write_state(path: Path, lines: list[dict]) -> Path:
@@ -502,14 +525,14 @@ def test_check_of_features_and_work(tmp_path):
     ]
 
 
-def test_loaded_unit_types(tmp_path):
+def test_visibility_and_loaded_unit_types(tmp_path):
     path = write_state(tmp_path / "2026-11-21_game.jsonl.gz", lines_v7())
     tables.convert(path)
     game = tables.read_game(path)
     for table, schema in tables.TABLE_SCHEMAS.items():
         assert dict(game[table].schema) == schema, table
     row = game["game"].row(0, named=True)
-    assert row["version"] == 7
+    assert row["version"] == 7 and row["visibility"] and row["visibility_unmatched"] == 0
     commander, extractor, bot = row["unit_defs"]
     assert commander["build_options"] == ["armmex", "armpw"]
     assert (commander["build_power"], commander["can_resurrect"], commander["can_assist"]) == (
@@ -519,23 +542,38 @@ def test_loaded_unit_types(tmp_path):
     )
     assert extractor["build_options"] == [] and not extractor["can_move"]
     assert (bot["build_power"], bot["can_move"], bot["can_repair"]) == (0.5, True, False)
+    visibility = game["visibility"]
+    assert visibility.get_column("unit_id").is_sorted()
+    assert visibility.row(1, named=True) == {
+        "replay": "2026-11-21_game",
+        "frame": 10,
+        "unit_id": 10,
+        "ally_team": 1,
+        "sense": "los",
+        "entered": True,
+        "x": 120,
+        "z": 140,
+    }
 
 
 def test_format_6_tables_read_with_format_7(tmp_path):
-    """Tables written before format 7 have fewer unit type columns."""
+    """Tables written before format 7 have no visibility file and fewer unit type columns."""
     state_dir = tmp_path / "state"
     old = write_state(state_dir / "date=2026-11-20" / "2026-11-20_old.jsonl.gz", lines_v6())
     new = write_state(state_dir / "date=2026-11-21" / "2026-11-21_new.jsonl.gz", lines_v7())
     tables.convert(old)
     tables.convert(new)
+    tables.table_path(old, "visibility").unlink()
     game_path = tables.table_path(old, "game")
     old_unit_def = pl.Struct({"unit_def_id": pl.Int32, "name": pl.String, "static": pl.Boolean})
-    pl.read_parquet(game_path).with_columns(
-        pl.col("unit_defs").cast(pl.List(old_unit_def))
-    ).write_parquet(game_path)
+    pl.read_parquet(game_path).drop(
+        "visibility", "visibility_unmatched", "visibility_multiple"
+    ).with_columns(pl.col("unit_defs").cast(pl.List(old_unit_def))).write_parquet(game_path)
     game = tables.read_game(old)
+    assert game["visibility"].height == 0
     assert dict(game["game"].schema) == tables.TABLE_SCHEMAS["game"]
     assert game["game"].row(0, named=True)["unit_defs"][0]["build_options"] is None
+    assert tables.scan(state_dir, "visibility").collect().height == len(VISIBILITY)
     every = tables.scan(state_dir, "game").collect()
-    assert every.get_column("version").to_list() == [6, 7]
+    assert every.get_column("visibility").to_list() == [None, True]
     assert list(read_records(game_path, True)) == list(read_records(old, True))
