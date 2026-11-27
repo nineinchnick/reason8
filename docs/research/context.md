@@ -373,14 +373,17 @@ What the game made of the unit files
 : Build lists, build power and job flags come from the unit files as written.
   The game changes some when it loads them, so 0.1% of the build orders lose
   their builder and the mask could in principle remove a true answer (none on
-  test). Neither format 5 nor format 6 writes the loaded unit definitions; the
-  `game` table's `unit_defs` list could carry `workertime`, the build options
-  and the `can*` flags as the game has them.
+  test). Format 7 of the state export writes them as the game loaded them, in
+  the `game` table's `unit_defs` (build power, build options and job flags);
+  the games of this sample are of formats 5 and 6
+  ([`state-extraction.md`](state-extraction.md)).
 
 Queues
 : A builder's and a factory's queue are not exported. The table sees the
   orders given, not what is still to do, so it cannot tell a builder with a
-  long queue from one about to go idle.
+  long queue from one about to go idle. Exporting every queue when it changes
+  would add a third to the state tables
+  ([`state-extraction.md`](state-extraction.md)).
 
 ## The first table: build orders only (`context_v1`)
 

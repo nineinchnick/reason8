@@ -30,10 +30,11 @@ team's resources, the current wind, the team's and its allies' units, and
 enemy units in line of sight or radar
 ([ADR 0007](0007-ship-the-model-as-tables-in-a-barb-variant.md)). The bot
 plays only on what a player could see
-([ADR 0008](0008-play-under-human-like-limits.md)), and the state export does
-not record what each team could see yet. An opening, as the dataset defines
-it, ends at first contact ([ADR 0012](0012-end-openings-at-first-contact.md)),
-before the enemy matters much.
+([ADR 0008](0008-play-under-human-like-limits.md)), and only the games
+re-simulated in state format 7 record what each team could see. An opening, as
+the dataset defines it, ends at first contact
+([ADR 0012](0012-end-openings-at-first-contact.md)), before the enemy matters
+much.
 
 The join was checked against the state tables and against the units that built
 what was ordered, and the measurement of what each kind of state adds is in
@@ -84,8 +85,9 @@ Models of the opening learn from and are scored on the **decision table**
 
 ## Consequences
 
-- Opening models need no visibility data. Line of sight per ally team is still
-  needed before enemy units are used, after first contact or for scouting.
+- Opening models need no visibility data. Line of sight per ally team, which
+  state format 7 records, is needed before enemy units are used, after first
+  contact or for scouting.
 - The bot must read the same inputs at decision time: the allies' resources
   and units through the AI interface, which has to be checked in our build of
   the library before a model that uses the allies group is played, and the
@@ -103,7 +105,9 @@ Models of the opening learn from and are scored on the **decision table**
   the game changes them when it loads; a builder that built something its file
   does not list loses that order's builder, and the mask of
   [ADR 0019](0019-first-model-trees-asked-by-every-builder.md) would remove
-  that answer. Both are rare ([`context.md`](../research/context.md)).
+  that answer. Both are rare ([`context.md`](../research/context.md)). Games
+  re-simulated in state format 7 carry the unit types as loaded
+  ([ADR 0010](0010-re-simulate-replays-headlessly-for-game-state.md)).
 - Whether a builder is idle is known only from the idle lines of the state
   export and the commands it got after them; a new builder counts as busy
   until it first runs out of orders. The work each builder does, which state

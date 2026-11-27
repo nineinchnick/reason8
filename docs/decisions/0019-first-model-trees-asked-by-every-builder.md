@@ -110,10 +110,10 @@ The first learned model is asked during the game what a builder does next.
   Reclaim and resurrection set new players apart from experienced ones, and
   some maps put their most valuable metal where teams fight for it, so the
   target matters more than for other jobs.
-- Playing past first contact needs line of sight per ally team in the state
-  export, and a finer notion of contact than one frame: a scout seeing or
-  being seen, a raid on economy buildings, an allied raid that goes around the
-  enemy's defences, a fight over a choke point. Until then the model does not
-  direct contested reclaim.
+- Playing past first contact needs line of sight per ally team, which state
+  format 7 records, re-simulated games that have it, and a finer notion of
+  contact than one frame: a scout seeing or being seen, a raid on economy
+  buildings, an allied raid that goes around the enemy's defences, a fight
+  over a choke point. Until then the model does not direct contested reclaim.
 - Revisit the model when a network clearly beats the trees on the decision
-  table, and the hand-over when the state export records visibility.
+  table, and the hand-over when re-simulated games record visibility.
