@@ -70,10 +70,15 @@ The first learned model is asked during the game what a builder does next.
 - **Choosing from the answer:** after the mask, the bot samples among the
   answers with a probability of at least 10%. When no answer reaches the
   threshold or the chosen one cannot be carried out, BARb decides.
-- **Skill stays an input only if the model uses it:** on held-out games the
-  predictions must change between low and high skill and the fit per skill
-  band must improve. In the game it is set high but inside the range seen in
-  training, because trees answer the same for every value above it.
+- **Skill stays an input only if the bot plays better with it:** on held-out
+  games the predictions must change between low and high skill and the fit per
+  skill band must improve; a model that passes is then played with and without
+  skill, and skill stays when the in-game measures
+  ([ADR 0003](0003-define-success-as-in-game-measures.md)) are better with it.
+  The replay test alone does not decide, because it passes only narrowly and
+  the rating is a weak label. In the game skill is set high but inside the
+  range seen in training, because trees answer the same for every value above
+  it.
 - **Where:** metal extractors go to the metal spots in the order players
   usually take them from that map and start position; BARb places every other
   structure and picks the target of every job.
