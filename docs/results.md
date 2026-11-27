@@ -339,22 +339,26 @@ and refuses when the model can order a unit the game does not have.
 ## Using it in the game
 
 `reason8 bot export` turns the saved model into the in-game AI's openings,
-`ai/Reason8/openings.json` ([`in-game.md`](reference/in-game.md)): one per
-map, start position and faction (Armada and Cortex), 96 in all.
+`ai/Reason8/openings.json` ([`in-game.md`](reference/in-game.md)): five per
+map, start position and faction (Armada and Cortex), 480 in all, scored on the
+same steps as the models above.
 
 Which opening
 : Taking the most likely next step again and again does not give an opening:
   after a few wind generators another one is always the most likely step, so
   the decoded opening never ends. Instead the export scores up to 2,000 human
   openings of each map, position and faction from the training split by how
-  likely the model finds their first 15 steps, and the AI plays the most
-  likely one: the model's most typical opening of the position. It is a real
-  opening, so it ends at its player's first contact, and its drags and factory
-  queues have real lengths.
+  likely the model finds their first 15 steps, and keeps the most likely one
+  and four more drawn at random from the more likely half; the AI picks one of
+  the five per game. One opening per position, played every game, was easy to
+  tell from human openings
+  ([`evaluation.md`](reference/evaluation.md#five-openings-per-position)).
+  They are real openings, so each ends at its player's first contact, and its
+  drags and factory queues have real lengths.
 
 Which position
 : Each opening carries the median start point of its position. The AI plays
-  the opening of its side and map whose start point is nearest to its
+  one of the openings of its side and map whose start point is nearest to its
   commander.
 
 Drags
