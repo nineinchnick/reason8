@@ -165,6 +165,7 @@ def test_check_infolog_counts_per_team(tmp_path):
     teams = check.check_infolog(log, "Reason8")["opening_by_team"]
     assert teams[3] == {
         "position": "P4",
+        "side": "armada",
         "commander_steps": 3,
         "variant": 0,
         "steps_finished": 2,
@@ -234,3 +235,40 @@ def test_replay_budget():
     result = check.replay_budget(Events(), team=1)
     assert result["commands"] == 4 and result["actions"] == 2
     assert result["windows"]["ok"] and result["windows"]["1 s"]["most"] == 2
+
+
+class LobbyReplay:
+    """A replay of a lobby game that left the AI's faction on random."""
+
+    meta = {"map": "M"}
+    ais = [{"teamId": 0, "shortName": "Reason8", "faction": "Random"}]
+    events: list[dict] = []
+
+    def __init__(self, orders: list[BuildOrder]):
+        self.orders = orders
+
+    def teams(self) -> dict:
+        return {}
+
+    def build_orders(self, team: int) -> list[BuildOrder]:
+        return [build_order for build_order in self.orders if build_order.team == team]
+
+
+def test_check_replay_takes_the_logged_side_for_a_random_faction():
+    openings = {"tasks": TASKS, "openings": [ARMADA]}
+    replay = LobbyReplay(armada_game(["armck", "armpw"]))
+    (team,) = check.check_replay(replay, openings, "Reason8", sides={0: "armada"})
+    assert team["side"] == "armada" and "error" not in team
+
+
+def test_check_replay_takes_the_side_of_the_first_order_without_a_log():
+    openings = {"tasks": TASKS, "openings": [ARMADA]}
+    replay = LobbyReplay(armada_game(["armck", "armpw"]))
+    (team,) = check.check_replay(replay, openings, "Reason8")
+    assert team["side"] == "armada" and "error" not in team
+
+
+def test_check_replay_random_faction_without_orders():
+    openings = {"tasks": TASKS, "openings": [ARMADA]}
+    (team,) = check.check_replay(LobbyReplay([]), openings, "Reason8")
+    assert team["error"] == "no opening for side 'random'"

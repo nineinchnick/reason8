@@ -213,6 +213,18 @@ def replay_budget(replay: Replay, team: int, band: str = budget.DEFAULT_BAND) ->
     }
 
 
+# The side of a unit, from the prefix of its name.
+SIDE_OF_PREFIX = {"arm": "armada", "cor": "cortex", "leg": "legion"}
+
+
+def ordered_side(replay: Replay, team: int) -> str | None:
+    """The side of the first unit the team ordered, or None when it ordered nothing."""
+    for order in replay.build_orders(team=team):
+        if side := SIDE_OF_PREFIX.get((order.unit or "")[:3]):
+            return side
+    return None
+
+
 def check_replay(
     replay: Replay,
     openings: dict,
@@ -220,10 +232,16 @@ def check_replay(
     state_records: list[dict] | None = None,
     variants: Mapping[int, int] | None = None,
     positions: Mapping[int, str | None] | None = None,
+    sides: Mapping[int, str | None] | None = None,
 ) -> list[dict]:
-    """One result per team that the AI played. `variants` and `positions` are the opening
-    and position each team chose, from the engine log (`check_infolog`); without them, the
-    first opening of the position nearest to its start."""
+    """One result per team that the AI played. `variants`, `positions` and `sides` are the
+    opening, position and side each team chose, from the engine log (`check_infolog`);
+    without them, the first opening of the position nearest to its start, for the side in
+    the replay.
+
+    A lobby that leaves an AI's faction on random writes ``Random`` into the replay, and the
+    game picks the side at the start. The side the AI logged is then used, or else the side
+    of the first unit the team ordered."""
     tasks = openings.get("tasks", {})
     teams = replay.teams()
     map_name = replay.meta.get("map")
@@ -232,6 +250,8 @@ def check_replay(
         if ai.get("shortName") != ai_short_name:
             continue
         side = (ai.get("faction") or "").lower()
+        if side not in SIDE_OF_PREFIX.values():
+            side = (sides or {}).get(ai["teamId"]) or ordered_side(replay, ai["teamId"]) or side
         result = {"team": ai["teamId"], "side": side, "version_in_replay": ai.get("version")}
         result["replay_budget"] = replay_budget(replay, ai["teamId"])
         team = teams.get(ai["teamId"])
@@ -267,6 +287,7 @@ def check_replay(
 
 OPENING_LINE = re.compile(r"team (\d+): (.*)")
 CHOSEN = re.compile(r"position (\S+) .*?(?:, opening (\d+) of \d+)?, (\d+) commander steps")
+LOGGED_SIDE = re.compile(r"side '([^']*)'")
 
 
 def count_opening_line(teams: dict[int, dict], message: str) -> None:
@@ -278,6 +299,7 @@ def count_opening_line(teams: dict[int, dict], message: str) -> None:
         int(match.group(1)),
         {
             "position": None,
+            "side": None,
             "commander_steps": None,
             "variant": 0,
             "steps_finished": 0,
@@ -290,6 +312,8 @@ def count_opening_line(teams: dict[int, dict], message: str) -> None:
     if chosen := CHOSEN.search(text):
         team["position"], team["commander_steps"] = chosen.group(1), int(chosen.group(3))
         team["variant"] = int(chosen.group(2)) - 1 if chosen.group(2) else 0
+        if logged_side := LOGGED_SIDE.search(text):
+            team["side"] = logged_side.group(1)
     elif text.startswith("step ") and ": finished," in text:
         team["steps_finished"] += 1
     elif text.startswith("step ") and text.endswith(": skipped"):
@@ -369,7 +393,10 @@ def run(args: argparse.Namespace) -> int:
     chosen = (log or {}).get("opening_by_team", {})
     variants = {team: counts["variant"] for team, counts in chosen.items()}
     positions = {team: counts["position"] for team, counts in chosen.items()}
-    teams = check_replay(Replay(document), openings, args.ai, state_records, variants, positions)
+    sides = {team: counts["side"] for team, counts in chosen.items()}
+    teams = check_replay(
+        Replay(document), openings, args.ai, state_records, variants, positions, sides
+    )
     result: dict = {"teams": teams}
     ok = bool(teams) and all(team["matches"] for team in teams)
     if log is not None:
