@@ -112,7 +112,7 @@ def lines_v5() -> list[dict]:
     """A state file of format 5: resources every 30 frames, snapshots every 60, written at
     the end of the frame (after its unit lines), without finished extractors."""
     lines = [header(5)]
-    life = list(LIFE)
+    life = [dict(line) for line in LIFE]  # tests change lines in place
     for frame in range(0, 181, 30):
         while life and life[0]["f"] <= frame:
             lines.append(life.pop(0))
@@ -127,7 +127,7 @@ def lines_v5() -> list[dict]:
 def lines_v4() -> list[dict]:
     """The same game in format 4: resources only in the snapshots, every unit in them."""
     lines = [header(4)]
-    life = list(LIFE)
+    life = [dict(line) for line in LIFE]  # tests change lines in place
     for frame in range(0, 181, 60):
         while life and life[0]["f"] <= frame:
             lines.append(life.pop(0))
@@ -139,6 +139,84 @@ def lines_v4() -> list[dict]:
             {"t": "s", "f": frame, "wind": row["wind"], "teams": row["teams"], "units": units}
         )
     return [*lines, END]
+
+
+ROCK, WRECK = 40, 41
+#: The order of a frame's lines as `tables.read_table_records` gives them.
+LINE_ORDER = {
+    **dict.fromkeys(tables.UNIT_EVENT_KINDS, 0),
+    "fdef": 1,
+    "fcreated": 1,
+    "reclaim": 2,
+    "fdestroyed": 3,
+    "hit": 4,
+    "damage": 5,
+    "r": 6,
+    "s": 7,
+    "work": 8,
+}
+
+
+def lines_v6() -> list[dict]:
+    """The game of format 5 in format 6, with features and builders' work: commander 1
+    builds the extractor and the bot and reclaims a rock of the map; the bot leaves a wreck
+    when it dies, which commander 2 resurrects."""
+    lines = lines_v5()
+    lines[0] = {**header(6), "work_frames": 10, "builders": [COMMANDER]}
+    for line in lines:
+        if line["t"] == "destroyed":
+            line.update(by=2, weapon=17)
+        if line["t"] == "s" and line["f"] == 180:
+            line["units"] = sorted([*line["units"], [12, BOT, 1, 500, 500, 100, 100]])
+    rock = {"t": "fdef", "d": ROCK, "name": "rock1", "metal": 50, "energy": 0, "reclaim_time": 600}
+    wreck = {"t": "fdef", "d": WRECK, "name": "armpw_dead", "metal": 30, "energy": 0}
+    wreck["reclaim_time"] = 900
+    added = [
+        rock,
+        {
+            "t": "fcreated",
+            "f": 0,
+            "id": 5,
+            "d": ROCK,
+            "x": 300,
+            "z": 300,
+            "metal": 50.0,
+            "energy": 0.0,
+        },
+        {"t": "work", "f": 10, "u": 1, "team": 0, "task": "build", "unit": 10},
+        {"t": "work", "f": 40, "u": 1, "team": 0, "task": "reclaim", "feature": 5},
+        {"t": "reclaim", "f": 60, "id": 5, "team": 0, "from": 50, "metal": 50.0, "energy": 0.0},
+        {"t": "fdestroyed", "f": 60, "id": 5, "metal": 0.0, "energy": 0.0, "reclaim_left": 0.0},
+        {"t": "work", "f": 60, "u": 1, "team": 0, "task": "none"},
+        {"t": "work", "f": 70, "u": 1, "team": 0, "task": "build", "unit": 11},
+        {"t": "work", "f": 80, "u": 1, "team": 0, "task": "none"},
+        wreck,
+        {
+            "t": "fcreated",
+            "f": 125,
+            "id": 6,
+            "d": WRECK,
+            "x": 410,
+            "z": 400,
+            "metal": 30.0,
+            "energy": 0.0,
+            "rez": BOT,
+        },
+        {"t": "work", "f": 150, "u": 2, "team": 1, "task": "resurrect", "feature": 6},
+        event("created", 170, 12, BOT, 1, 410, 400, by=2, rez=6),
+        event("finished", 170, 12, BOT, 1, 410, 400),  # a resurrected unit is finished
+        {"t": "fdestroyed", "f": 171, "id": 6, "metal": 30.0, "energy": 0.0, "reclaim_left": 1.0},
+        {"t": "work", "f": 180, "u": 2, "team": 1, "task": "repair", "unit": 12},
+    ]
+    # a feature type has no frame: it comes right before the first feature of its type
+    keyed = [(line["f"], LINE_ORDER[line["t"]], line) for line in lines[1:-1]]
+    keyed += [
+        (line["f"] if "f" in line else added[i + 1]["f"], LINE_ORDER[line["t"]], line)
+        for i, line in enumerate(added)
+    ]
+    body = [line for *_, line in sorted(keyed, key=lambda item: item[:2])]
+    end = {**lines[-1], "game_reclaimed": [[0, 50.0, 0.0], [1, 0.0, 0.0]]}
+    return [lines[0], *body, end]
 
 
 def write_state(path: Path, lines: list[dict]) -> Path:
@@ -195,7 +273,7 @@ def test_format_5_reads_like_format_4(tmp_path):
     assert units(new) == units(old)
 
 
-@pytest.mark.parametrize("make_lines", [lines_v5, lines_v4])
+@pytest.mark.parametrize("make_lines", [lines_v6, lines_v5, lines_v4])
 def test_tables_read_like_the_state_file(tmp_path, make_lines):
     path = write_state(tmp_path / "date=2026-11-21" / "2026-11-21_game.jsonl.gz", make_lines())
     result = tables.convert(path)
@@ -317,3 +395,66 @@ def test_a_doubled_snapshot_counts_once(tmp_path):
     game = tables.read_game(tables.convert(path)["state_file"])
     assert game["units"].filter(pl.col("frame") == 180).height == 4
     assert game["resources"].filter(pl.col("frame") == 180).height == 3
+
+
+def test_features_reclaim_and_work(tmp_path):
+    path = write_state(tmp_path / "2026-11-21_game.jsonl.gz", lines_v6())
+    tables.convert(path)
+    game = tables.read_game(path)
+    for table, schema in tables.TABLE_SCHEMAS.items():
+        assert dict(game[table].schema) == schema, table
+    row = game["game"].row(0, named=True)
+    assert row["version"] == 6 and row["work_frames"] == 10
+    assert [feature_def["name"] for feature_def in row["feature_defs"]] == ["rock1", "armpw_dead"]
+    assert row["game_reclaimed"][0] == {"team": 0, "metal": 50.0, "energy": 0.0}
+    features = game["features"].select(
+        "feature_id", "feature_def", "created_frame", "resurrect_as", "destroyed_frame", "end"
+    )
+    assert [
+        tuple(str(value) if value is not None else None for value in row) for row in features.rows()
+    ] == [
+        ("5", "rock1", "0", None, "60", "reclaimed"),
+        ("6", "armpw_dead", "125", "armpw", "171", "resurrected"),
+    ]
+    reclaim = game["reclaim"].row(0, named=True)
+    assert (reclaim["feature_id"], reclaim["team"], reclaim["from_frame"], reclaim["metal"]) == (
+        5,
+        0,
+        50,
+        50.0,
+    )
+    work = game["work"]
+    assert work.get_column("unit_id").is_sorted()
+    assert work.filter(pl.col("task") == "reclaim").row(0, named=True)["target_feature"] == 5
+    events = game["events"]
+    made = events.filter(pl.col("unit_id") == 12).row(0, named=True)
+    assert (made["builder"], made["resurrected_from"]) == (2, 6)
+    destroyed = events.filter(pl.col("kind") == "destroyed").row(0, named=True)
+    assert (destroyed["attacker"], destroyed["weapon_def"], destroyed["reclaimed"]) == (
+        2,
+        17,
+        False,
+    )
+
+
+def test_format_5_tables_read_with_format_6(tmp_path):
+    """Tables written before format 6 have no feature, reclaim and work files and fewer
+    event columns; they read with the tables of format 6 games as empty ones."""
+    state_dir = tmp_path / "state"
+    old = write_state(state_dir / "date=2026-11-20" / "2026-11-20_old.jsonl.gz", lines_v5())
+    new = write_state(state_dir / "date=2026-11-21" / "2026-11-21_new.jsonl.gz", lines_v6())
+    tables.convert(old)
+    tables.convert(new)
+    for table in ("features", "reclaim", "work"):
+        tables.table_path(old, table).unlink()
+    events_path = tables.table_path(old, "events")
+    pl.read_parquet(events_path).drop(
+        "attacker", "weapon_def", "reclaimed", "resurrected_from"
+    ).write_parquet(events_path)
+    game = tables.read_game(old)
+    assert game["features"].height == 0
+    assert dict(game["events"].schema) == tables.TABLE_SCHEMAS["events"]
+    events = tables.scan(state_dir, "events").collect()
+    assert events.get_column("replay").cast(pl.String).unique().len() == 2
+    assert events.filter(pl.col("resurrected_from").is_not_null()).height == 1
+    assert list(read_records(events_path, True)) == list(read_records(old, True))

@@ -492,8 +492,13 @@ def build_table(
         joined = join_state(
             with_steps(orders),
             chunk,
-            pl.scan_parquet([state_tables.table_path(stem, "resources") for stem in stems]),
-            pl.concat([pl.scan_parquet(state_tables.table_path(stem, "events")) for stem in stems]),
+            state_tables.scan_files(
+                [state_tables.table_path(stem, "resources") for stem in stems], "resources"
+            ),
+            # games of different formats have different event columns
+            state_tables.scan_files(
+                [state_tables.table_path(stem, "events") for stem in stems], "events"
+            ),
             roles,
         )
         parts.append(work_dir / "parts" / f"part-{len(parts):05d}.parquet")
