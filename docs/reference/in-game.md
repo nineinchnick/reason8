@@ -11,10 +11,11 @@ ships with BAR, and the scripts mentioned here.
 
 ## Summary
 
-- **A BARb variant under its own short name works, with no C++ build.** We
-  copied the engine's BARb library, added the game's BARb scripts with hooks
-  in two of them, and installed it as the Skirmish AI `Reason8`. It loads next
-  to stock BARb and plays against it headlessly.
+- **A BARb variant under its own short name works.** We build BARb's library
+  ourselves, add the game's BARb scripts with hooks in two of them, and
+  install it as the Skirmish AI `Reason8`. It loads next to stock BARb and
+  plays against it headlessly. With the engine's own library instead, it needs
+  no C++ build at all.
 - **It plays a build order we give it.** The commander builds the listed
   structures in order and the first factory makes the listed units in order,
   by unit name. Then stock BARb takes over. Checked against what was really
@@ -34,12 +35,18 @@ ships with BAR, and the scripts mentioned here.
   to be checked against the log and the replay, and there is a tool for it.
 - **BARb is not human-like in how often it gives orders**: 40 to 700 commands
   a minute in the first five minutes, peaks of 1,100 to 3,200 a minute later,
-  and up to 125 in one second. The scripts cannot change that.
-- **Past the tables, our own build of BARb's library is the route that covers
-  everything.** We built CircuitAI from source in under 7 minutes, loaded it
-  as `Reason8`, and capped its commands at a human budget. A script-to-widget
-  bridge also works, but only adds a little state and cannot cap commands. See
-  [Past the tables](#past-the-tables).
+  and up to 125 in one second. The scripts cannot change that; our build of
+  its library can.
+- **Our build of BARb's library keeps the bot within a strong player's action
+  budget and lets the scripts read the game as it is.** A command governor
+  holds the commands that do not fit the budget of
+  [ADR 0008](../decisions/0008-play-under-human-like-limits.md) and sends them
+  later in order, so nothing is lost and BARb keeps playing; the scripts read
+  the current wind, the team's economy and its standing units. See
+  [Our BARb library](#our-barb-library).
+- **Past the tables, our own build of BARb's library was the route that covers
+  everything.** A script-to-widget bridge also works, but only adds a little
+  state and cannot limit commands. See [Past the tables](#past-the-tables).
 
 ## The options
 
@@ -289,19 +296,121 @@ The AI lives in [`ai/Reason8`](../../ai/Reason8):
 `log_likelihood` the model's score of the one chosen; `dropped` counts what
 the AI cannot play (see [`results.md`](../results.md#using-it-in-the-game)).
 
-`reason8 bot build` puts the AI folder together from three sources:
+`reason8 bot build` puts the AI folder together from four sources:
 
-1. the engine's own `AI/Skirmish/BARb/stable/`: the library, unchanged;
-2. the installed game's `luarules/configs/BARb/stable/`: BARb's scripts and
+1. the engine's own `AI/Skirmish/BARb/stable/`: the files that come with
+   BARb's library;
+2. our build of BARb's library in place of the engine's (see
+   [Our BARb library](#our-barb-library));
+3. the installed game's `luarules/configs/BARb/stable/`: BARb's scripts and
    configs for the `hard` profile, read from the game package;
-3. `ai/Reason8`, on top, with `openings.json` turned into
+4. `ai/Reason8`, on top, with `openings.json` turned into
    `script/hard/reason8/opening_table.as`. Each opening's steps and factory
    units are one string there, decoded only for the opening played: 480
    openings as nested script arrays made each Reason8 AI take minutes to
-   compile.
+   compile. `script/hard/reason8/live_state.as` is generated for the library
+   installed.
 
 It stops when a stock script that we replace no longer has the recorded hash,
 because our copy would silently drop the game's change.
+
+### Our BARb library
+
+The library is CircuitAI at the commit the engine pins for BARb, with our
+files in [`ai/native`](../../ai/native), built by
+[`ai/native/build.sh`](../../ai/native/build.sh) (see
+[Our own build of BARb's library](#c-our-own-build-of-barbs-library) for the
+toolchain and the pinned downloads).
+
+Building it
+
+: `reason8 bot build` runs `build.sh` for the tag of the engine it installs
+  into, in `<data dir>/native/<tag>/` (`--library-cache` for another place).
+  The first build takes 5 to 7 minutes on four cores (`JOBS`, default 4);
+  after that the build is reused until a file in `ai/native` changes, and a
+  change rebuilds in seconds. `build.sh` writes `reason8_library.json` next to
+  the library: the engine tag and commit, and the SHA-256 of the library and
+  of `ai/native`. `--library <folder>` takes a build made elsewhere.
+
+Platforms
+
+: Linux x86-64 only. Elsewhere the build stops and says to pass
+  `--library stock`, which installs the engine's own library: the AI plays its
+  openings, without the command budget, and the live state reads as unknown
+  (-1). A Windows build has not been made yet.
+
+Engine version
+
+: The library is built for one engine tag. `reason8 bot build` stops when the
+  build it would use is for another tag, and the library logs, when it starts,
+  the engine it was built for and the one it runs in
+  (`Reason8 library: team 0: built for engine 2026.09.03, running in engine 2026.09.03`),
+  and an `engine mismatch` line when they differ. `build.sh` knows the commit
+  of one tag; another needs `--engine-commit`.
+
+The command governor
+
+: Every command the library sends goes through one engine callback
+  (`Engine_handleCommand`, see [A command governor](#a-command-governor)). The
+  governor counts each unit command as an action the way a player's is counted
+  ([ADR 0008](../decisions/0008-play-under-human-like-limits.md)), and holds a
+  command that would take an action the 30-40 band's budget has no room for.
+  On every frame, before the AI's own commands, it sends what fits, oldest
+  first: once one action fits, everything else held goes in the same frame,
+  which by the counting rule is the same action. A unit with a held command
+  has its later commands held behind it. A new order to a mobile unit given
+  without shift replaces the held orders to that unit, as it would replace
+  them a moment after they arrived (a factory's orders add to its queue, so
+  they never replace each other). Past 1,024 held commands the oldest is
+  dropped and counted. Spending is paced: each window also has a bucket of a
+  quarter of its cap that refills at the rate that spends the rest evenly, so
+  a busy AI acts every second or two instead of spending a window's cap at
+  once and then waiting. The logic is in `Budget.h`, which knows nothing of
+  the engine; `test_budget.cpp` tests it and `build.sh` runs the test with the
+  same compiler before every build.
+
+Its log
+
+: One line per team and minute, and the action frames of that minute:
+
+  ```
+  Reason8 governor: team 0: mode defer, band 30-40
+  Reason8 governor: team 0: minute 1: seen 89, sent at once 49, sent later 35, deferred 40, collapsed 5, dropped 0, failed 0, actions 31, worst delay 58 frames, held 0
+  Reason8 governor: team 0: minute 1 action frames: 25 150 651 673 691 ...
+  Reason8 governor: team 0: total to frame 9000: seen 877, sent at once 241, sent later 533, deferred 636, collapsed 97, dropped 0, failed 10, actions 234, worst delay 59 frames, held 6
+  ```
+
+  `collapsed` commands were replaced by a newer order while held, `failed`
+  ones were held and then refused by the engine (the unit was gone), `held` is
+  what was still waiting when the game ended. The AI option `command_budget`
+  (in the start script's `[OPTIONS]` of the AI) switches it to `count` (log
+  only) or `off`; `defer` is the default.
+
+The live state
+
+: Four functions for the scripts, read from the engine when called:
+  `Reason8CurrentWind()`, `Reason8Resource(resource, what)` with `metal` or
+  `energy` and `current`, `storage`, `income`, `expense` or `pull`,
+  `Reason8UnitCount(name)` (the team's finished units of that name) and
+  `Reason8Standing()` (all of them by name). The scripts call them through
+  `live_state.as`, which `reason8 bot build` generates for the library it
+  installs: with the stock library they return -1 and an empty string, so the
+  same scripts compile with either. The opening script logs them at every
+  commander step and every 30 s:
+
+  ```
+  Reason8 opening: team 0: state at frame 1761: wind 17.1668, metal 349.494 of 1150 +4.30268 -6.96429, energy 23.3591 of 1101 +64.4555 -78, standing armcom 1, armflea 2, armlab 1, armmex 1, armwin 2
+  ```
+
+Our changes to BARb's own files
+
+: Four lines in `AIExport.cpp` (install and release the governor, call it on
+  every update) and two in `InitScript.cpp` (register the live state), as
+  patches in `ai/native`; the rest is new files.
+
+What it measured is in
+[`command-governor.md`](../research/command-governor.md) and
+[`evaluation.md`](evaluation.md#our-barb-library).
 
 ### How the hooks work
 
@@ -389,12 +498,17 @@ Can do
   timer, limit and role, pick the next factory, call Lua (`ai.CallUI`,
   `ai.CallRules`) and receive a Lua message (`AiLuaMessage`).
 
+With our library
+: The current wind, the team's resources as the engine reports them (stored,
+  storage, income, expense, pull) and its finished units by name (see
+  [Our BARb library](#our-barb-library)).
+
 Cannot
-: Read files, open sockets, read a clock, list enemy units, read the current
-  wind or line of sight, or send or limit unit commands except through BARb's
-  tasks. Metal spots are readable only because BAR publishes them as game
-  rules (`mex_count`, `mex_x1`, ...); the wind only as the map's average, in
-  the energy BARb expects from a wind generator
+: Read files, open sockets, read a clock, list enemy units, read line of
+  sight, or send or limit unit commands except through BARb's tasks. Metal
+  spots are readable only because BAR publishes them as game rules
+  (`mex_count`, `mex_x1`, ...). With the engine's own library, the wind only
+  as the map's average, in the energy BARb expects from a wind generator
   (`aiEconomyMgr.GetEnergyMake`).
 
 *So the start position needed for per-position openings is available: the map
@@ -411,7 +525,8 @@ content folder made by `reason8 headless setup`
 uv run reason8 bot export --data-dir data/bar \
     --game "Beyond All Reason test-32018-ad135b9"
 
-# 1. build the AI into the folder the game will run in
+# 1. build the AI into the folder the game will run in (the first time this
+#    also builds our BARb library, 5 to 7 minutes)
 uv run reason8 bot build --data-dir data/bar \
     --game "Beyond All Reason test-32018-ad135b9" \
     --skirmish-dir data/runs/reason8/AI/Skirmish
@@ -463,11 +578,26 @@ With `--infolog`, `reason8 bot check` also counts each team's opening log
 lines (`opening_by_team`): its position, the steps finished and skipped, and
 the factory units made.
 
-`reason8 bot check` exits non-zero unless the AI loaded without errors and
-every team it played followed its opening. Its output has three parts per
-team: what was `ordered` (from the replay's commands, read with
-`reason8.replays.parse`), what was `built` (from the state file) and the
-`log`.
+With `--infolog` it also checks each team's command governor
+(`governor_by_team`): the library ran in the engine it was built for, every
+command the AI gave was sent, replaced by a newer order to the same unit or
+still held at the end (none dropped), the minutes add up, and the logged
+actions kept every window of the budget. With `--state` too it compares the
+live state the script logged with the export (`live_state_by_team`). Each team
+also gets `replay_budget`: its commands in the replay counted as actions, and
+the most in each window, a cross-check that is not part of the verdict (see
+[`command-governor.md`](../research/command-governor.md#the-replay-as-a-check)).
+
+When two AIs built by `reason8 bot build` play in one game, the engine logs
+the scripts and lines of both under the name of the first one loaded. The
+lines carry their team, so they stay apart; checking the second AI by its name
+finds no scripts loaded.
+
+`reason8 bot check` exits non-zero unless the AI loaded without errors, its
+governor kept the budget and lost nothing, and every team it played followed
+its opening. Its output has three parts per team: what was `ordered` (from the
+replay's commands, read with `reason8.replays.parse`), what was `built` (from
+the state file) and the `log`.
 
 ## Measurements
 
@@ -635,7 +765,10 @@ Stock BARb checked against our opening
 : 55 to 64 s wall time, 26 to 34 times real time, peak memory 5.6 GB.
 
 Building the AI folder
-: Under a second; 38 files, 8.5 MB, almost all of it the library.
+: Under a second; 38 files, 8.5 MB, almost all of it the library. Our library
+  takes 5 to 7 minutes to build the first time for an engine, seconds after a
+  change to `ai/native`, and 2 GB of disk for the toolchain and the build
+  tree; stripped, it is 8.3 MB.
 
 ### Command rate
 
@@ -852,7 +985,10 @@ treats an error as a broken unit. BARb then believes the unit has its order; a
 unit that was idle gets no new idle event and may wait until a task times out.
 *Dropping proves the budget can be enforced underneath BARb, not that BARb
 plays well under it; the governor has to defer commands, or BARb's tasks have
-to plan within the budget.*
+to plan within the budget.* The governor now defers
+([Our BARb library](#our-barb-library),
+[`command-governor.md`](../research/command-governor.md)); the measurements
+above are of the spike that dropped.
 
 #### What a model could use and how it would run
 
@@ -911,14 +1047,11 @@ of it; the opening hooks need no change. Do not use the bridge (B) for play.
 Tables that branch on state (A) stay useful for anything the scripts can see,
 in either library.
 
-Next steps, in order:
-
-1. Make the governor defer commands over budget instead of dropping them, and
-   compare capped and uncapped games with the same opening.
-2. Let `reason8 bot build` take the library from our build instead of the
-   engine's, and build Linux and Windows libraries in CI with BAR's images.
-3. Pass the first piece of state a model needs (the current wind) from the
-   library to the scripts.
+Done since: the governor defers commands over the budget instead of dropping
+them, `reason8 bot build` installs our library, and the scripts read the
+current wind, the team's economy and its standing units
+([Our BARb library](#our-barb-library)). Still to do: build the Windows
+library, and both in CI with BAR's images.
 
 ## What we learned that the next step needs
 
@@ -959,8 +1092,10 @@ Not tried: we have no graphical BAR install here. What we know:
 - The lobby sends AI options to the host only when they are set, and fills in
   a default profile only for the name `BARb`. Our `AIOptions.lua` defaults
   make that unnecessary.
-- On Windows the library is `SkirmishAI.dll`; `reason8 bot build` copies
-  whatever library the engine's BARb folder holds, but only Linux was run.
+- On Windows the library is `SkirmishAI.dll`. We have not built ours there, so
+  a Windows install needs `reason8 bot build --library stock`, which keeps the
+  engine's library: the openings play, without the command budget and the live
+  state. Only Linux was run.
 
 ## Not covered
 
@@ -969,8 +1104,10 @@ Not tried: we have no graphical BAR install here. What we know:
 - A model that runs during the game. The bridge and our own library were
   measured with a stand-in, not with a model.
 - A Windows build of the library, and our library in a real lobby.
-- Whether BARb plays worse under the command cap: the capped and uncapped
-  games drew different openings.
+- The command budget in a game played in real time: in headless games the
+  replay records the bot's commands up to a second late, so only the
+  governor's own log shows the budget exactly
+  ([`command-governor.md`](../research/command-governor.md#the-replay-as-a-check)).
 - Whether queueing one unit at a time really prevents the lost unit; more
   games are needed.
 - Saving and loading a game in the middle of an opening.
