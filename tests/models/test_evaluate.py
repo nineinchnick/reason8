@@ -3,8 +3,16 @@ import math
 import numpy as np
 import pytest
 
-from reason8.models.evaluate import choose_model, fit_models, report, score, summarize
-from reason8.models.ngram import NgramModel, RepeatModel, chain
+from reason8.models.evaluate import (
+    choose_model,
+    fit_models,
+    paired_difference,
+    report,
+    score,
+    score_probabilities,
+    summarize,
+)
+from reason8.models.ngram import UNKNOWN, NgramModel, RepeatModel, chain
 from tests.models.test_ngram import AIR, opening
 
 
@@ -53,3 +61,27 @@ def test_choose_and_report():
     assert "## All models" in text
     assert "### Test Valley 1.0" in text
     assert "| P2 |" in text
+
+
+def test_score_probabilities_scores_like_score():
+    training = [opening(match_id) for match_id in range(5)]
+    model = NgramModel("bigram", chain(2)).fit(training)
+    held_out = [opening(10), opening(11, ("armmex", "armgone"))]
+    expected = score(model, held_out, steps=4)
+    rows = [(opening, index) for opening in held_out for index in range(len(opening.steps[:4]))]
+    unknown = model.index[UNKNOWN]
+    scores = score_probabilities(
+        np.array([model.distribution(opening, index) for opening, index in rows]),
+        np.array([model.index.get(opening.steps[index], unknown) for opening, index in rows]),
+        unknown,
+        expected.match_ids,
+        expected.step_indices,
+        expected.groups,
+    )
+    for name in ("top1", "top3", "log_loss"):
+        assert np.allclose(getattr(scores, name), getattr(expected, name))
+    assert paired_difference(scores, expected, np.ones(len(rows), dtype=bool), 20) == (0.0, 0.0)
+    low, high = paired_difference(
+        scores, expected, np.ones(len(rows), dtype=bool), 20, metric="log_loss"
+    )
+    assert low == high == 0.0
