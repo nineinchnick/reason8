@@ -195,3 +195,42 @@ def test_check_infolog_ai_not_loaded(tmp_path):
     errors = check.check_infolog(log, "Reason8")["errors"]
     assert any("unknown skirmish AI" in error for error in errors)
     assert any("no script loaded" in error for error in errors)
+
+
+def test_check_infolog_governor(tmp_path):
+    prefix = "Skirmish AI <Reason8-0.1>: Reason8 governor: team 2: "
+    tally = (
+        "seen 5, sent at once 3, sent later 1, deferred 2, collapsed 1, dropped {dropped}, "
+        "failed 0, actions 2, worst delay 9 frames, held 0"
+    )
+    lines = [
+        "Skirmish AI <Reason8-0.1>: Load script: /engine/Reason8/0.1/script/hard/main.as",
+        "Skirmish AI <Reason8-0.1>: Reason8 library: team 2: built for engine 2026.09.03, "
+        "running in engine 2026.09.03",
+        prefix + "mode defer, band 30-40",
+        prefix + "minute 1 (part): " + tally.format(dropped=0),
+        prefix + "minute 1 (part) action frames: 25 400",
+        prefix + "total to frame 900: " + tally.format(dropped=0),
+    ]
+    result = check.check_infolog(write_log(tmp_path, lines), "Reason8")
+    assert result["governor_by_team"][2]["ok"] and result["errors"] == []
+    lines[-3] = prefix + "minute 1 (part): " + tally.format(dropped=1)
+    lines[-1] = prefix + "total to frame 900: " + tally.format(dropped=1)
+    result = check.check_infolog(write_log(tmp_path, lines), "Reason8")
+    assert any("dropped" in error for error in result["errors"])
+
+
+def test_replay_budget():
+    class Events:
+        events = [
+            {"type": "cmd", "frame": 30, "team": 1, "units": [5]},
+            {"type": "cmd", "frame": 30, "team": 1, "units": [6]},  # one action a frame
+            {"type": "cmd", "frame": 33, "team": 1, "units": [5]},  # within its 7 frames
+            {"type": "cmd", "frame": 40, "team": 1, "units": [7]},
+            {"type": "cmd", "frame": 40, "team": 0, "units": [8]},  # another team
+            {"type": "startpos", "frame": 0},
+        ]
+
+    result = check.replay_budget(Events(), team=1)
+    assert result["commands"] == 4 and result["actions"] == 2
+    assert result["windows"]["ok"] and result["windows"]["1 s"]["most"] == 2
