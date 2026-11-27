@@ -53,7 +53,10 @@ Measured for the routes past the scripts:
   loaded in an engine two months older. Holding the commands instead and
   sending them later kept 160 team-games within every window with no command
   lost, at no measurable cost in economy or openings
-  ([`command-governor.md`](../research/command-governor.md)).
+  ([`command-governor.md`](../research/command-governor.md)). The same sources
+  cross-compiled for Windows in BAR's own build image in 6 minutes, and the
+  `SkirmishAI.dll` played in the Windows engine as the Linux library does: 48
+  teams in 8v8 games within every window, no command lost.
 
 ## Decision
 
@@ -90,10 +93,13 @@ Models run inside the library or its scripts: first as tables loaded from a
 data file, a runtime such as ONNX only when a model needs it, and no second
 process. The widget bridge is not used for play.
 
-The library is built for Linux x86-64 now. Windows comes next, from the same
-sources with BAR's own Windows build image. Until then the engine's own
-library can be installed instead (`--library stock`): the AI plays its
-openings, without the command budget and with the live state unknown.
+The library is built for the platform of the engine it goes into, from the
+same sources: Linux x86-64 with a pinned toolchain, Windows x86-64
+(`SkirmishAI.dll`) cross-compiled in BAR's own Windows build image, pinned by
+the digest the engine release used. Both builds run on Linux. Where neither
+can be built, the engine's own library can be installed instead
+(`--library stock`): the AI plays its openings, without the command budget and
+with the live state unknown.
 
 ## Consequences
 
@@ -120,7 +126,8 @@ openings, without the command budget and with the live state unknown.
   move to the engine's BARb commit, carry our changes over (two new pairs of
   files and two small patches) and build both platforms. BAR's public build
   images do that for the engine itself; a GitHub Actions job could use them.
-- Windows players need the `.dll` we build, which has not been built yet.
+- Windows players need the `SkirmishAI.dll` we build; it is built on Linux, so
+  a release of the AI folder for Windows is made there too.
 - Revisit if keeping the fork current costs more than an engine release
   allows, or if BAR's scripts gain bindings for wind, line of sight and
   command limits, which would make the scripts enough.

@@ -324,20 +324,29 @@ toolchain and the pinned downloads).
 
 Building it
 
-: `reason8 bot build` runs `build.sh` for the tag of the engine it installs
-  into, in `<data dir>/native/<tag>/` (`--library-cache` for another place).
-  The first build takes 5 to 7 minutes on four cores (`JOBS`, default 4);
-  after that the build is reused until a file in `ai/native` changes, and a
-  change rebuilds in seconds. `build.sh` writes `reason8_library.json` next to
-  the library: the engine tag and commit, and the SHA-256 of the library and
-  of `ai/native`. `--library <folder>` takes a build made elsewhere.
+: `reason8 bot build` runs `build.sh` for the tag and platform of the engine
+  it installs into, in `<data dir>/native/<tag>/` for Linux and
+  `<data dir>/native/<tag>-windows/` for Windows (`--library-cache` for
+  another place). The first build takes 5 to 7 minutes on four cores (`JOBS`,
+  default 4); after that the build is reused until a file in `ai/native`
+  changes, and a change rebuilds in seconds. `build.sh` writes
+  `reason8_library.json` next to the library: the platform, the engine tag and
+  commit, and the SHA-256 of the library and of `ai/native`.
+  `--library <folder>` takes a build made elsewhere (the folder, or the
+  `libSkirmishAI.so` or `SkirmishAI.dll` in it); it must be for the engine's
+  tag and platform.
 
 Platforms
 
-: Linux x86-64 only. Elsewhere the build stops and says to pass
-  `--library stock`, which installs the engine's own library: the AI plays its
-  openings, without the command budget, and the live state reads as unknown
-  (-1). A Windows build has not been made yet.
+: Linux x86-64 (`libSkirmishAI.so`) and Windows x86-64 (`SkirmishAI.dll`). The
+  platform is the engine's: an engine whose BARb has `SkirmishAI.dll` gets the
+  Windows library. Both are built on Linux x86-64: Linux with the toolchain
+  below, Windows with `build.sh --platform windows`, which cross-compiles in
+  BAR's own Windows build image, run by podman or docker without network (see
+  [Windows](#c-our-own-build-of-barbs-library) under Past the tables). Where
+  neither can be built, `--library stock` installs the engine's own library:
+  the AI plays its openings, without the command budget, and the live state
+  reads as unknown (-1).
 
 Engine version
 
@@ -598,6 +607,32 @@ governor kept the budget and lost nothing, and every team it played followed
 its opening. Its output has three parts per team: what was `ordered` (from the
 replay's commands, read with `reason8.replays.parse`), what was `built` (from
 the state file) and the `log`.
+
+### On Windows, from WSL
+
+The same steps run a Windows engine from WSL, which starts Windows programs
+directly. `reason8 headless run` gives `spring-headless.exe` Windows paths and
+passes `SPRING_DATADIR` on through `WSLENV`; keep its run folder on the
+Windows drive. A content folder of our own on the Windows drive keeps BAR's
+install untouched: a copy of the engine folder from the install
+(`<BAR install>/data/engine/recoil_<tag>`) under `engine/`, and the game's
+`rapid/`, `packages/` and `pool/` files and the map, copied from `data/bar`.
+The engine runs with `--isolation` and its own write folder, so it reads
+nothing else.
+
+```sh
+# the AI with our SkirmishAI.dll (built the first time, about 6 minutes)
+uv run reason8 bot build --data-dir /mnt/c/<folder>/bar \
+    --game "Beyond All Reason test-32018-ad135b9" \
+    --skirmish-dir /mnt/c/<folder>/bar/engine/recoil_2026.09.03/AI/Skirmish
+
+# steps 2 to 4 as above, with --data-dir /mnt/c/<folder>/bar,
+# --engine-dir /mnt/c/<folder>/bar/engine/recoil_2026.09.03 and run
+# folders under /mnt/c/<folder>
+```
+
+The engine's CPU time and memory are not measured on Windows: WSL sees only
+the process that relays to it.
 
 ## Measurements
 
@@ -904,11 +939,12 @@ Pinned downloads
   downloads is checked before it runs: `micromamba` against a SHA-256 in the
   script, the 98 toolchain packages against the SHA-256 of each in
   [`ai/native/toolchain.lock`](../../ai/native/toolchain.lock), the engine and
-  `spring-static-libs` against their commits. The engine commit fixes the
-  commit of every submodule, BARb included. Another engine tag needs its
-  commit as an argument. To change the toolchain, create the environment from
-  package names and write the lock again with
-  `micromamba list --explicit --sha256`.
+  `spring-static-libs` against their commits, and for Windows the build image
+  against its digest. The engine commit fixes the commit of every submodule,
+  BARb included. Another engine tag needs its commit as an argument, and for
+  Windows a look at the image digest its release used. To change the
+  toolchain, create the environment from package names and write the lock
+  again with `micromamba list --explicit --sha256`.
 
 Build time
 : 4 min 56 s of wall time on 4 cores (18 min of CPU) for the first build; 6
@@ -932,9 +968,24 @@ Another engine
   not change in between.
 
 Windows
-: Not tried. BAR builds its Windows engine on Linux with MinGW, in a public
-  image (`ghcr.io/beyond-all-reason/recoil-build-amd64-windows`) next to the
-  Linux one; a CI job could use both.
+: Built and played. BAR builds its Windows engine on Linux with MinGW GCC 13,
+  in a public image (`ghcr.io/beyond-all-reason/recoil-build-amd64-windows`)
+  that holds the toolchain, CMake 3.27, Ninja and BAR's Windows libraries. The
+  engine pins the image by digest in `docker-build-v2/images_versions.sh`; at
+  tag `2026.09.03` that is `sha256:3ba630ac…f058ef`, and the log of the
+  release build of that tag shows it pulled exactly that digest.
+  `build.sh --platform windows` runs the same image, by that digest, with
+  rootless podman (or docker) and no network: the sources are cloned and
+  checked on the host as for Linux, and the container builds the `BARb` target
+  only. The first build took 6 min 6 s on four cores; the stripped
+  `SkirmishAI.dll` is 7.0 MB (stock: 7.0 MB) and, like stock, needs only
+  `KERNEL32.dll` and `msvcrt.dll`. The image cannot run Windows programs, so
+  the budget's test is compiled with MinGW in it and run where Windows
+  programs run (under WSL, as here). In the Windows engine
+  (`spring-headless.exe`, started from WSL) it loaded as `Reason8`, logged the
+  engine it was built for and played: two 1v1 and six 8v8 games against stock
+  BARb, every governor within the budget with no command lost
+  ([`evaluation.md`](evaluation.md#on-windows)).
 
 #### A command governor
 
@@ -1035,10 +1086,11 @@ B. Bridge to a widget and a process
   can switch widgets off.
 
 C. Own build of the library
-: *Measured:* build, load next to stock BARb, the governor counting and
-  capping, the library in an older engine. *Needs:* all three. *Build:* a
-  toolchain and 5 to 7 minutes per platform. *Keep working:* a fork rebased
-  for each engine release, two platforms. *Install:* one folder, as today.
+: *Measured:* build for Linux and Windows, load next to stock BARb, the
+  governor counting and capping, the library in an older engine. *Needs:* all
+  three. *Build:* a toolchain and 5 to 7 minutes per platform. *Keep working:*
+  a fork rebased for each engine release, two platforms. *Install:* one
+  folder, as today.
 
 ### Recommendation
 
@@ -1050,8 +1102,8 @@ in either library.
 Done since: the governor defers commands over the budget instead of dropping
 them, `reason8 bot build` installs our library, and the scripts read the
 current wind, the team's economy and its standing units
-([Our BARb library](#our-barb-library)). Still to do: build the Windows
-library, and both in CI with BAR's images.
+([Our BARb library](#our-barb-library)), for Linux and Windows. Still to do:
+build both in CI.
 
 ## What we learned that the next step needs
 
@@ -1077,7 +1129,7 @@ library, and both in CI with BAR's images.
 
 ## Installing it in a real game
 
-Not tried: we have no graphical BAR install here. What we know:
+Not tried in the BAR client. What we know:
 
 - Build the folder with `--skirmish-dir` pointing at the BAR install's
   `engine/<version>/AI/Skirmish/`. The data folder's `AI/Skirmish/` worked
@@ -1092,10 +1144,11 @@ Not tried: we have no graphical BAR install here. What we know:
 - The lobby sends AI options to the host only when they are set, and fills in
   a default profile only for the name `BARb`. Our `AIOptions.lua` defaults
   make that unnecessary.
-- On Windows the library is `SkirmishAI.dll`. We have not built ours there, so
-  a Windows install needs `reason8 bot build --library stock`, which keeps the
-  engine's library: the openings play, without the command budget and the live
-  state. Only Linux was run.
+- On Windows the library is `SkirmishAI.dll`. `reason8 bot build` builds ours
+  when the engine folder it installs into is a Windows one, for example from
+  WSL with `--data-dir "/mnt/c/<BAR install>/data"` and `--skirmish-dir`
+  pointing at that engine's `AI/Skirmish`. It played headless games in
+  `spring-headless.exe`; a game in the BAR client was not tried.
 
 ## Not covered
 
@@ -1103,7 +1156,8 @@ Not tried: we have no graphical BAR install here. What we know:
   were played), and Reason8 next to human players.
 - A model that runs during the game. The bridge and our own library were
   measured with a stand-in, not with a model.
-- A Windows build of the library, and our library in a real lobby.
+- Our library in a real lobby, on either platform; on Windows only headless
+  games were played.
 - The command budget in a game played in real time: in headless games the
   replay records the bot's commands up to a second late, so only the
   governor's own log shows the budget exactly

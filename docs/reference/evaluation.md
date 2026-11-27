@@ -453,6 +453,38 @@ both keep the budget), 10 seeds, 20 games, all played to the end:
 - The governors of all 320 teams, both AIs', kept the budget and lost no
   command.
 
+### On Windows
+
+The same AI with our `SkirmishAI.dll` instead, in a copy of the Windows engine
+`spring-headless.exe` started from WSL
+([`in-game.md`](in-game.md#on-windows-from-wsl)), against stock BARb: 3 seeds,
+6 games, all played to the end, one at a time.
+
+| measure at 4:00 | Reason8 | BARb    | share               |
+| --------------- | ------- | ------- | ------------------- |
+| metal income    | 9.6     | 12.0    | 80.0% (76.2%–82.5%) |
+| energy income   | 141.0   | 169.5   | 83.2% (78.6%–87.7%) |
+| built metal     | 4191.0  | 4926.6  | 85.1% (82.5%–87.7%) |
+| built energy    | 36525.9 | 44226.1 | 82.6% (78.5%–85.6%) |
+| units           | 16.9    | 24.6    | 68.8% (60.5%–78.5%) |
+
+- **It plays as on Linux.** Built metal at 4:00 is 85.1% of stock BARb's,
+  against 84.1% (83.1%–85.1%) in the 30 Linux seeds under the same reaction
+  limits ([Under human-like limits](#under-human-like-limits)).
+- **The governor works the same.** `reason8 bot check` found, for all 48
+  Reason8 teams, the library built for the engine it ran in, every window of
+  the budget kept and no command dropped: 91,160 commands seen, a median of 37
+  actions a minute, the longest hold 59 frames.
+- **The live state is the game's.** Compared with the state export, the units
+  standing matched the last snapshot in 934 of 1,558 lines (60%, 62% on Linux)
+  and the resources and wind differed as little as on Linux
+  ([`command-governor.md`](../research/command-governor.md#the-live-state)).
+- 29 of the 48 teams built their opening in order (69% on Linux); one finished
+  it within the 8.5 minutes, so `reason8 bot check` reports the others'
+  openings as followed but not finished, and its exit code is non-zero.
+- An 8v8 game took 3.5 minutes, one minute of it loading; the engine used up
+  to 5.5 GB.
+
 ## What the games cost
 
 Measured on the A/A run: 32 hardware threads, 56 GB of RAM for WSL, 7 games at
