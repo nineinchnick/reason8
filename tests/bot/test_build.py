@@ -248,6 +248,28 @@ def test_assemble_with_our_library(tmp_path):
         assert binding + "(" in live_state
 
 
+def test_assemble_with_our_library_for_windows(tmp_path):
+    stock_hash = hashlib.sha256(b"// stock factory\n").hexdigest()
+    inputs = make_inputs(tmp_path, stock_hash)
+    (inputs["base_ai_dir"] / "libSkirmishAI.so").rename(inputs["base_ai_dir"] / "SkirmishAI.dll")
+    ours = tmp_path / "SkirmishAI.dll"
+    ours.write_bytes(b"our dll")
+    library = native.Library(ours, {"source": "build", "platform": "windows"}, native.WINDOWS)
+    files, facts = build.assemble(**inputs, library=library)
+    assert files["SkirmishAI.dll"] == b"our dll" and "libSkirmishAI.so" not in files
+    assert facts["engine_files"] == ["SkirmishAI.dll"]
+
+
+def test_a_linux_library_does_not_go_into_a_windows_engine(tmp_path):
+    stock_hash = hashlib.sha256(b"// stock factory\n").hexdigest()
+    inputs = make_inputs(tmp_path, stock_hash)
+    (inputs["base_ai_dir"] / "libSkirmishAI.so").rename(inputs["base_ai_dir"] / "SkirmishAI.dll")
+    ours = tmp_path / "libSkirmishAI.so"
+    ours.write_bytes(b"our library")
+    with pytest.raises(SystemExit, match="no libSkirmishAI.so to replace"):
+        build.assemble(**inputs, library=native.Library(ours, {"source": "build"}))
+
+
 def test_live_state_scripts_declare_the_same_functions():
     def declarations(script: str) -> list[str]:
         return re.findall(r"^((?:float|int|string) \w+)\(", script, re.M)
