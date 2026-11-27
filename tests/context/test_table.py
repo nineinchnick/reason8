@@ -269,6 +269,31 @@ def test_build_table_and_check(tmp_path):
     assert created["created_frame"].to_list() == [40, None, None, None, None]
 
 
+def test_load_steps(tmp_path):
+    from reason8.context import measure
+
+    write_source(tmp_path / "source", {7: "train"})
+    write_state_tables(tmp_path / "state")
+    sample = pl.DataFrame(
+        {"match_id": [7], "replay_file_name": [REPLAY + ".sdfz"], "map": ["M"], "split": ["train"]}
+    )
+    out = tmp_path / "context"
+    table.build_table(
+        out, sample, source=tmp_path / "source", states=tmp_path / "state", log=lambda _: None
+    )
+    steps = measure.load_steps(out)
+    assert steps.frame.height == 5
+    assert [opening.steps for opening in steps.openings["train"]] == [
+        ("armmex", "armpw", "armmex", "armlab"),
+        ("armmex",),
+    ]
+    first_player = steps.frame.filter(pl.col("player_slot") == 0)
+    assert first_player["previous_1"].to_list() == ["<start>", "armmex", "armpw", "armmex"]
+    # two mex orders (one drag) before the third step, none counting the step itself
+    assert first_player["ordered_mex"].to_list() == [0, 2, 2, 3]
+    assert set(steps.groups) == {"history", *table.GROUPS}
+
+
 def test_time_since_an_earlier_frame():
     """Orders of one frame all get the time since the last order before that frame."""
     orders = pl.DataFrame(
