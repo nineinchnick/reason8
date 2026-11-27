@@ -220,6 +220,24 @@ def test_step_index_counts_steps_per_player():
     assert rows.select(step_index()).to_series().to_list() == [0, None, None, 0, 1]
 
 
+def test_step_starts_with_jobs_as_answers():
+    """In the decision table a job is a decision too: it breaks a run of one unit, and
+    quick repeats of one job are one step."""
+    rows = pl.DataFrame(
+        {
+            "match_id": [1] * 5,
+            "player_slot": [0] * 5,
+            "frame": [0, 2, 4, 30, 32],
+            "answer": ["armpw", "reclaim", "armpw", "assist", "assist"],
+        }
+    )
+    decides = pl.col("answer").is_not_null()
+    starts = rows.select(step_starts(answer="answer", decides=decides)).to_series()
+    assert starts.to_list() == [True, True, True, True, False]
+    steps = rows.select(step_index(answer="answer", decides=decides)).to_series()
+    assert steps.to_list() == [0, 1, 2, 3, None]
+
+
 def test_ordered_faction_and_removed_units():
     assert ordered_faction(["cormex", "corwin", "armmex"]) == "Cortex"
     assert ordered_faction(["legmex"]) == "Legion"
