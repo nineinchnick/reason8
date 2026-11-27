@@ -3,7 +3,12 @@
 Usage::
 
     uv run reason8 context measure                  # validation
-    uv run reason8 context measure --split test     # the numbers of docs/results.md
+    uv run reason8 context measure --split test     # the numbers of docs/research/context.md
+    uv run reason8 context measure --table data/datasets/context_v1
+
+This module measures a table of the first format (``context_v1``: build orders only,
+without builders); a table with builders and jobs (``context_v2``) is measured by
+`reason8.context.builder_measure`, which uses the trees of this module.
 
 The protocol is ADR 0013, on the rows of the decision table (`reason8.context.table`):
 each model predicts the unit of the next step of an opening, the first `SCORED_STEPS`
@@ -565,7 +570,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 def run(args: argparse.Namespace) -> int:
     device = args.device or default_device()
-    text = measure(args.table, args.split, args.saved_model, args.threads, args.rounds, device)
+    manifest = json.loads((args.table / "manifest.json").read_text())
+    if manifest.get("format") == "reason8.context/1":
+        text = measure(args.table, args.split, args.saved_model, args.threads, args.rounds, device)
+    else:
+        from reason8.context.builder_measure import measure_builders
+
+        text = measure_builders(args.table, args.split, args.threads, args.rounds, device)
     print(text)
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)
