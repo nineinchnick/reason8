@@ -22,10 +22,11 @@ ships with BAR, and the scripts mentioned here.
   built in 11 games: the commander's part was complete and in order in all 11;
   the factory's part was in order in all 11 and complete in 10 (in one game
   the economy was too weak to finish it in time).
-- **It plays the model's opening of its start position.** `reason8 bot export`
-  writes one opening per map, position and faction from the next-build model,
-  and the AI picks the one whose position is nearest to its commander. In two
-  8v8 games every Reason8 team found its position; see
+- **It plays the model's openings of its start position.**
+  `reason8 bot export` writes five openings per map, position and faction from
+  the next-build model, and the AI picks one of those whose position is
+  nearest to its commander. In two 8v8 games every Reason8 team found its
+  position; see
   [Learned openings in team games](#learned-openings-in-team-games).
 - **The model does not have to run inside the game yet.** For openings its
   output is known before the game starts, so it is exported to a data file and
