@@ -28,3 +28,4 @@ number and add it to the list below, which is in the same order.
 - [0015. Train across balance patches](0015-train-across-balance-patches.md)
 - [0016. Download in a fixed order, keep the data in a private S3 bucket by day, run locally first](0016-download-and-store-the-data.md)
 - [0017. Keep openings with automation widgets and flag them](0017-keep-openings-with-automation-widgets-flagged.md)
+- [0018. Learn from orders joined with the state just before them](0018-learn-from-orders-joined-with-the-state-before-them.md)

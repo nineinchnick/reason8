@@ -93,11 +93,14 @@ timeout.
 - Six small files per game: tens of thousands of files for a sample of
   thousands of games. If that gets slow to list or sync, the tables of a day
   can be merged into one file per table later, without touching the widget.
-- The state is the spectator's full view. Line of sight per player must be
-  recorded before the state is used for training
-  ([ADR 0008](0008-play-under-human-like-limits.md)). The format has room for
-  it and for other additions as lines and tables of their own: visibility per
-  ally team (LOS and radar), unit command queues, and static map data (metal
-  spots, features).
+- The state is the spectator's full view. Training on the openings uses only
+  the state of the player's own team and its allies, which a player sees
+  anyway
+  ([ADR 0018](0018-learn-from-orders-joined-with-the-state-before-them.md)).
+  Line of sight per ally team must be recorded before enemy units are used for
+  training ([ADR 0008](0008-play-under-human-like-limits.md)). The format has
+  room for it and for other additions as lines and tables of their own:
+  visibility per ally team (LOS and radar), unit command queues, and static
+  map data (metal spots, features).
 - Revisit if a replay stops re-simulating exactly, or if per-replay cost makes
   the needed part of 8v8 games too expensive even in the cloud.

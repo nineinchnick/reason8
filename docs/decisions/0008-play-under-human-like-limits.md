@@ -123,7 +123,9 @@ The bot plays as the 30-40 band by default, a strong player, as the README's
 ## Consequences
 
 - Game state used for training has to be what the player could see, not the
-  spectator's full view (line of sight per ally team).
+  spectator's full view: the team's own and its allies' state, and enemy units
+  only with line of sight per ally team
+  ([ADR 0018](0018-learn-from-orders-joined-with-the-state-before-them.md)).
 - The in-game side needs explicit limits on command rate and reaction time:
   the windows above, enforced on every command the bot sends by the governor,
   and the reaction delays, which the scripts draw
