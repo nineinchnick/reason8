@@ -45,7 +45,7 @@ import polars as pl
 
 from reason8.game.unitdefs import UnitDef, build_task, game_unit_defs
 from reason8.models.ngram import NgramModel, OpeningSteps, load_model, models_dir
-from reason8.openings.dataset import INCLUDED
+from reason8.openings.dataset import INCLUDED, step_starts
 from reason8.paths import REPO_ROOT, data_dir
 
 DEFAULT_OUT = REPO_ROOT / "ai" / "Reason8" / "openings.json"
@@ -93,17 +93,12 @@ class Candidate:
 
 
 def with_steps(rows: pl.DataFrame | pl.LazyFrame) -> pl.LazyFrame:
-    """Order rows that add units, numbered by step: an order that repeats the one before it
-    in the same frame (``repeat``) belongs to the same step."""
+    """Order rows that add units, numbered by step (`reason8.openings.dataset.step_starts`):
+    the orders of one step share its number."""
     return (
         rows.lazy()
         .sort("match_id", "player_slot", "seq_idx")
-        .with_columns(
-            step=(~pl.col("repeat").fill_null(False))
-            .cast(pl.Int32)
-            .cum_sum()
-            .over("match_id", "player_slot")
-        )
+        .with_columns(step=step_starts().cast(pl.Int32).cum_sum().over("match_id", "player_slot"))
     )
 
 
@@ -189,7 +184,18 @@ def load_candidates(
     )
     rows = (
         pl.scan_parquet(dataset / "train.parquet")
-        .select("match_id", "player_slot", "seq_idx", "unit", "kind", "count", "repeat", "x", "z")
+        .select(
+            "match_id",
+            "player_slot",
+            "seq_idx",
+            "frame",
+            "unit",
+            "kind",
+            "count",
+            "repeat",
+            "x",
+            "z",
+        )
         .filter(pl.col("seq_idx").is_not_null())
         .join(chosen.lazy().select("match_id", "player_slot"), on=("match_id", "player_slot"))
     )
