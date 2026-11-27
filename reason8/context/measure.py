@@ -242,6 +242,9 @@ class TreeModel:
         device: str = "cpu",
         categorical: Sequence[str] = CATEGORICAL,
         parameters: Mapping[str, Any] | None = None,
+        min_class_steps: int = MIN_CLASS_STEPS,
+        max_rounds: int = MAX_ROUNDS,
+        early_stopping_rounds: int = EARLY_STOPPING_ROUNDS,
     ) -> None:
         self.name = name
         self.features = list(features)
@@ -249,6 +252,9 @@ class TreeModel:
         self.device = device
         self.categorical = tuple(categorical)
         self.parameters = PARAMETERS | dict(parameters or {})
+        self.min_class_steps = min_class_steps
+        self.max_rounds = max_rounds
+        self.early_stopping_rounds = early_stopping_rounds
         self.categories: dict[str, dict[str, int]] = {}
         self.classes: list[str] = []
         self.vocabulary: list[str] = []
@@ -297,7 +303,9 @@ class TreeModel:
                 values = sorted(set(train[name].cast(pl.String).drop_nulls().to_list()))
                 self.categories[name] = {value: code for code, value in enumerate(values)}
         counts = Counter(train["unit"].to_list())
-        self.classes = sorted(unit for unit, count in counts.items() if count >= MIN_CLASS_STEPS)
+        self.classes = sorted(
+            unit for unit, count in counts.items() if count >= self.min_class_steps
+        )
         self.vocabulary = sorted(counts) + [UNKNOWN]
         index = {unit: position for position, unit in enumerate(self.vocabulary)}
         other = len(self.classes)
@@ -322,9 +330,9 @@ class TreeModel:
         self.booster = xgboost.train(
             parameters,
             training,
-            num_boost_round=MAX_ROUNDS,
+            num_boost_round=self.max_rounds,
             evals=[(stopping, "validation")],
-            early_stopping_rounds=EARLY_STOPPING_ROUNDS,
+            early_stopping_rounds=self.early_stopping_rounds,
             verbose_eval=False,
         )
         self.rounds = self.booster.best_iteration + 1
