@@ -997,21 +997,25 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--check",
         action="store_true",
         help="check the state instead: the units rebuilt from the events against every "
-        "snapshot, and the features, reclaim and builders' work",
+        "snapshot, the features, reclaim and builders' work, and sight and radar",
     )
 
 
 def check_file(path: str | Path) -> dict:
     """The checks of a state file, converted in memory (nothing is written): the units
-    rebuilt from the events against the snapshots (`reason8.headless.standing`) and, from
-    format 6, the features, reclaim and builders' work (`reason8.headless.features`)."""
-    from reason8.headless import features, standing
+    rebuilt from the events against the snapshots (`reason8.headless.standing`), from
+    format 6 the features, reclaim and builders' work (`reason8.headless.features`), and
+    from format 7 sight and radar (`reason8.headless.visibility`)."""
+    from reason8.headless import features, standing, visibility
 
     game_tables = to_tables(read_lines(path, snapshots=True), replay_name(path))
     result = {"state_file": str(path), **standing.check(game_tables)}
     feature_checks = features.check(game_tables)
     if feature_checks:
         result["features"] = feature_checks
+    visibility_checks = visibility.check(game_tables)
+    if visibility_checks:
+        result["visibility"] = visibility_checks
     return result
 
 
