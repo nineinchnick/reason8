@@ -235,8 +235,7 @@ with the protocol above on its 45 test games, 18,943 steps. Method, the other
 groups and the breakdowns: [`context.md`](research/context.md).
 
 ```sh
-uv run reason8 context build
-uv run reason8 context measure --split test
+uv run reason8 context measure --table data/datasets/context_v1 --split test
 ```
 
 | model                                    | trained on           | top-1             | top-3             | log-loss            |
@@ -250,6 +249,26 @@ The state (game time, the team's economy and units, the allies' economy and
 units) adds 3.2 points of top-1 (2.6 to 3.8, paired) and 0.135 nats over the
 same trees with the order history alone; the economy and the team's own units
 carry most of it, the wind nothing.
+
+### With builders and jobs (preliminary)
+
+The builder model's table (`context_v2`) gives every order the builders it
+went to and adds the builders' jobs (assist, reclaim, repair, resurrect) as
+answers, with build power and skill
+([ADR 0019](decisions/0019-first-model-trees-asked-by-every-builder.md)). Its
+steps are not those of the scores above: a fifth of them are jobs. On 800
+games (72 in test, 32,544 steps), with the mask of answers a builder cannot
+give:
+
+| model                                | trained on      | top-1             | top-3             | log-loss            |
+| ------------------------------------ | --------------- | ----------------- | ----------------- | ------------------- |
+| trees: order history                 | 633 table games | 54.3% (53.6–55.1) | 84.0% (83.4–84.7) | 1.327 (1.305–1.348) |
+| trees: order history and the builder | 633 table games | 58.5% (57.8–59.3) | 86.7% (86.2–87.3) | 1.206 (1.182–1.229) |
+| trees: the inputs of ADR 0019        | 633 table games | 61.4% (60.7–62.3) | 88.2% (87.6–88.8) | 1.128 (1.104–1.152) |
+
+What each group adds per kind of builder, how well a job is told from a build,
+skill, the mask and the two ways of scoring an order to several builders:
+[`context.md`](research/context.md).
 
 ## Findings
 
