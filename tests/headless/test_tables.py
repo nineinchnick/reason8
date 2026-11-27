@@ -458,3 +458,30 @@ def test_format_5_tables_read_with_format_6(tmp_path):
     assert events.get_column("replay").cast(pl.String).unique().len() == 2
     assert events.filter(pl.col("resurrected_from").is_not_null()).height == 1
     assert list(read_records(events_path, True)) == list(read_records(old, True))
+
+
+def test_check_of_features_and_work(tmp_path):
+    result = tables.check_file(write_state(tmp_path / "game.jsonl.gz", lines_v6()))
+    assert set(result["counts"]) == {"snapshots", "units"}, result["examples"]
+    checks = result["features"]
+    assert checks["reclaim"]["teams_differing_from_game"] == []
+    assert checks["reclaim"]["reclaimed_away_not_all_taken"] == 0
+    assert checks["features"]["ends"] == {"reclaimed": 1, "resurrected": 1}
+    assert checks["features"]["wrecks_matching_a_death"] == 1
+    assert checks["resurrected"] == {
+        "units": 1,
+        "feature_resurrected": 1,
+        "same_type": 1,
+        "features_resurrected": 1,
+    }
+    work = checks["work"]
+    # the extractor and the bot, both seen being built by the commander
+    assert (work["built_by_builders"], work["built_by_builders_seen_building"]) == (2, 2)
+    assert work["tasks"] == {"none": 2, "build": 2, "repair": 1, "reclaim": 1, "resurrect": 1}
+    # the game counts other reclaim than ours
+    lines = lines_v6()
+    lines[-1]["game_reclaimed"] = [[0, 80.0, 0.0]]
+    result = tables.check_file(write_state(tmp_path / "other.jsonl.gz", lines))
+    assert result["features"]["reclaim"]["teams_differing_from_game"] == [
+        {"team": 0, "metal": 50.0, "game": 80.0}
+    ]
