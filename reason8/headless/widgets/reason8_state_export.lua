@@ -24,6 +24,15 @@
 -- what it had left when reclaimed away to the builders working on it in that
 -- frame, which the widget asks right then.
 --
+-- Sight and radar (format 7): a line each time an enemy unit enters or leaves an
+-- ally team's sight ("los") or radar ("radar"), from the engine's call-ins. The
+-- engine calls them once per ally team, but BAR's widget handler passes on only
+-- the unit and its team, so the widget finds the ally team by reading the unit's
+-- state for every ally team (Spring.GetUnitLosState) and writing the one that
+-- changed: the engine updates the ally teams one after another and sets or
+-- clears the state before each call-in. Radar is the engine's: a unit in sight
+-- is on radar too.
+--
 -- The header also has the unit types as the game loaded them (format 7), after its
 -- post-processing: build power, build options and what each can do.
 --
@@ -47,6 +56,7 @@
 --   Reason8Events          1 = also write per-unit event lines (default 1)
 --   Reason8WorkFrames      frames between samples of builders' work (default 5,
 --                          0 = off); only with events
+--   Reason8Visibility      1 = sight and radar lines (default 1); only with events
 --
 -- No player names are written: teams and players are numbers only.
 --------------------------------------------------------------------------------
@@ -67,7 +77,7 @@ local OUT_PATH = "LuaUI/Config/reason8_state.jsonl"
 -- 2: hit and damage lines, wind; 3: exact attacker; 4: idle; 5: resource lines every
 -- second, snapshots at the end of the frame and without finished buildings; 6: features,
 -- reclaim, builders' work, resurrected units' features, attacker of a destroyed unit;
--- 7: unit types as loaded
+-- 7: unit types as loaded, sight and radar per ally team
 local FORMAT_VERSION = 7
 
 local spGetGameFrame = Spring.GetGameFrame
@@ -87,6 +97,7 @@ local spGetFeatureResources = Spring.GetFeatureResources
 local spGetFeatureResurrect = Spring.GetFeatureResurrect
 local spGetFeatureRadius = Spring.GetFeatureRadius
 local spGetUnitsInCylinder = Spring.GetUnitsInCylinder
+local spGetUnitLosState = Spring.GetUnitLosState
 local floor = math.floor
 local format = string.format
 local concat = table.concat
@@ -97,6 +108,7 @@ local wantedSpeed = Spring.GetConfigInt("Reason8Speed", 0)
 local maxFrame = Spring.GetConfigInt("Reason8MaxFrame", 0)
 local writeEvents = Spring.GetConfigInt("Reason8Events", 1) ~= 0
 local workFrames = writeEvents and Spring.GetConfigInt("Reason8WorkFrames", 5) or 0
+local writeVisibility = writeEvents and Spring.GetConfigInt("Reason8Visibility", 1) ~= 0
 
 local DAMAGE_FRAMES = 30 -- damage between teams is summed over this many frames
 
@@ -132,6 +144,15 @@ local builders, builderList, builderListDirty = {}, {}, false
 local lastTask = {} -- [builderID] = "task target" as last written
 local reclaimersBefore = {} -- [featureID] = { [team] = reclaim speed } at the last sample
 local reclaimSums = {} -- [featureID] = { [team] = { metal, energy, firstFrame } } not yet written
+
+-- sight and radar (format 7)
+local LOS_INLOS, LOS_INRADAR = 1, 2 -- bits of the engine's raw state of a unit for an ally team
+local allyTeams = {} -- every ally team but the neutral team's
+local gaiaAllyTeam
+local inSight, onRadar = {}, {} -- [unitID] = { [allyTeam] = true } as last written
+local ownerOf = {} -- [unitID] = its team as of its last "created" or "given" call-in
+-- call-ins in which no ally team's state had changed, or more than one: both should be 0
+local visibilityUnmatched, visibilityMultiple = 0, 0
 
 local function write(line)
 	if outputFile then
@@ -213,6 +234,9 @@ local function writeHeader()
 		local _, _, _, isAI, side, allyTeam = Spring.GetTeamInfo(team, false)
 		teams[#teams + 1] = team
 		allyTeamOfTeam[team] = allyTeam
+		if team == gaiaTeam then
+			gaiaAllyTeam = allyTeam
+		end
 		teamParts[#teamParts + 1] = format(
 			'{"team":%d,"ally":%d,"ai":%s,"side":%s,"gaia":%s}',
 			team,
@@ -222,12 +246,18 @@ local function writeHeader()
 			team == gaiaTeam and "true" or "false"
 		)
 	end
+	for _, allyTeam in ipairs(Spring.GetAllyTeamList()) do
+		if allyTeam ~= gaiaAllyTeam then
+			allyTeams[#allyTeams + 1] = allyTeam
+		end
+	end
+	table.sort(allyTeams)
 	write(
 		format(
 			'{"t":"header","v":%d,"game":%s,"map":%s,"engine":%s,"mapx":%d,"mapz":%d,'
 				.. '"replay":%s,"snapshot_frames":%d,"resource_frames":%d,"work_frames":%d,'
 				.. '"wind_min":%.1f,"wind_max":%.1f,"tidal":%.1f,'
-				.. '"teams":[%s],"unitdefs":{%s},"static":[%s],"builders":[%s],"loaded":{%s}}',
+				.. '"visibility":%s,"teams":[%s],"unitdefs":{%s},"static":[%s],"builders":[%s],"loaded":{%s}}',
 			FORMAT_VERSION,
 			jsonString(Game.gameName .. " " .. Game.gameVersion),
 			jsonString(Game.mapName),
@@ -241,6 +271,7 @@ local function writeHeader()
 			Game.windMin or -1,
 			Game.windMax or -1,
 			Game.tidal or -1,
+			writeVisibility and "true" or "false",
 			concat(teamParts, ","),
 			concat(unitDefNames, ","),
 			concat(staticIDs, ","),
@@ -335,6 +366,87 @@ local function writeEvent(kind, unitID, unitDefID, unitTeam, extra)
 			extra or ""
 		)
 	)
+end
+
+-- Sight and radar: a line when an enemy unit enters or leaves an ally team's sight
+-- ("los") or radar ("radar"), with where it is:
+--   {"t":"los","f":frame,"u":unit,"ally":the ally team that sees it,"in":true or false,
+--    "x":x,"z":z}
+-- The call-in does not say which ally team, so every ally team's state is read and the
+-- ones that changed since the last line are written: one per call-in (the counts of
+-- call-ins with none or several go to the end line). A unit given to another team is
+-- announced again to every ally team that sees it, before the "given" call-in; that is
+-- not counted as a call-in without a change. A unit's own ally team is left out;
+-- a unit given to another ally team stops being an enemy of it without a line (the
+-- "given" line says so), and a unit destroyed gets no "leave" lines.
+local function visibilityChanged(unitID, unitTeam, bit, written, kind)
+	if finished then
+		return
+	end
+	local unitAllyTeam = allyTeamOfTeam[unitTeam]
+	if unitAllyTeam == nil or unitTeam == gaiaTeam or spGetUnitIsDead(unitID) ~= false then
+		return -- the neutral team's, or dying: its "destroyed" line is written
+	end
+	local seen = written[unitID]
+	local changes = 0
+	for i = 1, #allyTeams do
+		local allyTeam = allyTeams[i]
+		if allyTeam ~= unitAllyTeam then
+			local state = spGetUnitLosState(unitID, allyTeam, true) or 0
+			local now = state % (2 * bit) >= bit
+			local before = seen ~= nil and seen[allyTeam] == true
+			if now ~= before then
+				changes = changes + 1
+				if not seen then
+					seen = {}
+					written[unitID] = seen
+				end
+				seen[allyTeam] = now or nil
+				local x, _, z = spGetUnitPosition(unitID)
+				write(
+					format(
+						'{"t":"%s","f":%d,"u":%d,"ally":%d,"in":%s,"x":%d,"z":%d}',
+						kind,
+						spGetGameFrame(),
+						unitID,
+						allyTeam,
+						now and "true" or "false",
+						x or -1,
+						z or -1
+					)
+				)
+			end
+		end
+	end
+	if changes == 0 and ownerOf[unitID] == unitTeam then
+		visibilityUnmatched = visibilityUnmatched + 1
+	elseif changes > 1 then
+		visibilityMultiple = visibilityMultiple + 1
+	end
+end
+
+function widget:UnitEnteredLos(unitID, unitTeam)
+	if writeVisibility then
+		visibilityChanged(unitID, unitTeam, LOS_INLOS, inSight, "los")
+	end
+end
+
+function widget:UnitLeftLos(unitID, unitTeam)
+	if writeVisibility then
+		visibilityChanged(unitID, unitTeam, LOS_INLOS, inSight, "los")
+	end
+end
+
+function widget:UnitEnteredRadar(unitID, unitTeam)
+	if writeVisibility then
+		visibilityChanged(unitID, unitTeam, LOS_INRADAR, onRadar, "radar")
+	end
+end
+
+function widget:UnitLeftRadar(unitID, unitTeam)
+	if writeVisibility then
+		visibilityChanged(unitID, unitTeam, LOS_INRADAR, onRadar, "radar")
+	end
 end
 
 -- Features: wrecks, heaps, rocks and trees, the ones with metal or energy to reclaim.
@@ -781,13 +893,16 @@ local function finish(reason, winners)
 	end
 	write(
 		format(
-			'{"t":"end","f":%d,"reason":%s,"winners":[%s],"attackers":%s,"sampled":%s%s}',
+			'{"t":"end","f":%d,"reason":%s,"winners":[%s],"attackers":%s,"sampled":%s%s%s}',
 			frame,
 			jsonString(reason),
 			concat(winners or {}, ","),
 			jsonString(attackerSource),
 			jsonString(sampleAtFrameStart and "frame_start" or "frame_end"),
-			#reclaimedParts > 0 and format(',"game_reclaimed":[%s]', concat(reclaimedParts, ",")) or ""
+			#reclaimedParts > 0 and format(',"game_reclaimed":[%s]', concat(reclaimedParts, ",")) or "",
+			writeVisibility
+					and format(',"visibility_unmatched":%d,"visibility_multiple":%d', visibilityUnmatched, visibilityMultiple)
+				or ""
 		)
 	)
 	if outputFile then
@@ -814,6 +929,18 @@ function widget:Initialize()
 				addBuilder(unitID, spGetUnitDefID(unitID))
 			end
 		end
+		if writeVisibility then
+			-- the units an enemy sees already, when the widget starts in a running game
+			local units = spGetAllUnits()
+			table.sort(units)
+			for i = 1, #units do
+				local unitTeam = spGetUnitTeam(units[i])
+				ownerOf[units[i]] = unitTeam
+				visibilityChanged(units[i], unitTeam, LOS_INLOS, inSight, "los")
+				visibilityChanged(units[i], unitTeam, LOS_INRADAR, onRadar, "radar")
+			end
+			visibilityUnmatched, visibilityMultiple = 0, 0
+		end
 	end
 	if wantedSpeed > 0 then
 		-- a replay plays at 1x unless told otherwise; min = max pins the speed
@@ -825,6 +952,7 @@ end
 -- A unit made by a builder names it ("by"); one resurrected names its feature ("rez"):
 -- while the unit is made, its resurrector still works on the feature.
 function widget:UnitCreated(unitID, unitDefID, unitTeam, builderID)
+	ownerOf[unitID] = unitTeam
 	local extra
 	if builderID then
 		extra = format(',"by":%d', builderID)
@@ -846,6 +974,7 @@ end
 -- (negative: not a weapon, such as a crash or self-destruction).
 function widget:UnitDestroyed(unitID, unitDefID, unitTeam, attackerID, attackerDefID, attackerTeam, weaponDefID)
 	hitBefore[unitID] = nil
+	inSight[unitID], onRadar[unitID], ownerOf[unitID] = nil, nil, nil
 	removeBuilder(unitID)
 	local _, _, _, _, buildProgress = spGetUnitHealth(unitID)
 	local reclaimed = false
@@ -880,6 +1009,14 @@ end
 
 function widget:UnitGiven(unitID, unitDefID, newTeam, oldTeam)
 	writeEvent("given", unitID, unitDefID, newTeam, format(',"from":%d', oldTeam or -1))
+	ownerOf[unitID] = newTeam
+	-- its new ally team no longer counts as seeing an enemy
+	local newAllyTeam = allyTeamOfTeam[newTeam]
+	for _, written in ipairs({ inSight, onRadar }) do
+		if written[unitID] and newAllyTeam then
+			written[unitID][newAllyTeam] = nil
+		end
+	end
 end
 
 local function sample(frame)

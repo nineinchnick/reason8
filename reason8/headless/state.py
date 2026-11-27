@@ -13,6 +13,8 @@ The file is JSON lines (see the widget for the fields):
     {"t":"fcreated"|"fdestroyed","f":frame,"id":featureID,...}   a reclaimable feature
     {"t":"reclaim","f":frame,"id":featureID,"team":team,"metal":m,"energy":e}   reclaimed
     {"t":"work","f":frame,"u":unitID,"team":team,"task":...}   a builder's work changed
+    {"t":"los"|"radar","f":frame,"u":unitID,"ally":allyTeam,"in":bool,"x":x,"z":z}   an
+        enemy unit entered or left an ally team's sight or radar (format 7)
     {"t":"end","f":frame,"reason":...,"winners":[allyTeam,...],"attackers":...}
 
 `read_records()` reads every format the same way, from the JSON lines or from the Parquet
@@ -60,6 +62,8 @@ EVENT_KINDS = (
     "fdestroyed",
     "reclaim",
     "work",
+    "los",
+    "radar",
 )
 #: From this format on resources are lines of their own ("r") and snapshots leave out
 #: finished units that cannot move (the header lists their types as "static").

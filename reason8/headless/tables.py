@@ -48,14 +48,19 @@ by name, not by the game version's numbers, and every table is zstd-compressed. 
 ``work`` (from format 6)
     what a builder worked on, each time it changed: build (assist, when someone else
     started the unit), repair, reclaim, resurrect, capture, restore or none, and the unit
-    or feature it worked on. Sampled every ``work_frames`` frames.
+    or feature it worked on. Sampled every ``work_frames`` frames;
+``visibility`` (from format 7)
+    an enemy unit entering or leaving an ally team's sight (``los``) or radar
+    (``radar``; a unit in sight is on radar too), with where it was. Sorted by unit and
+    frame, like ``units``. A unit is seen until its ``leave`` row, its death, or its being
+    given to that ally team.
 
 From format 7 the ``game`` row also has each unit type as the game loaded it: build power,
 build options and what it can do (move, assist, repair, reclaim, resurrect).
 
-Games written before format 6 have no ``features``, ``reclaim`` and ``work`` files, and
-their ``events`` and ``game`` lack the later columns: `scan()` and `read_game()` give
-them empty tables and empty columns.
+Games written before format 6 have no ``features``, ``reclaim`` and ``work`` files, those
+before format 7 no ``visibility`` file, and their ``events`` and ``game`` lack the later
+columns: `scan()` and `read_game()` give them empty tables and empty columns.
 
 `scan()` reads one table of many games as a lazy Polars frame; `read_records()` in
 `reason8.headless.state` reads a game's tables as if they were its JSON lines.
@@ -83,9 +88,10 @@ GAME_STATE_STEM = "state"
 UNIT_EVENT_KINDS = ("created", "finished", "destroyed", "given", "idle")
 WORK_TASKS = ("none", "build", "repair", "reclaim", "resurrect", "capture", "restore")
 FEATURE_ENDS = ("reclaimed", "resurrected", "destroyed")
+SENSES = ("los", "radar")
 #: The format that added features, reclaim and builders' work.
 FEATURES_FORMAT = 6
-#: The format that added the unit types as loaded.
+#: The format that added the unit types as loaded, and sight and radar.
 LOADED_FORMAT = 7
 #: What a unit type can do, in the widget's letters ("can"), as columns of ``unit_defs``.
 JOB_FLAGS = {
@@ -159,6 +165,11 @@ TABLE_SCHEMAS: dict[str, dict[str, pl.DataType]] = {
         # per team, metal and energy reclaimed as the game counts it (game versions from
         # late 2026 only)
         "game_reclaimed": pl.List(_TEAM_RECLAIMED),
+        "visibility": pl.Boolean,  # sight and radar were written (format 7)
+        # the widget's call-ins in which it found no ally team whose sight or radar of the
+        # unit changed, or more than one: 0 when the ally teams are exact (format 7)
+        "visibility_unmatched": pl.Int32,
+        "visibility_multiple": pl.Int32,
     },
     "resources": {
         "replay": pl.Categorical,
@@ -258,6 +269,16 @@ TABLE_SCHEMAS: dict[str, dict[str, pl.DataType]] = {
         "task": pl.Enum(WORK_TASKS),
         "target_unit": pl.Int32,
         "target_feature": pl.Int32,
+    },
+    "visibility": {
+        "replay": pl.Categorical,
+        "frame": pl.Int32,
+        "unit_id": pl.Int32,
+        "ally_team": pl.Int16,  # the ally team that sees it, or has it on radar
+        "sense": pl.Enum(SENSES),
+        "entered": pl.Boolean,  # false: it left
+        "x": pl.Int32,
+        "z": pl.Int32,
     },
 }
 TABLES = tuple(TABLE_SCHEMAS)
@@ -373,6 +394,9 @@ def _game_row(
         ]
         if end and "game_reclaimed" in end
         else None,
+        "visibility": header.get("visibility"),
+        "visibility_unmatched": end.get("visibility_unmatched") if end else None,
+        "visibility_multiple": end.get("visibility_multiple") if end else None,
     }
 
 
@@ -511,6 +535,10 @@ def to_tables(records: Iterable[dict], replay: str) -> dict[str, pl.DataFrame]:
                     record.get("feature"),
                 )
             )
+        elif kind in SENSES:
+            rows["visibility"].append(
+                (frame, record["u"], record["ally"], kind, record["in"], record["x"], record["z"])
+            )
         elif kind in ("r", "s"):
             # up to format 4 a run stopped at a snapshot frame wrote that snapshot twice:
             # the last one of a frame counts
@@ -542,6 +570,7 @@ def to_tables(records: Iterable[dict], replay: str) -> dict[str, pl.DataFrame]:
     tables["resources"] = tables["resources"].sort("team", "frame", maintain_order=True)
     tables["units"] = tables["units"].sort("unit_id", "frame", maintain_order=True)
     tables["work"] = tables["work"].sort("unit_id", "frame", maintain_order=True)
+    tables["visibility"] = tables["visibility"].sort("unit_id", "frame", maintain_order=True)
     # events, hits, damage, features and reclaim stay in the order they were written: by
     # frame, and in a frame in the order the engine reported them
     return {
@@ -648,9 +677,9 @@ def read_table_records(path: str | Path, snapshots: bool = False) -> Iterator[di
     """A game's tables as the lines of its state file would read (`read_lines`).
 
     Each frame gives its unit events, features (appeared, reclaim, went), hits, damage,
-    resource line, snapshot and builders' work, in that order; floats come back rounded as
-    the widget wrote them. Use `reason8.headless.state.read_records`, which makes snapshots
-    whole as well.
+    sight and radar (by unit), resource line, snapshot and builders' work, in that order;
+    floats come back rounded as the widget wrote them. Use
+    `reason8.headless.state.read_records`, which makes snapshots whole as well.
     """
     tables = read_game(path)
     game = tables["game"].row(0, named=True)
@@ -692,6 +721,7 @@ def read_table_records(path: str | Path, snapshots: bool = False) -> Iterator[di
         header["work_frames"] = game["work_frames"]
         header["builders"] = [ids[name] for name in game["builder_types"] or [] if name in ids]
     if version >= LOADED_FORMAT:
+        header["visibility"] = game["visibility"]
         header["loaded"] = {
             str(unit_def["unit_def_id"]): {
                 "bp": _short(unit_def["build_power"]),
@@ -759,6 +789,19 @@ def read_table_records(path: str | Path, snapshots: bool = False) -> Iterator[di
                 "by_team": row["by_team"],
                 "hits": row["hits"],
                 "damage": _round(row["damage"], 0),
+            }
+        )
+    visibility = tables["visibility"].sort("frame", "unit_id", maintain_order=True)
+    for row in visibility.iter_rows(named=True):
+        by_frame.setdefault(row["frame"], []).append(
+            {
+                "t": row["sense"],
+                "f": row["frame"],
+                "u": row["unit_id"],
+                "ally": row["ally_team"],
+                "in": row["entered"],
+                "x": row["x"],
+                "z": row["z"],
             }
         )
     work: dict[int, list[dict]] = {}
@@ -829,6 +872,9 @@ def read_table_records(path: str | Path, snapshots: bool = False) -> Iterator[di
                 [team["team"], _round(team["metal"], 1), _round(team["energy"], 1)]
                 for team in game["game_reclaimed"]
             ]
+        if game["visibility_unmatched"] is not None:
+            end["visibility_unmatched"] = game["visibility_unmatched"]
+            end["visibility_multiple"] = game["visibility_multiple"]
         yield end
 
 
