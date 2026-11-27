@@ -14,9 +14,10 @@ The AI folder <shortName>/<version>/ is put together from four sources:
      files that come with it;
   2. our build of BARb's library in place of the engine's (--library,
      `reason8.bot.library`): BARb with the command governor of ADR 0008 and
-     the live state the scripts read. It is built for the engine's tag with
-     ai/native/build.sh, on Linux x86-64 only; `--library stock` keeps the
-     engine's library;
+     the live state the scripts read. It is built for the engine's tag and
+     platform (Linux, or Windows when the engine's BARb has SkirmishAI.dll)
+     with ai/native/build.sh, which runs on Linux x86-64; `--library stock`
+     keeps the engine's library;
   3. the game's BARb scripts and configs (luarules/configs/BARb/stable in the
      game archive), for one profile;
   4. this repo's ai/Reason8: AIInfo.lua (short name and version),
@@ -58,6 +59,7 @@ MANIFEST_NAME = "reason8_build.json"
 OPENING_TABLE = "reason8/opening_table.as"
 LIVE_STATE = "reason8/live_state.as"
 LIMITS_ONLY_NAME = "BARbLimited"
+HEADLESS_NAMES = ("spring-headless", "spring-headless.exe")  # Linux, Windows
 
 # openings.json "tasks" values -> BARb's Task::BuildType (script/task.as). Types that
 # need more than a unit and a position (geothermal spots, pylons) are left out.
@@ -260,9 +262,10 @@ def assemble(
     if not library_files:
         raise SystemExit(f"no AI library in {base_ai_dir}")
     if library is not None and library.path is not None:
-        if native.LIBRARY_NAME not in files:
-            raise SystemExit(f"{base_ai_dir} has no {native.LIBRARY_NAME} to replace")
-        files[native.LIBRARY_NAME] = library.path.read_bytes()
+        name = native.LIBRARY_NAMES[library.platform]
+        if name not in files:
+            raise SystemExit(f"{base_ai_dir} has no {name} to replace")
+        files[name] = library.path.read_bytes()
 
     # 2. the game's BARb scripts and configs for the profile
     stock = profile_files(game_side, profile)
@@ -342,7 +345,7 @@ def build(args: argparse.Namespace) -> dict:
 
     if args.engine_copy:
         engine_copy = Path(args.engine_copy).resolve()
-        if not (engine_copy / "spring-headless").is_file():
+        if not any((engine_copy / name).is_file() for name in HEADLESS_NAMES):
             shutil.copytree(engine_dir, engine_copy, symlinks=True, dirs_exist_ok=True)
         skirmish_dir = engine_copy / "AI" / "Skirmish"
         facts["engine_dir"] = str(engine_copy)
@@ -376,8 +379,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--library",
         default=native.BUILD,
-        help="BARb's library: 'build' (ours, built or taken from the cache for the engine; "
-        "Linux x86-64), 'stock' (the engine's own) or the folder of a build.sh build",
+        help="BARb's library: 'build' (ours, built or taken from the cache for the engine's "
+        "tag and platform, Linux or Windows), 'stock' (the engine's own) or the folder of a "
+        "build.sh build (or the library in it)",
     )
     parser.add_argument(
         "--library-cache", help="where 'build' keeps its builds (default: <data dir>/native)"
