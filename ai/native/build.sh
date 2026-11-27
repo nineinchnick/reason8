@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Build BARb (CircuitAI) from source with the Reason8 command governor, for
-# Linux x86-64, without root: a conda-forge GCC 13 toolchain, the engine
-# source at the tag of the installed engine and BAR's prebuilt static
-# libraries. See docs/reference/in-game.md, "Our own build of BARb's library".
+# Build BARb (CircuitAI) from source with the Reason8 command governor and
+# live state, for Linux x86-64, without root: a conda-forge GCC 13 toolchain,
+# the engine source at the tag of the installed engine and BAR's prebuilt
+# static libraries. See docs/reference/in-game.md, "Our own build of BARb's
+# library". `reason8 bot build` runs it.
 #
 #   ai/native/build.sh <work dir> [engine tag] [engine commit]
 #
@@ -87,10 +88,11 @@ if [ ! -d spring-static-libs ]; then
 fi
 verify_commit spring-static-libs "$static_libs_commit"
 
-# 3. our changes: the governor (new files), the engine tag the library is
-#    built for, and the patch to BARb's AIExport.cpp
+# 3. our changes: the governor and the live state (new files), the engine tag
+#    the library is built for, and the patches to BARb's own files
 barb=recoil/AI/Skirmish/BARb
-cp "$here/Budget.h" "$here/Governor.h" "$here/Governor.cpp" "$barb/src/"
+cp "$here/Budget.h" "$here/Governor.h" "$here/Governor.cpp" \
+	"$here/LiveState.h" "$here/LiveState.cpp" "$barb/src/"
 build_header="#define REASON8_ENGINE_TAG \"$tag\""
 if [ "$(cat "$barb/src/Reason8Build.h" 2>/dev/null)" != "$build_header" ]; then
 	echo "$build_header" >"$barb/src/Reason8Build.h"
@@ -98,6 +100,9 @@ fi
 if ! grep -q 'reason8::UpdateGovernor' "$barb/src/AIExport.cpp"; then
 	git -C "$barb" checkout -q src/AIExport.cpp
 	patch -s -d "$barb" -p1 <"$here/AIExport.patch"
+fi
+if ! grep -q 'reason8::RegisterLiveState' "$barb/src/circuit/script/InitScript.cpp"; then
+	patch -s -d "$barb" -p1 <"$here/InitScript.patch"
 fi
 
 # the command budget's own tests, with the same compiler

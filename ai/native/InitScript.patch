@@ -1,0 +1,20 @@
+diff --git a/src/circuit/script/InitScript.cpp b/src/circuit/script/InitScript.cpp
+index c3aaefe..b42adc3 100644
+--- a/src/circuit/script/InitScript.cpp
++++ b/src/circuit/script/InitScript.cpp
+@@ -36,6 +36,7 @@
+ #include "Game.h"
+ #include "Team.h"
+ #include "Lua.h"
++#include "../../LiveState.h"  // Reason8
+ 
+ #include <format>
+ 
+@@ -633,6 +634,7 @@ void CInitScript::RegisterCore()
+ 
+ 	r = engine->RegisterObjectType("CCircuitAI", 0, asOBJ_REF | asOBJ_NOHANDLE); ASSERT(r >= 0);
+ 	r = engine->RegisterGlobalProperty("CCircuitAI ai", circuit); ASSERT(r >= 0);
++	reason8::RegisterLiveState(engine, circuit->GetSkirmishAIId());  // Reason8
+ 
+ 	r = engine->RegisterObjectType("CCircuitDef", 0, asOBJ_REF | asOBJ_NOCOUNT); ASSERT(r >= 0);
+ 	r = engine->RegisterObjectType("CCircuitUnit", 0, asOBJ_REF | asOBJ_NOCOUNT); ASSERT(r >= 0);
