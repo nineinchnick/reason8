@@ -1,7 +1,7 @@
 # 0008. Play under human-like limits
 
 - **Status:** Accepted
-- **Date:** 2026-11-26
+- **Date:** 2026-11-27
 
 ## Context
 
@@ -101,6 +101,20 @@ uses it:
 
 The command-rate windows above cap all of it.
 
+### Enforcing the budget
+
+A command over the budget is held, not dropped: dropping it leaves BARb
+believing the order was given, and a unit can stand idle until a task times
+out. The command governor in our build of BARb's library
+([ADR 0007](0007-ship-the-model-as-tables-in-a-barb-variant.md)) counts every
+command the bot sends as above, holds the ones that would take an action the
+budget has no room for, and sends them later, in the order they were given.
+Commands to one unit keep their order; a new order that replaces a unit's
+queue replaces the held orders to that unit too, as it would replace them a
+moment after they arrived. The governor also spends the budget evenly rather
+than in bursts, so that a busy bot acts every second or two instead of
+spending a window's cap at once and then waiting for the window to pass.
+
 ### Skill band
 
 The bot plays as the 30-40 band by default, a strong player, as the README's
@@ -111,13 +125,21 @@ The bot plays as the 30-40 band by default, a strong player, as the README's
 - Game state used for training has to be what the player could see, not the
   spectator's full view (line of sight per ally team).
 - The in-game side needs explicit limits on command rate and reaction time:
-  the windows above, enforced on every command the bot sends, and the reaction
-  delays once they are measured.
+  the windows above, enforced on every command the bot sends by the governor,
+  and the reaction delays, which the scripts draw
+  ([`in-game.md`](../reference/in-game.md#how-the-hooks-work)).
 - The state export has to record when units go idle, and re-simulated human
   games are needed to measure reaction delays per band.
-- Evaluation must check that the bot stays within these limits, counting its
-  commands in its replays the same way (`reason8.analysis.apm.ActionCounter`;
-  the `analysis apm` command itself leaves out games with bots).
+- Evaluation must check that the bot stays within these limits:
+  `reason8 bot check` checks the governor's log of every game (no command
+  lost, every window kept) and counts the bot's commands in its replay the
+  same way as a player's (`reason8.analysis.apm.ActionCounter`; the
+  `analysis apm` command itself leaves out games with bots). In a headless
+  game that runs many times faster than real time the replay records an AI's
+  commands up to a second of game time after they were sent, unevenly, which
+  moves a few actions across the edges of the windows; the replay is a
+  cross-check there, and the governor's log is the measure
+  ([`command-governor.md`](../research/command-governor.md)).
 - Models predict a step (one drag or click), and how many orders a step holds
   is learned separately, as part of the action budget.
 - BARb already sends commands that a person would leave to widgets (formation

@@ -1,7 +1,7 @@
 # 0007. Ship the model as generated tables in a BARb variant
 
 - **Status:** Accepted
-- **Date:** 2026-11-26
+- **Date:** 2026-11-27
 
 ## Context
 
@@ -50,13 +50,16 @@ Measured for the routes past the scripts:
   of the one engine callback every command goes through. Counting, it agreed
   with the replay within 2%; capping at the 30-40 band's budget, it kept the
   AI within every window and dropped 45% of BARb's commands. The same library
-  loaded in an engine two months older.
+  loaded in an engine two months older. Holding the commands instead and
+  sending them later kept 160 team-games within every window with no command
+  lost, at no measurable cost in economy or openings
+  ([`command-governor.md`](../research/command-governor.md)).
 
 ## Decision
 
 Reason8 is installed as a Skirmish AI with the short name `Reason8`. Its
-folder is built by `reason8 bot build` from the engine's own BARb library, the
-game's BARb scripts and configs for one profile, and the files in
+folder is built by `reason8 bot build` from our own build of BARb's library,
+the game's BARb scripts and configs for one profile, and the files in
 `ai/Reason8`.
 
 The model does not run inside the game. Its predictions are exported offline
@@ -69,46 +72,55 @@ Every headless evaluation checks the engine log and the recorded replay with
 
 ### Build the library ourselves
 
-For models that decide from the game state, and for the action budget, we
-build BARb's library from source instead of copying the engine's: CircuitAI at
-the commit the engine pins for BARb, plus our changes, built for Linux and
-Windows for each engine release. The scripts and the opening tables stay as
-they are and run on top of it. The first change is the command governor
-(`ai/native`). Models run inside the library: first as tables loaded from a
+We build BARb's library from source instead of copying the engine's: CircuitAI
+at the commit the engine pins for BARb, plus our changes in `ai/native`, built
+for the tag of the engine the AI is installed into. `reason8 bot build` builds
+it, or reuses the build for that tag, and the library checks at start that it
+runs in the engine it was built for. Our changes are:
+
+- the command governor, which keeps every command the AI sends within the
+  action budget of [ADR 0008](0008-play-under-human-like-limits.md) by holding
+  what does not fit and sending it later, in order;
+- the live state for the scripts: the current wind, the team's stored metal
+  and energy with storage, income and expense, and its finished units by name,
+  read from the engine when a script asks.
+
+The scripts and the opening tables stay as they are and run on top of it.
+Models run inside the library or its scripts: first as tables loaded from a
 data file, a runtime such as ONNX only when a model needs it, and no second
 process. The widget bridge is not used for play.
+
+The library is built for Linux x86-64 now. Windows comes next, from the same
+sources with BAR's own Windows build image. Until then the engine's own
+library can be installed instead (`--library stock`): the AI plays its
+openings, without the command budget and with the live state unknown.
 
 ## Consequences
 
 - No change to the game: only the player who adds the bot needs the AI
-  installed. Until `reason8 bot build` takes our library, the AI folder still
-  holds the engine's copy and needs no C++ build.
+  installed. Installing stays one folder.
 - The AI folder is tied to one engine version (the library) and one game
-  version (the scripts), so it is rebuilt when either changes. The build stops
-  when a BARb script we replace has changed upstream.
-- The scripts see only what BARb exposes to them. Extractors already go on the
-  human player's spots: BAR publishes the map's metal spots as game rules,
-  which scripts can read. Other buildings are placed by BARb near a position
-  the opening gives. Whether wind generators are worth building can only be
-  judged from the map's average wind, which BARb's energy values give, not
-  from the current wind.
+  version (the scripts), so it is rebuilt when either changes. A library built
+  for another engine tag stops the build and logs a mismatch at run time; the
+  build stops when a BARb script we replace has changed upstream.
+- The action budget is enforced on every command BARb's library sends, and
+  BARb keeps playing under it, because a held command is sent later instead of
+  being lost.
+- The scripts see the current wind, the team's economy and what it has
+  standing at the moment they decide, so wind generators can be judged from
+  the wind that blows, not only from the map's average. A model can read more
+  of what the AI interface gives a team (line of sight and radar, enemy units
+  in them, unit queues) by adding a binding in `ai/native`.
+- Extractors still go on the human player's spots through the game rules BAR
+  publishes (`mex_count`, `mex_x1`, ...); other buildings are placed by BARb
+  near a position the opening gives.
 - A wrong script or a missing AI does not stop the game; the team just stands
   still. That is why the log and replay check is mandatory.
-- With the copied library, BARb's own command rate is outside our reach and
-  the limits of [ADR 0008](0008-play-under-human-like-limits.md) are not met.
-- With our own library:
-  - The action budget is enforced on every command, and the model can read
-    everything the AI interface gives a team: current wind, the team's line of
-    sight and radar, enemy units in them, metal spots and unit queues.
-  - We keep a fork of CircuitAI current with the engine: on each engine
-    release, move to the engine's BARb commit, carry our changes over and
-    build both platforms. BAR's public build images do that for the engine
-    itself; a GitHub Actions job could use them.
-  - A library that only drops commands over budget leaves BARb believing
-    orders were given. Before the budget is used in evaluation, the governor
-    has to defer commands, or BARb's tasks have to plan within the budget.
-  - Installing stays one folder; Windows players need the `.dll` we build,
-    which has not been built yet.
+- We keep a fork of CircuitAI current with the engine: on each engine release,
+  move to the engine's BARb commit, carry our changes over (two new pairs of
+  files and two small patches) and build both platforms. BAR's public build
+  images do that for the engine itself; a GitHub Actions job could use them.
+- Windows players need the `.dll` we build, which has not been built yet.
 - Revisit if keeping the fork current costs more than an engine release
   allows, or if BAR's scripts gain bindings for wind, line of sight and
   command limits, which would make the scripts enough.
