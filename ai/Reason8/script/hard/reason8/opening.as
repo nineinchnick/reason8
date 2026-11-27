@@ -14,13 +14,16 @@
  * there is no opening for the side, or the opening is over, they return
  * null/false and BARb's own code decides, as in stock BARb.
  *
- * Every decision is logged with the prefix "Reason8 opening:".
+ * Every decision is logged with the prefix "Reason8 opening:". With our BARb
+ * library the live state (live_state.as) is logged too: at every commander
+ * step, and every 30 s of game time while units go idle.
  */
 
 #include "../../define.as"
 #include "../../unit.as"
 #include "../../task.as"
 #include "opening_table.as"
+#include "live_state.as"
 
 
 namespace Reason8 {
@@ -136,6 +139,7 @@ SOpening@ opening = null;
 uint commanderStep = 0;
 int tries = 0;
 int retryFrame = 0;  // a failed step is tried again from this frame on
+int stateLoggedStep = -1;  // the commander step the live state was last logged for
 IUnitTask@ commanderTask = null;  // the task of the current commander step
 CCircuitUnit@ openingFactory = null;  // the factory that makes the opening's units
 array<string> factoryUnits;
@@ -227,6 +231,7 @@ string ReactionKind(CCircuitUnit@ unit, bool isFactory)
  */
 int ReactionWait(CCircuitUnit@ unit, bool isFactory)
 {
+	LogStateEvery30Seconds();
 	const int waiting = waitingUnits.find(unit.id);
 	if (waiting >= 0) {
 		if (ai.frame < releaseFrames[waiting])
@@ -313,6 +318,30 @@ void TaskEnded(IUnitTask@ task, bool done)
 void Log(const string& in message)
 {
 	AiLog("Reason8 opening: team " + ai.teamId + ": " + message);
+}
+
+const int STATE_LOG_FRAMES = 30 * SECOND;
+int nextStateFrame = 0;  // the next periodic state line, at or after this frame
+
+// What the team's game looks like now, read from the engine by our library.
+void LogState()
+{
+	if (!LIVE_STATE)
+		return;
+	Log("state at frame " + ai.frame + ": wind " + CurrentWind()
+		+ ", metal " + Resource("metal", "current") + " of " + Resource("metal", "storage")
+		+ " +" + Resource("metal", "income") + " -" + Resource("metal", "expense")
+		+ ", energy " + Resource("energy", "current") + " of " + Resource("energy", "storage")
+		+ " +" + Resource("energy", "income") + " -" + Resource("energy", "expense")
+		+ ", standing " + Standing());
+}
+
+void LogStateEvery30Seconds()
+{
+	if (ai.frame < nextStateFrame)
+		return;
+	LogState();
+	nextStateFrame = ai.frame - ai.frame % STATE_LOG_FRAMES + STATE_LOG_FRAMES;
 }
 
 /*
@@ -449,6 +478,10 @@ IUnitTask@ MakeCommanderTask(CCircuitUnit@ unit)
 		return aiBuilderMgr.Enqueue(TaskB::Wait(retryFrame - ai.frame));
 	}
 
+	if (stateLoggedStep != int(commanderStep) && commanderStep < plan.commander.length()) {
+		stateLoggedStep = int(commanderStep);
+		LogState();  // what the step is decided on
+	}
 	while (commanderStep < plan.commander.length()) {
 		const string unitName = plan.commander[commanderStep].unit;
 		const Task::BuildType type = plan.commander[commanderStep].type;

@@ -3,12 +3,14 @@
 import gzip
 import hashlib
 import json
+import re
 import struct
 from pathlib import Path
 
 import pytest
 
 from reason8.bot import build
+from reason8.bot import library as native
 from reason8.game import package as game_package
 from reason8.paths import REPO_ROOT
 
@@ -186,7 +188,11 @@ def test_assemble(tmp_path):
     assert "script/easy/main.as" not in files
     assert "base.json" not in files and "openings.json" not in files
     assert facts["short_name"] == "Reason8" and facts["version"] == "0.1"
-    assert facts["library"] == ["libSkirmishAI.so"]
+    assert facts["library"] == {"source": "stock"}
+    assert facts["engine_files"] == ["libSkirmishAI.so"]
+    live_state = files["script/hard/reason8/live_state.as"].decode()
+    assert "const bool LIVE_STATE = false;" in live_state
+    assert "Reason8CurrentWind" not in live_state  # the stock library has no such binding
     assert facts["replaced"] == ["script/hard/manager/factory.as"]
     assert facts["base_drift"] == []
 
@@ -226,3 +232,35 @@ def test_opening_table_with_reactions():
     table = build.opening_table({"openings": [], "reactions": reactions})
     assert '\t"builder 180 0.9 1.0 2.5"\n};' in table
     assert "const array<string> REACTIONS;" in build.opening_table({"openings": []})
+
+
+def test_assemble_with_our_library(tmp_path):
+    stock_hash = hashlib.sha256(b"// stock factory\n").hexdigest()
+    ours = tmp_path / "ours.so"
+    ours.write_bytes(b"our library")
+    library = native.Library(ours, {"source": "build", "engine_tag": "2026.09.03"})
+    files, facts = build.assemble(**make_inputs(tmp_path, stock_hash), library=library)
+    assert files["libSkirmishAI.so"] == b"our library"
+    assert facts["library"]["source"] == "build"
+    live_state = files["script/hard/reason8/live_state.as"].decode()
+    assert "const bool LIVE_STATE = true;" in live_state
+    for binding in ("Reason8CurrentWind", "Reason8Resource", "Reason8UnitCount", "Reason8Standing"):
+        assert binding + "(" in live_state
+
+
+def test_live_state_scripts_declare_the_same_functions():
+    def declarations(script: str) -> list[str]:
+        return re.findall(r"^((?:float|int|string) \w+)\(", script, re.M)
+
+    ours = build.live_state_script(True)
+    stock = build.live_state_script(False)
+    assert ours.count("{") == ours.count("}") and stock.count("{") == stock.count("}")
+    assert declarations(ours) == declarations(stock) and len(declarations(ours)) == 4
+
+
+def test_assemble_under_another_short_name(tmp_path):
+    stock_hash = hashlib.sha256(b"// stock factory\n").hexdigest()
+    files, facts = build.assemble(**make_inputs(tmp_path, stock_hash), short_name="Reason8Stock")
+    assert facts["short_name"] == "Reason8Stock" and facts["openings"] > 0
+    with pytest.raises(SystemExit):
+        build.set_short_name("x", "Not a name")

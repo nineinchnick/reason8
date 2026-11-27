@@ -4,6 +4,9 @@
 --   game_config = false  The scripts and configs next to the library are the
 --                        only copy; the game archive has none for this AI.
 --   profile     = hard   The only profile the variant is built with.
+--
+-- One is Reason8's own, read by the command governor of our BARb library:
+--   command_budget       How the AI keeps to the action budget of ADR 0008.
 
 local options = {
 	{
@@ -61,6 +64,30 @@ local options = {
 				key = 'hard',
 				name = 'Hard',
 				desc = 'BARb hard, with Reason8 openings',
+			},
+		},
+	},
+	{
+		key = 'command_budget',
+		name = 'Command budget',
+		desc = 'How the AI keeps to a strong player\'s action budget (skill 30-40).\nkey: command_budget',
+		type = 'list',
+		def = 'defer',
+		items = {
+			{
+				key = 'defer',
+				name = 'Defer',
+				desc = 'Hold commands over the budget and send them later, in order',
+			},
+			{
+				key = 'count',
+				name = 'Count',
+				desc = 'Only count and log the commands',
+			},
+			{
+				key = 'off',
+				name = 'Off',
+				desc = 'No governor',
 			},
 		},
 	},
