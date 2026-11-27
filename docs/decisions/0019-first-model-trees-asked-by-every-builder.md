@@ -33,6 +33,16 @@ structures; the commander has more build power and health; build towers can be
 carried by air. Build power is a resource like metal and energy: what a team
 can do with its income depends on it.
 
+What others did with the same problems is in
+[`builder-model-prior-work.md`](../research/builder-model-prior-work.md): no
+source shows that setting a skill input changes how a model plays, a model fed
+its own earlier answers can learn to repeat them, and the usual remedies for
+drift need an expert to ask, which we do not have.
+
+The skill we have is a rating of the account. Many things move it besides how
+a person plays, it can be gamed, and an experienced player on a new account
+starts low.
+
 ## Decision
 
 The first learned model is asked during the game what a builder does next.
@@ -52,9 +62,18 @@ The first learned model is asked during the game what a builder does next.
   library evaluates with its own code, without a runtime. The list of inputs
   and the form of the answer are kept independent of trees, so that a network
   can take their place.
-- **Choosing from the answer:** the bot samples among the answers with a
-  probability of at least 10%. When no answer reaches the threshold or the
-  chosen one cannot be carried out, BARb decides.
+- **Possible answers only:** the answers the asking builder can never give (a
+  factory cannot reclaim, a builder builds only its own list) are removed and
+  the rest rescaled to sum to one. What a team cannot afford stays: the game
+  lets a player start anything. Models are scored on replays with the same
+  mask, so that the model chosen there is the one that plays.
+- **Choosing from the answer:** after the mask, the bot samples among the
+  answers with a probability of at least 10%. When no answer reaches the
+  threshold or the chosen one cannot be carried out, BARb decides.
+- **Skill stays an input only if the model uses it:** on held-out games the
+  predictions must change between low and high skill and the fit per skill
+  band must improve. In the game it is set high but inside the range seen in
+  training, because trees answer the same for every value above it.
 - **Where:** metal extractors go to the metal spots in the order players
   usually take them from that map and start position; BARb places every other
   structure and picks the target of every job.
@@ -66,7 +85,18 @@ The first learned model is asked during the game what a builder does next.
 - The bot can leave what any human played. One unusual choice leads to a state
   no player was in, and the choices after it get worse. Sampling only among
   likely answers and falling back to BARb limit this; how far the bot's games
-  drift from human ones has to be measured from its games.
+  drift from human ones has to be measured from its games: how often it falls
+  back to BARb by game minute, how likely the model finds the bot's own
+  choices compared with held-out human games, how far the bot's state is from
+  human states at fixed minutes, and the classifier of
+  [ADR 0003](0003-define-success-as-in-game-measures.md).
+- In the game the order history is the model's own earlier answers, and a
+  model can learn to repeat them: repeating the last order is right for 40% of
+  steps. A model with a shorter history is played next to the full one to see
+  whether it drifts less.
+- The account's rating is a weak label of skill. A measure of how well someone
+  played, taken from their actions in the game, would be a better input and a
+  better way to choose training games; it has to be found.
 - The decision table has to give every order its builder and its build power,
   hold the jobs next to the build orders, and carry the skill. It can only do
   that for re-simulated games, so the amount of training data is the number of
