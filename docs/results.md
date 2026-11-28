@@ -293,6 +293,39 @@ What each group adds per kind of builder, how well a job is told from a build,
 skill, the mask and the two ways of scoring an order to several builders:
 [`context.md`](research/context.md).
 
+### The first model
+
+The model of
+[ADR 0019](decisions/0019-first-model-decides-each-builders-next-order.md), as
+the game library evaluates it
+([`builder-model.md`](reference/builder-model.md)): trees with the history of
+one step, the builder, time, economy, own units, build power and skill,
+trained on the order view of `context_v2` for 100 rounds, with and without
+skill. Scored from the model files on the test split (286 games, 129,525
+steps, order view), masked, against n-grams over the same answers trained on
+the table's training games:
+
+```sh
+uv run reason8 model score data/models/builder_v1.json data/models/builder_v1_no_skill.json --split test
+```
+
+| model                             | top-1             | top-3             | log-loss            | top-1, clicked    |
+| --------------------------------- | ----------------- | ----------------- | ------------------- | ----------------- |
+| repeat the previous step          | 39.7% (39.3–40.1) | 66.5% (66.1–66.8) | 2.165 (2.150–2.180) | 40.1% (39.6–40.6) |
+| trigram, faction                  | 50.3% (49.9–50.6) | 79.6% (79.3–79.9) | 1.518 (1.508–1.529) | 46.8% (46.3–47.2) |
+| 4-gram, faction, map and position | 52.8% (52.4–53.2) | 81.8% (81.4–82.1) | 1.527 (1.510–1.544) | 47.0% (46.5–47.5) |
+| trees, with skill (`builder_v1`)  | 62.2% (61.8–62.6) | 89.2% (88.9–89.4) | 1.075 (1.063–1.089) | 55.2% (54.5–55.8) |
+| trees, without skill              | 62.1% (61.7–62.5) | 89.0% (88.8–89.3) | 1.081 (1.068–1.095) | 55.1% (54.4–55.6) |
+
+The model predicts 9.4 points of top-1 (9.1 to 9.7) and 0.45 nats better than
+the 4-gram, 8.1 points on the orders players clicked (86,894 steps). Skill
+adds 0.1 point and 0.005 nats. The 100 rounds are chosen for the size of the
+file: on validation they predict 1.3 points of top-1 and 0.043 nats worse than
+the 400 rounds the measurement allows, at a quarter of the size
+([the sweep](research/context.md#the-size-of-the-model)). By kind of builder
+and the inputs the game cannot give exactly:
+[`context.md`](research/context.md#the-first-model).
+
 ## Findings
 
 - **Counting sets a high bar.** The chosen n-gram predicts the next step right

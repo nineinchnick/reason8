@@ -46,10 +46,19 @@ is preliminary; for what the state adds, the first part's numbers replace it.
 Its finding that trees on 411 games match the n-gram trained on the whole
 dataset was not measured again.
 
+The first model of ADR 0019, trained on this table and written as the game
+library plays it, beats the best n-gram over the same answers clearly: 62.2%
+against 52.8% of the test steps right, +9.4 points, and +8.1 on the orders
+players clicked. It is a quarter of the size the boosting reaches by itself,
+which costs it 1.3 points; skill adds 0.1 point. Three of its inputs mean
+something else for the bot than for a player, and leaving them out costs 0.1
+point.
+
 Used in
-[ADR 0019](../decisions/0019-first-model-trees-asked-by-every-builder.md): the
-model's inputs, the mask, the test that keeps skill, and the shorter history
-played next to the full one.
+[ADR 0019](../decisions/0019-first-model-decides-each-builders-next-order.md):
+the model's inputs, the mask, the test that keeps skill, the shorter history
+played next to the full one, and the inputs dropped at the next training. The
+model's size and file: [`builder-model.md`](../reference/builder-model.md).
 
 ## The builder model's table (`context_v2`)
 
@@ -367,6 +376,152 @@ own units 2.3%, time 0.9% and skill 0.5%.
 Clicked orders are harder than widgets' (57.0% top-1 against 77.6%); asks of
 builders that were idle, the situation in which the bot asks, are predicted
 about as well as all (62.7%).
+
+### The first model
+
+The model of ADR 0019 as it is shipped predicts the next order better than any
+n-gram, by 9.4 points of top-1 on test, and by more for construction units and
+the commander than for factories. Its 100 rounds, chosen for the size of the
+file, cost 1.3 points against the 400 the measurement allows; fewer classes or
+shallower trees would cost more for the same size. Of its inputs, the three
+the bot cannot give as players did can be left out for 0.1 point; the first
+version keeps them, the next training drops them (ADR 0019).
+
+`reason8 model train` trains the model of ADR 0019 on this table and writes it
+in the file the game library evaluates
+([`builder-model.md`](../reference/builder-model.md)): the inputs of ADR 0019
+with a history of one step, trained on the order view, 100 rounds. It trains
+it with skill (`builder_v1`) and without (`builder_v1_no_skill`), because the
+in-game measures choose between them
+([ADR 0019](../decisions/0019-first-model-decides-each-builders-next-order.md)).
+`reason8 model score` scores the files themselves, through the reference
+evaluator, with the protocol of
+[ADR 0013](../decisions/0013-evaluate-on-held-out-games.md) and the mask of
+ADR 0019, against n-grams over the same answers trained on the table's
+training games.
+
+```sh
+uv run reason8 model train
+uv run reason8 model score data/models/builder_v1.json data/models/builder_v1_no_skill.json --split test
+```
+
+#### Scores
+
+On the test split, 286 games and 129,525 steps in the order view; "clicked"
+are the 86,894 steps a player clicked rather than a widget sent:
+
+| model                             | orders  | top-1             | top-3             | log-loss            | top-1 vs 4-gram        | log-loss vs 4-gram        |
+| --------------------------------- | ------- | ----------------- | ----------------- | ------------------- | ---------------------- | ------------------------- |
+| repeat the previous step          | all     | 39.7% (39.3–40.1) | 66.5% (66.1–66.8) | 2.165 (2.150–2.180) | -13.1 (-13.6 to -12.7) | +0.637 (+0.619 to +0.656) |
+| repeat the previous step          | clicked | 40.1% (39.6–40.6) | 64.7% (64.2–65.2) | 2.273 (2.253–2.293) | -6.9 (-7.5 to -6.5)    | +0.544 (+0.523 to +0.566) |
+| trigram, faction                  | all     | 50.3% (49.9–50.6) | 79.6% (79.3–79.9) | 1.518 (1.508–1.529) | -2.5 (-2.8 to -2.2)    | -0.009 (-0.018 to +0.000) |
+| trigram, faction                  | clicked | 46.8% (46.3–47.2) | 75.7% (75.3–76.1) | 1.658 (1.644–1.671) | -0.3 (-0.6 to +0.0)    | -0.071 (-0.082 to -0.060) |
+| 4-gram, faction, map and position | all     | 52.8% (52.4–53.2) | 81.8% (81.4–82.1) | 1.527 (1.510–1.544) |                        |                           |
+| 4-gram, faction, map and position | clicked | 47.0% (46.5–47.5) | 78.4% (77.9–78.9) | 1.729 (1.707–1.752) |                        |                           |
+| `builder_v1`                      | all     | 62.2% (61.8–62.6) | 89.2% (88.9–89.4) | 1.075 (1.063–1.089) | +9.4 (+9.1 to +9.7)    | -0.452 (-0.462 to -0.441) |
+| `builder_v1`                      | clicked | 55.2% (54.5–55.8) | 86.5% (86.2–86.9) | 1.247 (1.231–1.265) | +8.1 (+7.7 to +8.5)    | -0.482 (-0.495 to -0.469) |
+| `builder_v1_no_skill`             | all     | 62.1% (61.7–62.5) | 89.0% (88.8–89.3) | 1.081 (1.068–1.095) | +9.3 (+9.0 to +9.6)    | -0.447 (-0.457 to -0.435) |
+| `builder_v1_no_skill`             | clicked | 55.1% (54.4–55.6) | 86.4% (86.0–86.7) | 1.253 (1.237–1.271) | +8.0 (+7.6 to +8.4)    | -0.476 (-0.489 to -0.462) |
+
+In the builder view (131,370 rows, one per builder an order went to) every
+score is within 0.1 point and 0.008 nats of these. Top-1 by kind of builder,
+order view:
+
+| model                             | commander (59,186) | factory (34,075)  | construction (25,086) | tower (2,087)     | other (8,915)     |
+| --------------------------------- | ------------------ | ----------------- | --------------------- | ----------------- | ----------------- |
+| repeat the previous step          | 35.9% (35.4–36.4)  | 26.8% (26.1–27.4) | 40.7% (39.6–41.7)     | 93.0% (91.8–94.1) | 99.1% (98.8–99.3) |
+| trigram, faction                  | 49.1% (48.6–49.6)  | 44.2% (43.5–44.8) | 40.7% (39.7–41.7)     | 92.8% (91.6–94.0) | 99.0% (98.7–99.3) |
+| 4-gram, faction, map and position | 52.5% (52.1–53.1)  | 46.7% (46.0–47.3) | 42.3% (41.2–43.3)     | 91.6% (90.4–92.8) | 98.7% (98.5–99.0) |
+| `builder_v1`                      | 64.2% (63.6–64.8)  | 49.9% (49.2–50.5) | 58.4% (57.5–59.3)     | 97.9% (97.3–98.5) | 99.2% (99.0–99.4) |
+| `builder_v1_no_skill`             | 64.0% (63.4–64.6)  | 49.8% (49.1–50.4) | 58.2% (57.3–59.2)     | 97.8% (97.1–98.4) | 99.3% (99.1–99.5) |
+
+- **The model beats the n-grams by 9.4 points** of top-1 and 0.45 nats, 8.1
+  points on clicked orders. The gain is largest for construction units (+16
+  points over the 4-gram) and the commander (+12), smallest for factories
+  (+3): the builder and the state matter where one player directs several
+  builders.
+- **Skill adds 0.1 point** of top-1 (0.0 to 0.2) and 0.005 nats (0.004 to
+  0.007), as in the measurement above; whether it stays is decided in the
+  game.
+- **The mask removes 0.6% of the model's probability**, against 23% to 39% of
+  the n-grams', which do not know the builder.
+- **They are 1.5 to 1.9 points of top-1 below the trees of the measurement**
+  with the same inputs (63.6% to 64.0% in the builder view, trained for up to
+  400 rounds; 62.1% here): the cost of 100 rounds (next section).
+
+#### The size of the model
+
+Trained with the settings of the measurement, the boosting does not stop by
+itself within its 400 rounds: the model is 293 MB of JSON (26 MB gzipped),
+with 115,600 trees and 2.1 million nodes, too large to load in the game. The
+nodes are spread evenly over the rounds and the classes (about 18 per tree),
+so a smaller file needs fewer rounds, fewer classes or shallower trees. On the
+validation split (299 games, 120,000 steps, order view, masked), the first
+rounds of the full model against models trained smaller:
+
+| model                          | classes | rounds | nodes     | top-1 | top-3 | log-loss |
+| ------------------------------ | ------- | ------ | --------- | ----- | ----- | -------- |
+| depth 6                        | 289     | 400    | 2,098,074 | 64.1% | 90.1% | 1.022    |
+| depth 6                        | 289     | 300    | 1,559,316 | 63.9% | 90.1% | 1.026    |
+| depth 6                        | 289     | 200    | 1,025,544 | 63.7% | 89.9% | 1.035    |
+| depth 6                        | 289     | 150    | 757,062   | 63.4% | 89.7% | 1.045    |
+| depth 6 (shipped)              | 289     | 100    | 489,020   | 62.8% | 89.3% | 1.065    |
+| depth 6                        | 289     | 50     | 241,424   | 61.8% | 88.6% | 1.103    |
+| depth 6, classes of 2,000 rows | 86      | 100    | 319,034   | 62.2% | 88.1% | 1.138    |
+| depth 5, classes of 2,000 rows | 86      | 100    | 226,122   | 61.6% | 87.8% | 1.162    |
+| depth 4, classes of 2,000 rows | 86      | 100    | 153,052   | 60.9% | 87.2% | 1.191    |
+| depth 4, classes of 5,000 rows | 50      | 200    | 204,562   | 60.6% | 85.5% | 1.253    |
+| depth 4, classes of 5,000 rows | 50      | 60     | 54,158    | 58.3% | 84.1% | 1.341    |
+
+- **Rounds are the cheapest to give up.** Of the same size, the full model cut
+  to fewer rounds beats every model with fewer classes or shallower trees: 50
+  rounds (241,000 nodes) predict better than depth 4 with 86 classes (153,000)
+  or 50 classes (205,000). Merging rare answers into a shared class costs the
+  most log-loss, because they then share its probability by fixed weights.
+- **The shipped 100 rounds cost 1.3 points of top-1 and 0.043 nats** against
+  400 rounds, for a quarter of the size; 200 rounds would cost 0.4 points and
+  0.013 nats at twice the shipped size.
+- **A learning rate of 0.3 or more diverges** on this table: the validation
+  loss rises from the second round, as it did with small leaves
+  ([above](#how-it-is-measured)). 0.2 trains, and scores as 0.15 does at the
+  same size.
+- The models with fewer classes are trained with those settings and stopped on
+  validation; the rows with 289 classes are the first rounds of the 400-round
+  model, which equal the same model trained to that many rounds.
+
+#### Inputs the game cannot give exactly
+
+The library computes most inputs exactly as the table has them
+([`builder-model.md`](../reference/builder-model.md#the-inputs)). Three it
+cannot:
+
+`decision_index`
+: A player's count of orders grows with every building of a drag and every
+  reclaim of a feature a widget sends; the bot gives one order per decision.
+
+`ordered_assist`, `ordered_reclaim`, `ordered_repair`, `ordered_resurrect`
+: The same for the count of jobs: a widget's reclaim of an area counts once
+  per feature.
+
+`idle_build_power` and its five kinds
+: The rule can be followed in the game, but the builder the order is for is
+  idle at every decision of the bot and at 7% of the table's rows.
+
+Each left out of the model with skill, trained the same way, on the validation
+split (299 games, 133,469 steps, order view), against the model with them:
+
+| left out            | top-1               | log-loss                  | top-1, clicked      |
+| ------------------- | ------------------- | ------------------------- | ------------------- |
+| `decision_index`    | +0.1 (-0.1 to +0.2) | +0.001 (-0.000 to +0.002) | +0.1 (-0.1 to +0.3) |
+| the four job counts | +0.1 (+0.0 to +0.3) | +0.001 (-0.001 to +0.002) | +0.1 (-0.1 to +0.3) |
+| idle build power    | -0.0 (-0.1 to +0.1) | +0.002 (+0.001 to +0.003) | -0.0 (-0.2 to +0.1) |
+| all three           | -0.1 (-0.2 to +0.0) | +0.006 (+0.005 to +0.007) | -0.0 (-0.3 to +0.1) |
+
+The model with them scores 62.8% (62.4–63.2) and 1.065 nats there. None of the
+three is worth keeping on its own, and together they hold 0.006 nats: the
+other inputs carry the same. No kind of builder loses more than 0.1 point of
+top-1 without all three; the 176 orders that reached no builder lose 3.9 (1.1
+to 7.0).
 
 ### Cost
 
