@@ -28,6 +28,7 @@ import json
 import shutil
 import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 
 from reason8.headless import run as headless_run
@@ -49,27 +50,43 @@ def fetch_content(data_dir: Path, replay: Path) -> list[str]:
     return failed
 
 
-def play(replay: Path, target: Path, args: argparse.Namespace) -> dict:
-    """Play one replay and write its state to `target`; the result of `headless_run.play()`."""
+@dataclass(frozen=True)
+class PlayOptions:
+    """How the replays of a batch are played; the same for every replay."""
+
+    #: The content dir: engine/ pool/ packages/ maps/ (`reason8 headless setup`).
+    data_dir: Path
+    #: Stop at this frame (0: play the whole game).
+    max_frame: int = 0
+    snapshot_seconds: float = 5
+    #: Kill the engine after this many seconds.
+    timeout: float = 3600
+    #: Engine settings, ``KEY=VALUE``.
+    settings: tuple[str, ...] = ()
+
+
+def play(replay: Path, target: Path, options: PlayOptions) -> dict:
+    """Play one replay and write its state and tables to `target`; the result of
+    `headless_run.play()`, with ``ok`` when the game was played to its end without a desync."""
     with tempfile.TemporaryDirectory(prefix="state-", dir=target.parent) as scratch:
         plain = Path(scratch) / "state.jsonl"
         arguments = [
             str(replay),
             "--data-dir",
-            str(args.data_dir),
+            str(options.data_dir),
             "--threads",
             "1",
             "--snapshots",
             "--snapshot-seconds",
-            str(args.snapshot_seconds),
+            str(options.snapshot_seconds),
             "--max-frame",
-            str(args.max_frame),
+            str(options.max_frame),
             "--timeout",
-            str(args.timeout),
+            str(options.timeout),
             "--out",
             str(plain),
         ]
-        for setting in args.set:
+        for setting in options.settings:
             arguments += ["--set", setting]
         run_parser = argparse.ArgumentParser()
         headless_run.add_arguments(run_parser)
@@ -130,6 +147,13 @@ def run(args: argparse.Namespace) -> int:
     replays = list(args.replays)
     if args.list:
         replays += read_list(args.list)
+    options = PlayOptions(
+        data_dir=args.data_dir,
+        max_frame=args.max_frame,
+        snapshot_seconds=args.snapshot_seconds,
+        timeout=args.timeout,
+        settings=tuple(args.set),
+    )
 
     ok = True
 
@@ -164,5 +188,5 @@ def run(args: argparse.Namespace) -> int:
                 print(json.dumps({"target": replay.name, "ok": False, "missing": failed}))
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
-            pool.submit(play, replay.resolve(), target, args).add_done_callback(finished)
+            pool.submit(play, replay.resolve(), target, options).add_done_callback(finished)
     return 0 if ok else 1
