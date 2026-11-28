@@ -61,7 +61,18 @@ who makes it.
   time, the team's economy, its own units finished and under construction, its
   build power (the idle builder's and the team's), and the skill of the
   player. In the game the skill is a number we choose. The allies and the wind
-  are left out.
+  are left out. The first version also has three inputs that mean something
+  else for the bot than for a player: how many orders the player gave before,
+  how many jobs of each kind, and the build power of the idle builders. A
+  player's counts grow with every building of a drag and every reclaim of a
+  feature their widget sends, while the bot gives one order per decision; and
+  the builder an order is for is idle at every decision of the bot but at few
+  of the players' orders. Leaving the three out costs 0.1 point of top-1 and
+  0.006 nats on held-out games
+  ([`context.md`](../research/context.md#inputs-the-game-cannot-give-exactly)),
+  so the models trained on the rebuilt decision table leave them out. The
+  first version keeps them, the library giving its best approximation of each,
+  so that the bot can be wired with it before that training.
 - **The model:** gradient-boosted trees, written to a data file that the
   library evaluates with its own code, without a runtime. The list of inputs
   and the form of the answer are kept independent of trees, so that a network
