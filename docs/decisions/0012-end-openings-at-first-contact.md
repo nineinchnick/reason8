@@ -115,10 +115,15 @@ parameters of the builder; `--cutoff window` builds the 8-minute openings
   is measured separately ([ADR 0015](0015-train-across-balance-patches.md)).
 - Rosetta has about 1,100 games in the slice, so its validation and test
   splits have about 110 games each; results there have wide intervals.
-- The in-game side has the same boundary: the opening it plays ends at the
-  position's cutoff or when its own units are first hit, whichever comes
-  first, and hands over to BARb's reactive logic
-  ([`in-game.md`](../reference/in-game.md)).
+- The bot in the game ends the opening it plays at its team's own first
+  contact, by this definition, as our BARb library reports it, or at the end
+  of the opening window, whichever comes first, and hands the commander and
+  the factory to BARb. It does not stop at the position's cutoff: it builds
+  one structure at a time where players queue several, so by that time it has
+  played only about half of an opening. It also gives an opening up when a
+  step stalls (a commander step not finished in 111 s). With the engine's own
+  library it cannot see contact, and only the window and the stalled step end
+  an opening ([`in-game.md`](../reference/in-game.md#when-the-opening-ends)).
 - The measurements of the opening meta and of balance patches
   ([`maps/`](../research/maps/README.md),
   [`game-versions.md`](../research/game-versions.md)) were made on the
