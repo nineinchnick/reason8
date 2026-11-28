@@ -409,6 +409,39 @@ under the same limits (`reason8 bot build --limits-only`,
   without, the intervals overlapping: what is built, and in what order, gives
   the bot away, not when.
 
+## The model's bot with and without the limits
+
+The bot whose builders the model orders (`builder_orders=model`,
+[ADR 0019](../decisions/0019-first-model-decides-each-builders-next-order.md))
+is behind stock BARb, and the human-like limits of
+[ADR 0008](../decisions/0008-play-under-human-like-limits.md) are about half
+of the gap at 10:00. 10 seeds each, 160 pairs of teams, Supreme Isthmus; the
+bot's totals as a share of BARb's, with 95% intervals:
+
+| measure       | limits off, 4:00 | limits off, 10:00 | limits on, 4:00 | limits on, 10:00 |
+| ------------- | ---------------- | ----------------- | --------------- | ---------------- |
+| metal income  | 82% (79–86)      | 81% (76–85)       | 74% (71–77)     | 74% (72–77)      |
+| energy income | 87% (83–92)      | 81% (77–85)       | 72% (70–75)     | 72% (69–75)      |
+| built metal   | 95% (94–97)      | 91% (89–93)       | 90% (88–92)     | 79% (78–80)      |
+| built energy  | 96% (95–98)      | 87% (86–89)       | 90% (89–92)     | 72% (71–74)      |
+| units         | 82% (79–87)      | 88% (85–91)       | 68% (65–70)     | 67% (66–68)      |
+
+"Limits off" is `reaction_delays=off` and `command_budget=off`; "limits on" is
+the default. The reaction delays no longer include the minute-long wait.
+
+- Without the limits the model's bot has built 91% of BARb's metal value at
+  10:00 and earns 81% of its metal income. The model stops at each team's
+  first contact, at a median of 3:39, and BARb plays on from a weaker start:
+  the gap does not close afterwards.
+- The limits cost another 12 points of built metal and 21 points of units at
+  10:00. They go on after the model has stopped, so stock BARb under the
+  limits would lose most of that too.
+- Positions differ: without limits the bot is level with BARb at P6 and P10
+  and at 73 to 80% at P4, P5 and P11.
+
+This is the standing comparison for changes to the bot: `reason8 eval games`
+with these options, reported at 10:00.
+
 ## Our BARb library
 
 `reason8 bot build` installs our build of BARb's library, whose governor holds
