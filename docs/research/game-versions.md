@@ -10,6 +10,24 @@ a patch. The policy that follows from it is
 
 Dump of 2026-11-21; replays parsed on 2026-11-22.
 
+## Summary
+
+Balance patches did not measurably change openings in the last 12 months, so
+games from before a patch are still good training data. On 142 ranked games of
+Supreme Isthmus, the shares of first factories and opening shapes moved no
+more than chance between patches, while the start position decides the
+opening. A simple model trained on games from before a patch predicts today's
+openings as well as one trained on as many current games, and adding the old
+games to the current ones helps a little; a cut at the last patch that changed
+openings would keep only 30% of the Isthmus slice. No unit was renamed; one
+Legion unit used in openings was removed. The sample is small and on one map:
+a shift under about a point of accuracy would not show.
+
+Used in [ADR 0015](../decisions/0015-train-across-balance-patches.md): train
+across patches, check each new patch with the
+[routine](#routine-after-a-patch) below, and warn when a model is used on a
+game newer than its training games.
+
 ## How versions work
 
 A game version looks like `Beyond All Reason test-32018-ad135b9`. BAR is
