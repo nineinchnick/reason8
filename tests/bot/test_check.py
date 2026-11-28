@@ -199,6 +199,18 @@ def test_check_infolog_opening_ended(tmp_path):
     }
 
 
+def test_check_infolog_opening_ended_at_contact(tmp_path):
+    line = (
+        "team 9: opening ended at frame 7404, contact: first contact at frame 7403, armck by "
+        "unseen; commander steps done 12 of 30, factory units done 0 of 0; BARb takes over"
+    )
+    log = write_log(tmp_path, [f"Skirmish AI <Reason8-0.1>: Reason8 opening: {line}"])
+    ended = check.check_infolog(log, "Reason8")["opening_by_team"][9]["ended"]
+    assert ended["reason"] == "contact" and ended["frame"] == 7404
+    assert ended["detail"] == "first contact at frame 7403, armck by unseen"
+    assert ended["commander_steps_done"] == 12 and ended["factory_units_done"] == 0
+
+
 def test_check_infolog_opening_not_ended(tmp_path):
     lines = ["team 3: commander steps done at frame 2768, BARb takes over"]
     log = write_log(tmp_path, [f"Skirmish AI <Reason8-0.1>: Reason8 opening: {x}" for x in lines])

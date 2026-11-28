@@ -16,9 +16,10 @@
  *
  * The opening ends early, and BARb takes the commander and the factory, when
  * it no longer applies (EndOpening): when a commander step is not finished
- * STEP_LIMIT_SECONDS after it was first queued, or when the game is past
- * the opening window (OPENING_WINDOW_SECONDS). Update() checks them once a
- * second, from main.as.
+ * STEP_LIMIT_SECONDS after it was first queued, when the game is past the
+ * opening window (OPENING_WINDOW_SECONDS), or at the team's first contact,
+ * which our BARb library reports (live_state.as; never with the engine's own
+ * library). Update() checks them once a second, from main.as.
  *
  * Every decision is logged with the prefix "Reason8 opening:". With our BARb
  * library the live state (live_state.as) is logged too: at every commander
@@ -727,6 +728,11 @@ void Update()
 		return;
 	if (commanderStep >= opening.commander.length() && openingFactory is null)
 		return;  // played to the end
+	const int contactFrame = FirstContactFrame();
+	if (contactFrame >= 0) {
+		EndOpening("contact", "first contact at frame " + contactFrame + ", " + FirstContact());
+		return;
+	}
 	if (ai.frame >= OPENING_WINDOW_SECONDS * SECOND) {
 		EndOpening("time", "the game is past the opening window of "
 			+ OPENING_WINDOW_SECONDS + " s");
