@@ -163,6 +163,14 @@ Every column of the opening dataset's rows
 ([`openings-dataset.md`](openings-dataset.md); null in job rows for the
 columns of a build order: `order_index`, `seq_idx`, `unit`, `count`), and:
 
+`start_x`, `start_z`, `position`, `role`, `position_index`, `on_spot`
+: Unlike in the opening dataset, where the player's commander was created in
+  the re-simulated game, and the position of that point on the side of the
+  player's recorded position. The replay's start is the player's last start
+  pick, which the game may have refused
+  ([ADR 0011](../decisions/0011-take-positions-from-the-map-metadata.md)); in
+  1.9% of the players the two give different positions.
+
 `replay`
 : The replay's name without `.sdfz`: the name the state tables use.
 

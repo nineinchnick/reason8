@@ -67,6 +67,8 @@ from typing import Any
 import polars as pl
 
 from reason8.context import builders
+from reason8.game.maps import MapMetadata, load_map_list
+from reason8.game.positions import position_of, spot_radii
 from reason8.headless import tables as state_tables
 from reason8.headless.state import RESOURCE_LINES_FORMAT
 from reason8.openings import dataset as openings
@@ -450,6 +452,98 @@ def as_of(
     )
 
 
+def commander_spawns(
+    events: pl.DataFrame, types: pl.DataFrame, games: pl.DataFrame
+) -> pl.DataFrame:
+    """Where each team's commander was created at the start of the re-simulated game:
+    ``replay``, ``player_slot``, ``spawn_x``, ``spawn_z``.
+
+    `events` are the state's ``events`` tables, `types` the builder types (a commander is
+    one of kind ``commander``), and `games` has ``replay`` and ``game`` (the version).
+    """
+    commanders = types.filter(pl.col("builder_kind") == builders.COMMANDER).select(
+        "game", "unit_def"
+    )
+    return (
+        events.lazy()
+        .with_columns(pl.col("replay").cast(pl.String), pl.col("unit_def").cast(pl.String))
+        .filter(pl.col("kind").cast(pl.String) == "created")
+        .join(games.lazy().select("replay", "game"), on="replay")
+        .join(commanders.lazy(), on=["game", "unit_def"])
+        .sort("frame", "unit_id")
+        .group_by("replay", "team")
+        .agg(pl.col("x").first(), pl.col("z").first())
+        .select(
+            "replay",
+            pl.col("team").cast(pl.Int32).alias("player_slot"),
+            pl.col("x").cast(pl.Float32).alias("spawn_x"),
+            pl.col("z").cast(pl.Float32).alias("spawn_z"),
+        )
+        .collect()
+    )
+
+
+#: The columns of an order row that say where its player started.
+START_COLUMNS = ("start_x", "start_z", "position", "role", "position_index", "on_spot")
+
+
+def with_spawn_positions(
+    orders: pl.DataFrame, spawns: pl.DataFrame, map_list: Mapping[str, MapMetadata]
+) -> pl.DataFrame:
+    """`orders` with the start and position of each player taken from where their
+    commander was created (`commander_spawns`) instead of the replay's start point.
+
+    The replay's start is the player's last start pick, which the game may have refused
+    (docs/decisions/0011). The position is the spawn point nearest to the spawn on the
+    side of the player's recorded position, as `reason8.game.positions.position_of` finds
+    it. Players without a spawn, or on a map without a layout in `map_list`, keep theirs.
+    """
+    players = (
+        orders.select("replay", *PLAYER, "map", "team_size", "position")
+        .unique(["replay", *PLAYER])
+        .join(spawns, on=["replay", "player_slot"])
+    )
+    found = []
+    for row in players.iter_rows(named=True):
+        metadata = map_list.get(row["map"])
+        layout = (
+            metadata.start_positions.layout_for(openings.TEAM_COUNT, row["team_size"])
+            if metadata is not None and metadata.start_positions is not None
+            else None
+        )
+        side = (
+            next(
+                (
+                    index
+                    for index, points in enumerate(layout.sides)
+                    if any(point.id == row["position"] for point in points)
+                ),
+                None,
+            )
+            if layout is not None
+            else None
+        )
+        if side is None:
+            continue
+        position = position_of(layout, side, (row["spawn_x"], row["spawn_z"]), spot_radii(layout))
+        found.append(
+            {
+                "match_id": row["match_id"],
+                "player_slot": row["player_slot"],
+                "start_x": row["spawn_x"],
+                "start_z": row["spawn_z"],
+                "position": position.spawn_point,
+                "role": position.role,
+                "position_index": position.index,
+                "on_spot": position.on_spot,
+            }
+        )
+    if not found:
+        return orders
+    schema = {name: orders.schema[name] for name in (*PLAYER, *START_COLUMNS)}
+    return orders.update(pl.from_dicts(found, schema=schema), on=PLAYER, how="left")
+
+
 def join_chunk(
     orders: pl.DataFrame,
     games: pl.DataFrame,
@@ -459,17 +553,25 @@ def join_chunk(
     types: pl.DataFrame,
     roles: Sequence[str],
     counts: Counter[str] | None = None,
+    map_list: Mapping[str, MapMetadata] | None = None,
 ) -> pl.DataFrame:
     """The rows of the decision table of some games: their decisions (build orders and
-    jobs), one row per builder, with the state before each.
+    jobs), one row per builder, with the state before each, and each player's start and
+    position from where their commander was created (`with_spawn_positions`).
 
     `orders` are rows of the opening dataset with ``replay``; `games` the state's ``game``
     rows of the same games (with ``game``, the version); `commands` their commands with
     ``targets`` (`reason8.context.builders.command_units`); `resources` and `events` the
     state's tables; `types` the builder types of the versions
     (`reason8.context.builders.builder_types`). `counts` gets the number of job orders
-    left out because they reached no builder (``jobs_to_army_units_only``).
+    left out because they reached no builder (``jobs_to_army_units_only``). `map_list`
+    defaults to the cached pinned map list.
     """
+    orders = with_spawn_positions(
+        orders,
+        commander_spawns(events, types, games),
+        load_map_list() if map_list is None else map_list,
+    )
     lives = builders.unit_lives(events).collect()
     decisions = builders.opening_decisions(orders, commands, lives)
     joined = join_state(with_times(decisions), games, resources, events, roles)
@@ -513,6 +615,7 @@ def build_table(
     content: Path | None = None,
     types: pl.DataFrame | None = None,
     sample_path: Path | None = None,
+    map_list: Mapping[str, MapMetadata] | None = None,
     log=lambda message: print(message, file=sys.stderr),
 ) -> dict[str, Any]:
     """Build the decision table of the re-simulated games of `sample`; return its manifest.
@@ -522,8 +625,10 @@ def build_table(
     state tables, in date partitions, `tables` that of the replay tables (commands and
     selections) and `content` the game's content directory with the installed game
     versions, whose unit files say what each builder is (or `types`, the builder types
-    already read, `reason8.context.builders.builder_types`).
+    already read, `reason8.context.builders.builder_types`). `map_list` defaults to the
+    cached pinned map list.
     """
+    map_list = load_map_list() if map_list is None else map_list
     tables = tables or replay_tables.tables_dir()
     content = content or data_dir() / "bar"
     sample = sample.with_columns(
@@ -617,6 +722,7 @@ def build_table(
             types,
             roles,
             left_out,
+            map_list,
         )
         parts.append(work_dir / "parts" / f"part-{len(parts):05d}.parquet")
         joined.drop("seq").write_parquet(parts[-1])
