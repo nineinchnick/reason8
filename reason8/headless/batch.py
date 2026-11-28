@@ -5,7 +5,7 @@
     uv run reason8 headless batch --data-dir data/bar --out-dir data/state --list FILE
 
 A list file holds one replay path per line; empty lines and lines starting with ``#`` are
-skipped, so a list can say where it came from.
+skipped, so a list can say where it came from (`reason8 headless list` writes one).
 
 For every replay it fetches what the replay needs (`reason8 headless setup`), plays it
 with the state export widget (`reason8 headless run`) and writes the state to

@@ -17,7 +17,7 @@ from reason8.evaluation import games as evaluation_games
 from reason8.evaluation import openings as evaluation_openings
 from reason8.evaluation import report as evaluation_report
 from reason8.game import maps, positions
-from reason8.headless import batch, run, setup, state
+from reason8.headless import batch, batch_list, run, setup, state
 from reason8.headless import tables as state_tables
 from reason8.models import evaluate
 from reason8.openings import contact, dataset
@@ -49,6 +49,7 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
             ("setup", setup, "fetch the engine, game and map a run needs"),
             ("run", run, "run a start script or play back a replay"),
             ("batch", batch, "play many replays and keep their state"),
+            ("list", batch_list, "write the replay list of a batch from a sample"),
             ("state", state, "summarise a state file"),
             ("tables", state_tables, "convert state files to Parquet tables"),
         ],
