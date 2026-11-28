@@ -49,11 +49,13 @@ bool areBuildTasksRead = false;
 array<string> buildTaskUnits;
 array<Task::BuildType> buildTaskTypes;
 
-// Tasks given for an order: the builder it is for, the order, the metal spot taken (-1)
+// Tasks given for an order: the builder it is for, the order, the metal spot taken (-1),
+// the frame it was given
 array<IUnitTask@> orderTasks;
 array<int> orderUnits;
 array<string> orderAnswers;
 array<int> orderSpots;
+array<int> orderFrames;
 // Units BARb decides for, until it gives them something to do
 array<int> barbUnits;
 
@@ -288,6 +290,7 @@ IUnitTask@ NextOrderFor(CCircuitUnit@ unit, bool isFactory)
 	orderUnits.insertLast(unit.id);
 	orderAnswers.insertLast(answer);
 	orderSpots.insertLast(spot);
+	orderFrames.insertLast(ai.frame);
 	return task;
 }
 
@@ -304,9 +307,9 @@ void BarbGave(CCircuitUnit@ unit, IUnitTask@ task)
 }
 
 /*
- * Called when a builder or factory task ends. A task given for an order that ends
- * undone could not be carried out: its unit is left to BARb, and its metal spot is free
- * to be ordered again.
+ * Called when a builder or factory task ends. Every order's end is logged, with how long
+ * its task lasted. A task given for an order that ends undone could not be carried out:
+ * its unit is left to BARb, and its metal spot is free to be ordered again.
  */
 void OrderTaskEnded(IUnitTask@ task, bool done)
 {
@@ -316,15 +319,20 @@ void OrderTaskEnded(IUnitTask@ task, bool done)
 		const int unitId = orderUnits[i];
 		const string answer = orderAnswers[i];
 		const int spot = orderSpots[i];
+		const int lasted = ai.frame - orderFrames[i];
 		orderTasks.removeAt(i);
 		orderUnits.removeAt(i);
 		orderAnswers.removeAt(i);
 		orderSpots.removeAt(i);
+		orderFrames.removeAt(i);
+		CCircuitUnit@ unit = ai.GetTeamUnit(unitId);
+		if (!areModelOrdersOver)
+			OrderLog((unit is null ? "frame " + ai.frame + ": unit " + unitId : Who(unit)) + ": "
+				+ answer + " ended " + (done ? "done" : "unfinished") + " after " + lasted + " frames");
 		if (done || areModelOrdersOver)
 			continue;
 		if (spot >= 0 && takenSpots.find(spot) >= 0)
 			takenSpots.removeAt(takenSpots.find(spot));
-		CCircuitUnit@ unit = ai.GetTeamUnit(unitId);
 		if (unit !is null)
 			OrderFailed(unit, answer, "its task ended unfinished");
 		LeaveToBarb(unitId);
