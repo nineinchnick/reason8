@@ -247,7 +247,11 @@ def test_assemble_with_our_library(tmp_path):
     live_state = files["script/hard/reason8/live_state.as"].decode()
     assert "const bool LIVE_STATE = true;" in live_state
     bindings = ("Reason8CurrentWind", "Reason8Resource", "Reason8UnitCount", "Reason8Standing")
-    for binding in bindings + ("Reason8FirstContactFrame", "Reason8FirstContact"):
+    for binding in bindings + (
+        "Reason8FirstContactFrame",
+        "Reason8FirstContact",
+        "Reason8ReactionDelays",
+    ):
         assert binding + "(" in live_state
 
 
@@ -280,7 +284,7 @@ def test_live_state_scripts_declare_the_same_functions():
     ours = build.live_state_script(True)
     stock = build.live_state_script(False)
     assert ours.count("{") == ours.count("}") and stock.count("{") == stock.count("}")
-    assert declarations(ours) == declarations(stock) and len(declarations(ours)) == 18
+    assert declarations(ours) == declarations(stock) and len(declarations(ours)) == 19
 
 
 def test_library_bindings_are_those_the_scripts_call():

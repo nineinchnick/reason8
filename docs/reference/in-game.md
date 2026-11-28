@@ -567,8 +567,9 @@ Reaction delays
   around what players start between two idle events: about six units for a
   factory, one or two structures for a builder. Only a finished task uses up
   the batch, so a unit taking back a task it dropped, or the opening's own
-  short waits, add no delay. `reason8 bot build --limits-only` builds the same
-  AI without openings as `BARbLimited`, stock BARb under the same limits.
+  short waits, add no delay. The AI option `reaction_delays=off` gives idle
+  units their next task at once. `reason8 bot build --limits-only` builds the
+  same AI without openings as `BARbLimited`, stock BARb under the same limits.
 
 Hidden timers
 : BARb's configs hold some units back (`since` in `behaviour.json`): the radar

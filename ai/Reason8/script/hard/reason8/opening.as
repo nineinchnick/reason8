@@ -247,6 +247,8 @@ string ReactionKind(CCircuitUnit@ unit, bool isFactory)
 int ReactionWait(CCircuitUnit@ unit, bool isFactory)
 {
 	LogStateEvery30Seconds();
+	if (!ReactionDelays())
+		return 0;  // the AI option reaction_delays is off
 	const int waiting = waitingUnits.find(unit.id);
 	if (waiting >= 0) {
 		if (ai.frame < releaseFrames[waiting])
