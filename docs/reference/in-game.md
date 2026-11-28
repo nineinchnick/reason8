@@ -33,10 +33,14 @@ ships with BAR, and the scripts mentioned here.
   opening the bot, as one player, decides the next order for every unit with
   build power that has nothing to do, by consulting one model of the team's
   state, and extractors go to the metal spots players usually take
-  ([When the model decides](#when-the-model-decides)). Until the learned model
-  of
-  [ADR 0019](../decisions/0019-first-model-decides-each-builders-next-order.md)
-  is in, a stand-in answers, and the option is off by default.
+  ([When the model decides](#when-the-model-decides)). The model is the
+  learned one of
+  [ADR 0019](../decisions/0019-first-model-decides-each-builders-next-order.md):
+  our library evaluates its trees and computes its inputs from the live game,
+  the same inputs the decision table has, checked against the state export. In
+  two 8v8 games it decided 93% and 86% of the orders; its economy at 8:00 is
+  still weaker than the openings', so the option is off by default
+  ([The learned model's orders](#the-learned-models-orders)).
 - **The openings' model does not run inside the game.** For openings its
   output is known before the game starts, so it is exported to a data file and
   compiled into a script table.
@@ -262,8 +266,9 @@ The AI lives in [`ai/Reason8`](../../ai/Reason8):
   start position, and BARb's task type for every structure.
 
 `stand_in.json`
-: The stand-in model's table, written by the same command. It is temporary: it
-  goes when the learned model is in.
+: The stand-in model's table, written by the same command: how often players'
+  builders of each unit got each answer in each minute. The AI plays it when
+  it was built without the learned model's file.
 
 `script/hard/reason8/next_order.as`
 : The script side of the model's orders: it carries out the order our library
@@ -340,9 +345,14 @@ the AI cannot play (see [`results.md`](../results.md#using-it-in-the-game)).
    units are one string there, decoded only for the opening played: 480
    openings as nested script arrays made each Reason8 AI take minutes to
    compile. `next_order.json` is turned into
-   `script/hard/reason8/next_order_table.as`, and `stand_in.json` into the
-   stand-in's `reason8/stand_in.txt`, which our library reads.
-   `script/hard/reason8/live_state.as` is generated for the library installed.
+   `script/hard/reason8/next_order_table.as`, with the role of each start
+   position from the map list, and `stand_in.json` into the stand-in's
+   `reason8/stand_in.txt`, which our library reads.
+   `script/hard/reason8/live_state.as` is generated for the library installed;
+5. the learned builder model (`--model`, by default `builder_v1` in the data
+   directory's `models/`), copied to `reason8/builder_model.json` when it is
+   there. It is built from players' data and never committed;
+   `reason8_build.json` records its name, size and SHA-256.
 
 It stops when a stock script that we replace no longer has the recorded hash,
 because our copy would silently drop the game's change.
@@ -463,18 +473,25 @@ The next order
   the decision and returns the order or nothing,
   `Reason8OrderFailed(builder, order, reason)`,
   `Reason8BarbTask(builder, what)`, BARb's own task for an extractor or a job,
-  and `Reason8SpotOpen(spot)`. The model sits behind one interface
+  `Reason8SpotOpen(spot)`, `Reason8BarbOrdered(builder, task)` (BARb gave a
+  builder left to it a task: an order for the model's history) and
+  `Reason8SetStart(position, role)`. The model sits behind one interface
   (`AnswerModel` in `Model.h`): given the builder the order is for, a
-  probability per answer. The mask and the choice are in `Choice.h`, which
-  knows nothing of the engine; `test_next_order.cpp` tests them and the
-  stand-in, and `build.sh` runs it before every build.
+  probability per answer. The learned trees are read and evaluated by
+  `Trees.h`, their inputs computed in `NextOrder.cpp` with the rules of
+  `ModelInputs.h`; the mask and the choice are in `Choice.h`. The parts
+  without the engine have tests that `build.sh` runs before every build:
+  `test_next_order.cpp` (mask, choice, stand-in, order history, the export's
+  rounding) and `test_trees.cpp` (every decision of the builder model's test
+  vectors, [`builder-model.md`](builder-model.md#test-vectors)).
 
 Our changes to BARb's own files
 
 : A few lines in `AIExport.cpp` (install and release the governor, call it on
   every update and unit-finished event; pass each unit-damaged event to the
-  live state) and four in `InitScript.cpp` (register the live state and the
-  next order), as patches in `ai/native`; the rest is new files.
+  live state; pass every update and each idle event to the next order, for the
+  model's inputs) and four in `InitScript.cpp` (register the live state and
+  the next order), as patches in `ai/native`; the rest is new files.
 
 What it measured is in
 [`command-governor.md`](../research/command-governor.md) and
@@ -594,18 +611,29 @@ model of the team's state, as
 [ADR 0019](../decisions/0019-first-model-decides-each-builders-next-order.md)
 decides. The bot is one player: it notices an idle builder and gives it
 something to do, as a person does; the builder is what the decision is about,
-not who makes it. The default, `opening`, plays the opening table as before,
-so the bot is unchanged until the learned model is in. The model's orders need
-our library; with the engine's own the option has no effect.
+not who makes it. The default, `opening`, plays the opening table as before.
+The model's orders need our library; with the engine's own the option has no
+effect.
 
 The model
 
-: Until the trees of ADR 0019 are in, a **stand-in** answers: NOT the learned
-  model, but a fixed table of how often players' builders of each unit got
-  each answer in each minute of the opening window, measured on the training
-  split of the decision table (`reason8 bot export-next-order`,
+: The learned trees of ADR 0019, `reason8/builder_model.json` in the AI folder
+  ([`builder-model.md`](builder-model.md)), read when the AI starts, once per
+  process for all its AIs: 2.8 s and 14 MB in an 8v8 game, about 1.7 ms a
+  decision. Without that file a **stand-in** answers: NOT the learned model,
+  but a fixed table of how often players' builders of each unit got each
+  answer in each minute of the opening window, measured on the training split
+  of the decision table (`reason8 bot export-next-order`,
   `reason8/bot/next_order.py`, `stand_in.json`). It knows nothing of the game
-  state. The library logs which model answers when it is first consulted.
+  state. The library logs which model answers when the AI starts.
+
+The inputs
+
+: Computed from the live game for every decision, as the decision table
+  defines them ([The model's inputs](#the-models-inputs)). The AI option
+  `skill` sets the skill the model is told; empty, it is the 90th percentile
+  of the training players' skill (43.9 for `builder_v1`), high but inside the
+  range seen in training, as ADR 0019 asks.
 
 The answer
 
@@ -665,19 +693,81 @@ Log
 
   ```
   Reason8 next order: team 2: the model decides the next orders of idle builders during the opening; the opening table is not played
-  Reason8 next order: team 2: map 'Supreme Isthmus v2.1', start 2155 11744: position P3 (start 2146 11801), 4 usual metal spots
-  Reason8 next order: team 2: model stand-in (NOT the learned model: a fixed answer per builder unit and minute), 464 rows for 58 builder units from reason8/stand_in.txt
-  Reason8 next order: team 2: frame 19: armcom 25947 commander: model chose armmex 0.29; 2 of 9 possible of 9 at 10% or more: armwin 0.40 armmex 0.29 armsolar 0.10 armtide 0.08 armlab 0.07
+  Reason8 next order: team 2: model builder_v1 (the learned trees) from reason8/builder_model.json: 28900 trees, 489020 nodes, 281 inputs, shared with an AI of this process; skill 43.894001 (the 0.9 quantile of training)
+  Reason8 next order: team 2: map 'Supreme Isthmus v2.1', start 2155 11744: position P3 (start 2146 11801), role air, 4 usual metal spots
+  Reason8 next order: team 2: frame 19: armcom 25947 commander: model chose armmex 0.99; 1 of 29 possible of 414 at 10% or more: armmex 0.99 armwin 0.01 armlab 0.00 armap 0.00 armsolar 0.00
+  Reason8 next order: team 2: frame 19: armcom 25947 commander: inputs faction=Armada; map=Supreme Isthmus v2.1; position=P3; role=air; previous_1=<start>; builder_kind=commander; ...
   Reason8 next order: team 2: frame 19: armcom 25947: armmex on usual spot 1 of 4, BARb's spot 88 at 2280 11960
+  Reason8 next order: team 2: frame 2379: armcom 25947 commander: BARb ordered armmex
   Reason8 next order: team 2: model orders ended at frame 8732, contact: first contact at frame 8702, armatlas by corveng; BARb takes over
   ```
+
+  The first AI of the process to start reads the model
+  (`read in 2.8 s, 13.7 MB` in place of `shared with an AI of this process`);
+  without the file the line names the stand-in and says why. The inputs of
+  every fourth decision of a team are logged: every name, every number but
+  zero, `?` for a missing one.
 
   `reason8 bot check` counts them per team (`next_order_by_team`): how often
   an idle builder needed an order, what came of each, the orders the model
   chose, how often the order was decided by the model and how often left to
   BARb, by kind of builder and by game minute, where the extractors went, and
-  when the model's orders ended. A team whose orders the model decided is not
-  compared with an opening; it passes when the model decided some.
+  when the model's orders ended, the orders BARb gave the builders left to it
+  (`barb_orders`) and the decisions whose inputs were logged. A team whose
+  orders the model decided is not compared with an opening; it passes when the
+  model decided some.
+
+### The model's inputs
+
+The library computes every input of the learned model when it decides, as
+[`builder-model.md`](builder-model.md#the-inputs) defines it from the decision
+table, so that the model sees in the game what it saw in training:
+
+```mermaid
+flowchart LR
+    engine["the engine:<br/>units, economy, map"]
+    events["idle events,<br/>every frame"]
+    script["next_order.as:<br/>start position and role,<br/>BARb's orders"]
+    history["the bot's orders:<br/>the model's that were given,<br/>and BARb's"]
+    inputs["the 281 inputs"]
+    trees["the trees<br/>(Trees.h)"]
+    choice["mask and choice<br/>(Choice.h)"]
+    engine --> inputs
+    events --> inputs
+    script --> history --> inputs
+    script --> inputs
+    inputs --> trees --> choice
+```
+
+The order history
+: Counted from the bot's orders, the model's and BARb's, as the table counts a
+  player's: a run of orders of one answer at most 6 frames apart is one step.
+  BARb's order is the unit its task builds or the job it does; a model order
+  the script reports it could not carry out in its frame is no order. Each
+  decision is one order, the approximation the reference gives for
+  `decision_index` and the job counts. The position and its role come from the
+  script, which finds the position from the usual metal spots; `bot build`
+  adds each position's role from the map list's layout for two teams of eight.
+
+The economy
+: The values of the last whole second as the state export writes them: read at
+  the start of the frame after it, which is the state the export writes at the
+  end of that second's frame, and cut or rounded as its format does. Read in
+  the second's own frame, before the team's resources are updated, income and
+  expense were those of the second before.
+
+Units and build power
+: The team's units by type, finished and under construction, and the build
+  power of its finished builders by kind, from the engine. A builder is idle
+  from its idle event until the frame after its next order, as the table reads
+  the state of the frame before the order.
+
+Checked against training
+: `reason8 bot check --model FILE`, with `--infolog` and `--state`
+  (`reason8/bot/model_inputs.py`), computes the inputs of every logged
+  decision again from the state export of the same game, the way the table
+  does, encodes both rows as the trees read them, and lists every input that
+  differs (`model_inputs_by_team`).
 
 ### What a script can see and do
 
@@ -719,14 +809,17 @@ content folder made by `reason8 headless setup`
 ```sh
 # 0. the openings, from the saved model (written to ai/Reason8/openings.json),
 #    and what the bot uses when the model decides builders' next orders
-#    (ai/Reason8/next_order.json, and the stand-in's ai/Reason8/stand_in.json)
+#    (ai/Reason8/next_order.json, and the stand-in's ai/Reason8/stand_in.json;
+#    the learned model itself is data/models/builder_v1.json, from
+#    `reason8 model train`)
 uv run reason8 bot export --data-dir data/bar \
     --game "Beyond All Reason test-32018-ad135b9"
 uv run reason8 bot export-next-order --data-dir data/bar \
     --game "Beyond All Reason test-32018-ad135b9"
 
 # 1. build the AI into the folder the game will run in (the first time this
-#    also builds our BARb library, 5 to 7 minutes)
+#    also builds our BARb library, 5 to 7 minutes), with the learned model
+#    when data/models/builder_v1.json is there (--model to pick another)
 uv run reason8 bot build --data-dir data/bar \
     --game "Beyond All Reason test-32018-ad135b9" \
     --skirmish-dir data/runs/reason8/AI/Skirmish
@@ -1051,6 +1144,87 @@ opening. The bot's own steps rarely take that long: in the same 20 games 18 of
 2,648 commander steps (0.7%) were not finished 111 s after they were first
 queued, and the median was 10 s. Its factory units are not limited: the
 slowest of 1,682 took 86 s.
+
+### The learned model's orders
+
+**Summary.** The learned model plays: in 8v8 games every team's orders were
+decided by it, 93% of them with skill and 86% without, the rest left to BARb
+when BARb had no task for the order. The inputs the library computes are the
+ones the decision table has: all 240 logged decisions of the game with
+`builder_v1` and 190 of 191 with `builder_v1_no_skill` gave exactly the row
+computed again from the state export. No script error, and every team kept the
+action budget. Its economy at 8:00 is weaker than the openings': 11.0 and 12.3
+metal income against 13.1, with one extractor fewer. One finding holds it
+back: about half the model's orders end at once, mostly `assist` and
+extractors for the commander, and the builder is idle again within half a
+second. That is how BARb's tasks carry the orders out, not the model, and it
+is the next thing to fix.
+
+10-minute 8v8 games on Supreme Isthmus, seed 1, Reason8 as Armada against
+stock BARb as Cortex, one game per row, one at a time on a machine running six
+other engines. Each game was played again with the state export for the check.
+The model draws its orders at random, so one game per model shows how it
+plays, not which of the two is better.
+
+What came of the idle builders, the 8 teams together:
+
+| outcome                                         | `builder_v1` | `builder_v1_no_skill` |
+| ----------------------------------------------- | -----------: | --------------------: |
+| needed an order                                 |          946 |                   753 |
+| decided by the model and given to the builder   |          882 |                   650 |
+| chosen by the model, but not carried out        |           64 |                   103 |
+| left to BARb before a choice                    |            0 |                     0 |
+| given, but the task ended unfinished            |          208 |                   161 |
+| the same answer to the same builder within 1 s  |          443 |                   274 |
+| orders BARb gave the builders left to it        |          159 |                   183 |
+| decisions whose inputs were logged and compared |          240 |                   191 |
+| of them, the same row as from the state export  |          240 |                   190 |
+
+- No order was left to BARb before a choice: for every idle builder an answer
+  it could carry out reached 10%. The orders not carried out were units not
+  available to build (24 and 47), jobs BARb had no task for (`repair`,
+  `reclaim`, `resurrect`: 33 and 53), and extractors with no metal spot left
+  (7 and 3).
+- The repeats: the task given for the order ends at once and the builder is
+  idle again. With `builder_v1`, 218 of the 443 were `assist`, 102 an
+  extractor and 35 a lab, 286 for commanders. Each repeat is an order of the
+  bot, so it also counts in the model's order history.
+- The one input that differed: an energy income of 364 against 365 in the
+  export, at 7:56.
+- The model's orders ended at first contact for 6 and 7 teams (from 2:07 to
+  7:43) and at the end of the 8-minute window for the others.
+  `reason8 bot check` passed for both games: no script error, no command
+  dropped, and every team kept every window of the budget (the busiest
+  5-minute window had 249 actions of 250, as in the game with the openings).
+
+The teams' economy from the state export, the mean of the 8 teams:
+
+| game                  | metal income at 5:00 | at 8:00 | energy income at 8:00 | extractors at 8:00 | factories at 8:00 | units at 10:00 |
+| --------------------- | -------------------: | ------: | --------------------: | -----------------: | ----------------: | -------------: |
+| openings (default)    |                  9.7 |    13.1 |                   245 |                4.5 |               1.0 |             58 |
+| `builder_v1`          |                  7.9 |    11.0 |                   214 |                3.4 |               1.2 |             49 |
+| `builder_v1_no_skill` |                  8.5 |    12.3 |                   354 |                3.2 |               1.1 |             43 |
+
+In the game with the openings, 6 of 8 teams followed their opening as far as
+they played it, as in the earlier games below.
+
+Loading and deciding, with the 73 MB `builder_v1`:
+
+| measure                                            | Linux | Windows |
+| -------------------------------------------------- | ----: | ------: |
+| reading the file, in the game (s)                  |   2.8 |         |
+| reading the file, `test_trees` (s)                 |   4.1 |    14.6 |
+| the model's arrays (MB)                            |  13.7 |    13.7 |
+| resident memory after reading (MB)                 |    25 |         |
+| peak memory of `test_trees`, with the vectors (MB) |   146 |         |
+| one decision (ms)                                  |   1.7 |     1.9 |
+
+The file is read once per process; the other seven AIs of a game share it.
+Parsed whole by jsoncpp it took 1.9 GB, so the library parses the file without
+its trees and then each tree alone. On Windows `test_trees.exe` read the file
+over WSL's file share, which makes its time an upper bound; its memory is not
+measured there. A decision walks all 28,900 trees and takes 1.7 ms, on a
+machine running six other engines.
 
 ### The model's orders, with the stand-in
 

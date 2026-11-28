@@ -155,7 +155,8 @@ this version cannot evaluate gets a new format name. Abridged:
   `[node, [codes]]`) sends the codes of its set right and every other code
   left; a numeric node sends a value below `threshold` left and the rest
   right. Thresholds and leaf values are 32-bit floats, written as the shortest
-  decimal that reads back to the same float.
+  decimal that reads back to the same float; a threshold can be `-Infinity`,
+  as Python's JSON writes it, which sends every number right.
 
 `builders`
 : Per builder type (today's unit name): its kind, whether it moves, its build
@@ -245,26 +246,38 @@ gives the committed vectors and that it matches XGBoost.
 ## In the bot
 
 The bot decides the next order of an idle builder through `AnswerModel`
-(`ai/native/Model.h`), whose stand-in (`StandIn.h`,
-`ai/Reason8/stand_in.json`) answers from a fixed table per builder unit and
-minute. The trees replace the stand-in: a model that loads this file once per
-process, computes the inputs below for the `IdleBuilder` it is given (its
-unit, kind, build power and the frame come with it; the rest it reads from the
-engine), walks the trees and returns the probability of every answer. The mask
-and the choice stay as they are. That model is the next step: its C++ side,
-tested against the vectors above, and the build step that copies the file into
-the AI folder in place of `stand_in.json`, which the option
-`builder_orders = model` then plays. Until then the stand-in plays.
+(`ai/native/Model.h`). With this file in the AI folder
+(`reason8/builder_model.json`, copied there by
+`reason8 bot build --model builder_v1`) and the option
+`builder_orders = model`, the learned trees answer:
+
+- `ai/native/Trees.h` reads the file with BARb's jsoncpp, keeps only the
+  arrays and gives the probability of every answer, steps 1 to 4 above;
+- `ai/native/NextOrder.cpp` computes the inputs below for the builder the
+  order is for, with the bookkeeping of `ai/native/ModelInputs.h`;
+- the mask and the choice stay as they are (`ai/native/Choice.h`).
+
+`test_trees.cpp` checks every decision of the test vectors, from the model
+parsed whole and read from a file, on every build of the library, for Linux
+and Windows; given the vectors of a trained model
+(`reason8 model vectors --model`) it checks those too and reports what loading
+and deciding take. In a game, the library logs the inputs of every fourth
+decision, and `reason8 bot check --model` compares them with the inputs
+computed again from the state export
+([`in-game.md`](in-game.md#the-models-inputs)). Without the file the stand-in
+answers (`StandIn.h`, `ai/Reason8/stand_in.json`), a fixed table per builder
+unit and minute.
 
 ## Size
 
 `builder_v1` is 73.5 MB of JSON (6.3 MB gzipped): 289 classes, 100 rounds,
 28,900 trees and 489,020 nodes, of which 258,960 leaves; `builder_v1_no_skill`
 is 73.3 MB with 484,522 nodes. A decision walks every tree once: about 55,000
-split nodes (at most 60,400 on 20 synthetic decisions), a fraction of a
-millisecond in C++. Held as arrays (a 16-bit input index, a 32-bit threshold
-or leaf value, two 32-bit children and the missing side), the trees take about
-7 MB per process.
+split nodes (at most 60,400 on 20 synthetic decisions), 1.7 ms in the library
+on a machine running six game engines (1.9 ms on Windows). Held as arrays of
+20 bytes a node (a 16-bit input index, a 32-bit threshold or leaf value, two
+32-bit children, the missing side and the categorical set), the trees take
+13.7 MB per process.
 
 Trained for the 400 rounds the measurement allows, without stopping by itself,
 the model is 293 MB of JSON with 2.1 million nodes, too large to load in the
@@ -274,12 +287,14 @@ while fewer classes or shallower trees of the same size cost more
 ([`context.md`](../research/context.md#the-size-of-the-model)).
 
 The file is plain JSON so that the library reads it with the JSON parser BARb
-already has (jsoncpp, in BARb's `src/lib/json`). Parsed whole, a 73 MB file
-takes far more memory than its arrays, so the library should read it once per
-process, for all its AIs, and keep only the arrays. It is not committed: it is
+already has (jsoncpp, in BARb's `src/lib/json`). Parsed whole by jsoncpp,
+`builder_v1` took 1.9 GB, so the library parses the file without its trees and
+then each tree alone, which leaves 25 MB more resident memory after reading.
+It reads the file once per process, when the first AI starts, and the other
+AIs of the process share it: 2.8 s in an 8v8 game. It is not committed: it is
 built from data that stays private and it is larger than anything in the
-repository. The plan is that `reason8 bot build` copies it from `data/models/`
-into the AI folder in place of `stand_in.json`, in the next step.
+repository. `reason8 bot build` copies it from `data/models/` into the AI
+folder.
 
 ## The inputs
 
@@ -309,17 +324,20 @@ and whether that is exactly what the model was trained on.
 `position`, `role`
 : *Table:* the start position (the nearest spawn point of the map's metadata,
   `P1` …) and its role, from the opening dataset.
-: *Library:* the position the opening script already finds from the
-  commander's position at frame 0 and the map's positions in `openings.json`,
-  and its role from the same metadata.
+: *Library:* the position whose usual metal spots start nearest to the
+  commander (`next_order.as`, from `next_order.json`), and its role in the map
+  list's layout for two teams of eight, which `reason8 bot build` adds to the
+  usual spots.
 : *Exact:* yes for the maps and positions of the metadata; elsewhere missing.
 
 `step_idx`
 : *Table:* how many steps the player had made before this one: their build
   orders and jobs, a run of orders of one answer at most 6 frames apart being
   one step ([ADR 0013](../decisions/0013-evaluate-on-held-out-games.md)).
-: *Library:* the number of the team's earlier decisions, every order the bot
-  gives a builder (the model's and BARb's), by the same rule.
+: *Library:* the number of steps of the bot's earlier orders by the same rule:
+  the model's orders that were given (one the script reports it could not
+  carry out in its frame is none) and BARb's orders to the builders left to
+  it.
 : *Exact:* the same rule, but on the bot's decisions, not a player's; see
   [below](#inputs-the-library-cannot-compute-exactly).
 
@@ -333,8 +351,8 @@ and whether that is exactly what the model was trained on.
 `previous_1`
 : *Table:* the answer of the player's previous step, `<start>` before the
   first.
-: *Library:* the answer of the bot's previous decision; for an order of BARb,
-  the unit it builds or the job it does.
+: *Library:* the answer of the bot's previous step; for an order of BARb, the
+  unit its task builds or the job it does (a guard task is `assist`).
 : *Exact:* yes when BARb's orders are named as answers.
 
 `ordered_<type>`, one per unit type of the table (`mex`, `win`, … `other`)
@@ -356,9 +374,8 @@ and whether that is exactly what the model was trained on.
 : *Table:* `commander` (`customparams.iscommander`), `factory` (does not move,
   has a build list), `construction` (moves, has a build list), `tower` (does
   not move, no build list), `other` (moves, no build list).
-: *Library:* from the builder's unit definition: `UnitDef_getCustomParams`,
-  `UnitDef_getBuildOptions`, `UnitDef_getSpeed`; or the `kind` of its entry in
-  `builders`.
+: *Library:* from the builder's unit definition as BARb reads it: the
+  commander role, its build options and whether it moves.
 : *Exact:* yes; the table reads the unit files as written, the library as the
   game loaded them, which differ for a few build lists.
 
@@ -396,10 +413,14 @@ and whether that is exactly what the model was trained on.
   numbers, metal income and expense to one decimal, energy income and expense
   to whole numbers.
 : *Library:* `Economy_getCurrent`, `Economy_getStorage`, `Economy_getIncome`,
-  `Economy_getUsage` (the live state of our library reads the same), taken at
-  the last frame that is a multiple of 30 and rounded the same way.
-: *Exact:* yes, if the library keeps the values of the last whole second; read
-  live they are up to a second newer than the table's.
+  `Economy_getUsage` (the live state of our library reads the same) of the
+  last whole second: read at the start of the frame after it, which is the
+  state the export writes at the end of that second's frame, and cut or
+  rounded as its format does (`%d` cuts stored and storage to whole numbers).
+  Read in the second's own frame, before the team's resources are updated,
+  income and expense were those of the second before.
+: *Exact:* yes: in two 8v8 games one value of 431 logged decisions differed,
+  an energy income by 1.
 
 ### Own units
 
@@ -429,7 +450,8 @@ and whether that is exactly what the model was trained on.
   `UnitIdle` line of the state export) and got no order since that gives them
   work. A builder that has not gone idle yet counts as busy, however new.
 : *Library:* the same rule from the `UnitIdle` events the AI gets and the
-  orders it gives.
+  orders it gives, a builder counting as idle until the frame after its next
+  order, as the table reads the state of the frame before.
 : *Exact:* the rule can be followed, but the builder the order is for is idle
   at every decision of the bot and at few of the table's rows; see below.
 
@@ -437,8 +459,9 @@ and whether that is exactly what the model was trained on.
 
 `skill`
 : *Table:* the player's rating before the game.
-: *Library:* a number the bot is given (ADR 0019: high, but inside the range
-  of `training.skill_quantiles`). Absent from `builder_v1_no_skill`.
+: *Library:* the AI option `skill`; when it is empty, the 0.9 quantile of
+  `training.skill_quantiles` (43.9 for `builder_v1`): high, but inside the
+  range seen in training, as ADR 0019 asks. Absent from `builder_v1_no_skill`.
 : *Exact:* not a measurement; chosen.
 
 ### Inputs the library cannot compute exactly
