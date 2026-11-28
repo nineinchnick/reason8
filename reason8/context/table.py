@@ -67,7 +67,7 @@ from typing import Any
 import polars as pl
 
 from reason8.context import builders
-from reason8.context.sample import sample_file
+from reason8.context.sample import description_path, sample_file
 from reason8.game.maps import MapMetadata, load_map_list
 from reason8.game.positions import position_of, spot_radii
 from reason8.headless import tables as state_tables
@@ -132,6 +132,15 @@ CATEGORICAL = ("builder_kind", "builder_role", "builder_previous")
 GROUPS = tuple(groups([]))
 #: The groups `join_state` adds: the state of the game, the same for every builder.
 STATE_GROUPS = ("time", "pace", "economy", "wind", "own_units", "allies")
+
+
+def sample_drawn(sample_path: Path | None) -> dict[str, Any] | None:
+    """How the sample was drawn, from the file `reason8 context sample` writes next to it:
+    the rule, the seed, the counts and the source dataset; None for a sample drawn by hand."""
+    if sample_path is None or not description_path(sample_path).exists():
+        return None
+    description = json.loads(description_path(sample_path).read_text())
+    return {key: description.get(key) for key in ("rule", "seed", "counts", "source", "drawn_at")}
 
 
 def state_dir() -> Path:
@@ -763,6 +772,7 @@ def build_table(
             "sha256": hashlib.sha256(sample_path.read_bytes()).hexdigest() if sample_path else None,
             "games": sample.height,
             "games_by_map": dict(sorted(Counter(sample["map"].to_list()).items())),
+            "drawn": sample_drawn(sample_path),
         },
         "split": source_manifest.get("split"),
         "state": {
