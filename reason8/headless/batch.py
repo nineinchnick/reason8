@@ -4,6 +4,9 @@
         --jobs 4 --max-frame 21600 REPLAY.sdfz ...
     uv run reason8 headless batch --data-dir data/bar --out-dir data/state --list FILE
 
+A list file holds one replay path per line; empty lines and lines starting with ``#`` are
+skipped, so a list can say where it came from.
+
 For every replay it fetches what the replay needs (`reason8 headless setup`), plays it
 with the state export widget (`reason8 headless run`) and writes the state to
 <out-dir>/date=<date>/<replay name>.jsonl.gz, in the date partition of the replay
@@ -92,9 +95,17 @@ def play(replay: Path, target: Path, args: argparse.Namespace) -> dict:
     return result
 
 
+def read_list(path: Path) -> list[Path]:
+    """The replay paths of a list file: one per line, without empty lines and ``#`` comments."""
+    lines = (line.strip() for line in path.read_text().splitlines())
+    return [Path(line) for line in lines if line and not line.startswith("#")]
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("replays", nargs="*", type=Path)
-    parser.add_argument("--list", type=Path, help="file with one replay path per line")
+    parser.add_argument(
+        "--list", type=Path, help="file with one replay path per line (# starts a comment)"
+    )
     parser.add_argument("--data-dir", required=True, type=Path)
     parser.add_argument("--out-dir", required=True, type=Path)
     parser.add_argument("--jobs", type=int, default=4, help="engines at once")
@@ -118,7 +129,7 @@ def run(args: argparse.Namespace) -> int:
     require_partitioned(args.out_dir, "*" + STATE_SUFFIX)
     replays = list(args.replays)
     if args.list:
-        replays += [Path(line) for line in args.list.read_text().splitlines() if line.strip()]
+        replays += read_list(args.list)
 
     ok = True
 
