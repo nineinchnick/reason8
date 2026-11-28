@@ -7,7 +7,7 @@ import pytest
 from reason8 import cli
 from reason8.data.download import MANIFEST_NAME, manifest_bytes, merge_manifests, read_manifest
 from reason8.data.storage import Bucket, configured_bucket
-from reason8.data.sync import PULL, PUSH, sync_area
+from reason8.data.sync import PULL, PUSH, is_area_name, sync_area
 from reason8.paths import LayoutError, partitioned_name
 from reason8.replays.parse import index_text, merge_indexes, parse_index
 from reason8.replays.tables import INDEX_NAME
@@ -261,3 +261,42 @@ def test_cli_sync(bucket, tmp_path, monkeypatch, capsys):
     assert bucket.read("matches/matches.parquet") == b"dump"
     assert "matches: 1 files, 0 already there, 1 copied" in capsys.readouterr().err
     assert cli.main(["sync", "pull", "nonsense", "--s3-uri", uri]) == 2
+
+
+def test_state_areas_copy_state_files_and_their_tables(bucket, tmp_path):
+    game = "2026-11-01_10-00-00-000_Map_2026.09.03"
+    state = tmp_path / "state-v7"
+    write(state, game + ".jsonl.gz", b"state")
+    write(state, game + ".game.parquet", b"game table")
+    write(state, game + ".game.parquet.part", b"half")
+    # the batch's scratch folder inside a partition: not copied
+    scratch = state / "date=2026-11-01" / "state-abc123"
+    scratch.mkdir()
+    (scratch / "state.jsonl").write_bytes(b"x")
+
+    summary = sync(bucket, tmp_path, "state-v7", PUSH)
+
+    assert (summary.files, summary.copied) == (2, 2)
+    assert all_keys(bucket) == [
+        f"shared/state-v7/date=2026-11-01/{game}.game.parquet",
+        f"shared/state-v7/date=2026-11-01/{game}.jsonl.gz",
+    ]
+    pulled = sync(bucket, tmp_path / "elsewhere", "state-v7", PULL)
+    assert pulled.copied == 2
+    assert (
+        tmp_path / "elsewhere" / "state-v7" / "date=2026-11-01" / (game + ".jsonl.gz")
+    ).is_file()
+
+
+@pytest.mark.parametrize(
+    ("area_name", "expected"),
+    [
+        ("state", True),
+        ("state-v7", True),
+        ("replays", True),
+        ("state-", False),
+        ("state-../x", False),
+    ],
+)
+def test_area_names(area_name, expected):
+    assert is_area_name(area_name) is expected
