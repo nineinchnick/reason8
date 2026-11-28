@@ -6,7 +6,7 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from reason8.analysis.apm import end_frames, event_stream, player_actions
+from reason8.analysis.apm import end_frames, event_stream, order_kind, player_actions
 from reason8.replays import parse, tables
 from reason8.replays.replay import Replay, load_replay
 from tests import synthetic
@@ -176,6 +176,10 @@ def test_actions_can_be_counted_from_the_tables(make, tmp_path):
     stream = event_stream(tables.open_source(out), [NAME]).collect()
     events = [dict(row) for row in stream.drop("replay").iter_rows(named=True)]
     rebuilt = Replay({**replay.doc, "events": events})
+    commands = [event for event in replay.events if event["type"] == "cmd"]
+    assert [event["kind"] for event in events if event["type"] == "cmd"] == [
+        order_kind(event) for event in commands
+    ]
     if replay.end_frame is not None:
         assert player_actions(rebuilt) == player_actions(replay)
         assert end_frames(rebuilt) == end_frames(replay)

@@ -11,6 +11,7 @@ from reason8.analysis.apm import (
     game_apm,
     measure,
     most_in_window,
+    order_kind,
     per_minute,
     player_actions,
     report,
@@ -184,3 +185,13 @@ def test_day_apm_reads_in_chunks(tmp_path):
         name: result.players for name, result in whole.items()
     }
     assert sorted(whole) == ["2026-11-01_a", "2026-11-01_b"]
+
+
+def test_order_kind_leaves_out_parameters_and_units():
+    build = {"type": "cmd", "cmd": "BUILD", "cmd_id": -3, "unit": "armmex", "opts": ["shift"]}
+    there = order_kind({**build, "params": [1, 2, 3], "units": [1]})
+    assert there == order_kind({**build, "params": [9, 9, 9], "units": [2]}) == "-3:armmex:32:"
+    assert order_kind({**build, "opts": []}) != there
+    insert = {"type": "cmd", "cmd": "INSERT", "cmd_id": 1, "opts": ["alt"], "inner": build}
+    assert order_kind(insert) == "-3:armmex:32:128"
+    assert order_kind({"type": "select", "units": [1]}) is None

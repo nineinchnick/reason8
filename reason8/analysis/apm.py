@@ -143,13 +143,54 @@ class FrameCounter:
 
 
 #: The fields of an event that the counting reads, in the order of `event_rows`.
-EVENT_FIELDS = ("type", "frame", "player", "via", "ai", "units", "action", "param")
+EVENT_FIELDS = ("type", "frame", "player", "via", "ai", "units", "action", "param", "kind")
 EventRow = tuple[Any, ...]
 
 
+def order_kind(event: Mapping[str, Any]) -> str | None:
+    """The kind of order of a command event: its command, unit to build and options, and
+    for an INSERT the inserted command's and the INSERT's own options; not its parameters
+    or units. A dragged line of one building is one kind, a move and a shift-queued move
+    are two. The same as `order_kind_column` of the command's row in the tables."""
+    if event.get("type") != "cmd":
+        return None
+    command = event
+    insert_options = None
+    if event.get("cmd") == "INSERT" and "inner" in event:
+        command = event["inner"]
+        insert_options = tables.option_bits(event.get("opts"))
+    return _kind_key(
+        command.get("cmd_id"),
+        command.get("unit"),
+        tables.option_bits(command.get("opts")),
+        insert_options,
+    )
+
+
+def _kind_key(command_id: Any, unit: Any, options: Any, insert_options: Any) -> str:
+    parts = (command_id, unit, options, insert_options)
+    return ":".join("" if part is None else str(part) for part in parts)
+
+
+def order_kind_column() -> pl.Expr:
+    """`order_kind` of the rows of the commands table, as a ``kind`` column."""
+    parts = [
+        pl.col(name).cast(pl.String).fill_null("")
+        for name in ("command_id", "unit", "options", "insert_options")
+    ]
+    return pl.concat_str(parts, separator=":").alias("kind")
+
+
 def event_rows(events: Iterable[Mapping[str, Any]]) -> list[EventRow]:
-    """The events of a parsed document as tuples of `EVENT_FIELDS`."""
-    return [tuple(event.get(name) for name in EVENT_FIELDS) for event in events]
+    """The events of a parsed document as tuples of `EVENT_FIELDS`. An event that already
+    has a ``kind`` (one rebuilt from `event_stream`) keeps it."""
+    return [
+        (
+            *(event.get(name) for name in EVENT_FIELDS[:-1]),
+            event["kind"] if "kind" in event else order_kind(event),
+        )
+        for event in events
+    ]
 
 
 def end_frames(replay: Replay, events: Sequence[EventRow] | None = None) -> dict[int, int]:
@@ -166,7 +207,7 @@ def end_frames(replay: Replay, events: Sequence[EventRow] | None = None) -> dict
     team_died: dict[int, int] = {}
     if events is None:
         events = event_rows(replay.events)
-    for kind, frame, player, _, _, _, action, param in events:
+    for kind, frame, player, _, _, _, action, param, _ in events:
         if frame is None or frame < 0:
             continue
         if kind == "cmd" and player is not None:
@@ -205,7 +246,7 @@ def player_actions(
     selections: dict[int, Sequence[int]] = {}
     if events is None:
         events = event_rows(replay.events)
-    for kind, frame, player, via, ai, event_units, _, _ in events:
+    for kind, frame, player, via, ai, event_units, _, _, _ in events:
         if player not in counters:
             continue
         if kind == "select":  # pregame selections count too
@@ -361,7 +402,8 @@ def event_stream(source: tables.Source, replays: Iterable[str]) -> pl.LazyFrame:
     """The commands, selections and events of `replays`, in stream order, from the tables.
 
     One row per event with the fields that `player_actions` and `end_frames` read: ``type``,
-    ``frame``, ``player``, ``via``, ``ai``, ``units``, ``action`` and ``param``.
+    ``frame``, ``player``, ``via``, ``ai``, ``units``, ``action``, ``param`` and ``kind``
+    (`order_kind`).
     """
     replays = list(replays)
     commands = source.scan(tables.COMMANDS, replays).select(
@@ -373,6 +415,7 @@ def event_stream(source: tables.Source, replays: Iterable[str]) -> pl.LazyFrame:
         pl.col("via").cast(pl.String),
         "ai",
         "units",
+        order_kind_column(),
     )
     selections = source.scan(tables.SELECTIONS, replays).select(
         "replay", "seq", pl.lit("select").alias("type"), "frame", "player", "units"
