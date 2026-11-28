@@ -6,7 +6,7 @@ import argparse
 import sys
 from types import ModuleType
 
-from reason8.analysis import apm, map_meta, opening_shift, play_quality, reactions
+from reason8.analysis import apm, map_meta, opening_shift, orders, play_quality, reactions
 from reason8.bot import build, check, export, game, next_order
 from reason8.context import check as context_check
 from reason8.context import measure as context_measure
@@ -102,6 +102,7 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
             ("apm", apm, "how many actions per minute people take, by phase and skill"),
             ("reactions", reactions, "how long people take to give an idle unit new orders"),
             ("play-quality", play_quality, "scores of how well a player played the opening"),
+            ("orders", orders, "how many commands and distinct orders one action holds"),
         ],
     ),
 ]

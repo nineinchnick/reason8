@@ -116,11 +116,11 @@ task, the commands in order and what each one talks to.
   bot's openings from human ones
   ([workflow](docs/reference/workflows.md#paired-evaluation-games)).
 
-`analysis opening-shift|map-meta|apm|reactions|play-quality`
+`analysis opening-shift|map-meta|apm|reactions|play-quality|orders`
 : The measurements behind the research on balance patches, on the opening meta
   of each start position, on how many actions per minute people take, on how
-  long they take to give an idle unit new orders and on scores of how well a
-  player played the opening.
+  long they take to give an idle unit new orders, on scores of how well a
+  player played the opening and on how many orders one action holds.
 
 ## Data storage
 
