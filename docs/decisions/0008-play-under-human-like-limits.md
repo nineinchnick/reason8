@@ -1,7 +1,7 @@
 # 0008. Play under human-like limits
 
 - **Status:** Accepted
-- **Date:** 2026-11-27
+- **Date:** 2026-11-28
 
 ## Context
 
@@ -15,21 +15,29 @@ whole line of buildings, and about half of the build orders in a replay repeat
 the order before them in the same frame
 ([`openings-dataset.md`](../reference/openings-dataset.md)).
 
-How fast people act is measured on every game of the slice in
-[`apm.md`](../research/apm.md), counting actions the way BAR's own APM gadget
-does: at most one per frame, and a command counts only if one of its units got
-no command in the 7 frames before. Measured there:
+A player's action is one kind of order. Of the actions players click, 99.4%
+give a single kind of order (one command with its options, to any number of
+units or places: a click to a selection, a dragged line of buildings), and
+with the commands of their widgets 89.6% do, the rest being widgets'
+housekeeping of units the player didn't click. Counted by frames, one action
+of the bot's command governor held 4.8 kinds and 9.9 different orders on
+average in games played in real time, mixing orders to many units that a
+player gives with several clicks
+([`command-governor.md`](../research/command-governor.md#what-one-action-holds)).
 
-- A player-minute has a median of 13 clicked actions (p90 34) and of 36 when
-  the commands of the player's widgets are added (p90 80); the second figure
-  is close to the APM BAR shows in game.
+How fast people act is measured on every game of the slice in
+[`apm.md`](../research/apm.md), counting actions by the rule below. Measured
+there:
+
+- A player-minute has a median of 13 clicked actions (p90 35) and of 35 when
+  the commands of the player's widgets are added (p90 80).
 - Skill doubles the rate: averaged over a game, the median player clicks 11
-  actions a minute below skill 10 and 24 at 40 and up (25 and 56 with
+  actions a minute below skill 10 and 24 at 40 and up (24 and 56 with
   widgets).
 - Short bursts barely depend on skill: the most clicked actions in any 10
-  seconds of a game has a p90 of 22 to 23 in every band, and of 35 to 50 with
-  widgets; in any second, a p90 of 9 to 11 with widgets.
-- The first two minutes are the quietest: a p90 of 26 to 48 actions a minute
+  seconds of a game has a p90 of 23 to 24 in every band, and of 38 to 60 with
+  widgets; in any second, a p90 of 11 to 14 with widgets.
+- The first two minutes are the quietest: a p90 of 25 to 46 actions a minute
   with widgets, depending on skill.
 
 Attention is scarcer than actions. Noticing that a factory finished its queue
@@ -49,25 +57,34 @@ command rates (including bursts), reaction time and limited attention. It
 should win by decisions, not by speed or extra information. This holds for
 every milestone, including any later reinforcement learning.
 
-The command rate is an action budget, counted the way a player spends it and
-the way BAR counts it: at most one action per frame, and a command counts only
-if at least one of its units got no command from the bot in the 7 frames
-before. Batching orders, such as dragging a line of buildings or queueing with
-shift, is one action, and the bot learns to batch where players do. Every
-command the bot sends counts, so the comparable human figure is the one with
-widget commands (`all` in [`apm.md`](../research/apm.md)), and BAR's in-game
-APM is a check on it.
+The command rate is an action budget, counted the way a player spends it:
+
+- One action is one kind of order in a frame: the command, the unit it builds
+  and its options, to any number of units or places; its targets and
+  parameters don't count. A click to a selection, a dragged line of buildings
+  and a formation move are one action each; a move and a shift-queued move in
+  the same frame are two, and so are orders of two kinds to different units.
+- As in BAR's own APM gadget, a command counts only if at least one of its
+  units got no command in the 7 frames before its frame, and the commands a
+  unit gets in the frame it is finished (the settings an AI or a widget gives
+  a new unit at once) don't count.
+
+Batching orders of one kind, such as dragging a line of buildings, is one
+action, and the bot learns to batch where players do. Every command the bot
+sends counts, so the comparable human figure is the one with widget commands
+(`all` in [`apm.md`](../research/apm.md)), counted by the same rule. BAR's
+in-game APM counts at most one action a frame, so it reads a little lower.
 
 The bot plays at a chosen skill band, and its actions must stay within every
 window of that band's row at all times:
 
 | skill band | any 1 s | any 10 s | any 60 s | any 60 s, first 2 min | game average |
 | ---------- | ------: | -------: | -------: | --------------------: | -----------: |
-| below 10   |       9 |       35 |       50 |                    25 |           25 |
-| 10-20      |      10 |       40 |       65 |                    30 |           30 |
-| 20-30      |      11 |       50 |       80 |                    35 |           40 |
-| 30-40      |      11 |       50 |       90 |                    40 |           50 |
-| 40 and up  |      11 |       50 |      100 |                    50 |           55 |
+| below 10   |      11 |       40 |       50 |                    25 |           25 |
+| 10-20      |      12 |       50 |       65 |                    30 |           30 |
+| 20-30      |      13 |       60 |       80 |                    35 |           40 |
+| 30-40      |      14 |       60 |       90 |                    40 |           50 |
+| 40 and up  |      14 |       60 |      100 |                    45 |           55 |
 
 These limits are our recommendation, rounded from the measurements: the 1 s
 and 10 s caps are the p90 of the most actions a player takes in that window of
@@ -109,11 +126,13 @@ out. The command governor in our build of BARb's library
 ([ADR 0007](0007-ship-the-model-as-tables-in-a-barb-variant.md)) counts every
 command the bot sends as above, holds the ones that would take an action the
 budget has no room for, and sends them later, in the order they were given.
-Commands to one unit keep their order; a new order that replaces a unit's
-queue replaces the held orders to that unit too, as it would replace them a
-moment after they arrived. The governor also spends the budget evenly rather
-than in bursts, so that a busy bot acts every second or two instead of
-spending a window's cap at once and then waiting for the window to pass.
+When an action fits, the held commands of its kind go with it; each other kind
+waits for an action of its own. Commands to one unit keep their order; a new
+order that replaces a unit's queue replaces the held orders to that unit too,
+as it would replace them a moment after they arrived. The governor also spends
+the budget evenly rather than in bursts, so that a busy bot acts every second
+or two instead of spending a window's cap at once and then waiting for the
+window to pass.
 
 ### Skill band
 
@@ -136,8 +155,10 @@ The bot plays as the 30-40 band by default, a strong player, as the README's
   `reason8 bot check` checks the governor's log of every game (no command
   lost, every window kept) and counts the bot's commands in its replay the
   same way as a player's (`reason8.analysis.apm.ActionCounter`; the
-  `analysis apm` command itself leaves out games with bots). In a headless
-  game that runs many times faster than real time the replay records an AI's
+  `analysis apm` command itself leaves out games with bots). A replay doesn't
+  say when a unit was finished, so there the frame of a unit's first command
+  stands in for it, for the bot as for players' widgets. In a headless game
+  that runs many times faster than real time the replay records an AI's
   commands up to a second of game time after they were sent, unevenly, which
   moves a few actions across the edges of the windows; the replay is a
   cross-check there, and the governor's log is the measure
@@ -146,7 +167,8 @@ The bot plays as the 30-40 band by default, a strong player, as the README's
   is learned separately, as part of the action budget.
 - BARb already sends commands that a person would leave to widgets (formation
   moves, queue clean-up). They count against the budget, as widget commands
-  count in the measured figure.
+  count in the measured figure; the settings it gives a new unit don't, as a
+  widget's don't.
 - Revisit the numbers if the counting changes (BAR's gadget or the parser), if
   a check against BAR's own in-game APM shows `all` to be off, or if the bot
   turns out unable to play at all within its band's budget.
