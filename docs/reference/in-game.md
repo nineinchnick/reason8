@@ -37,9 +37,11 @@ ships with BAR, and the scripts mentioned here.
   learned one of
   [ADR 0019](../decisions/0019-first-model-decides-each-builders-next-order.md):
   our library evaluates its trees and computes its inputs from the live game,
-  the same inputs the decision table has, checked against the state export. In
-  two 8v8 games it decided 93% and 86% of the orders; its economy at 8:00 is
-  still weaker than the openings', so the option is off by default
+  the same inputs the decision table has, checked against the state export. An
+  order turns into work or is left to BARb once: in an 8v8 game 8% of the
+  decisions ended at once, from 67% before
+  ([Orders that turn into work](#orders-that-turn-into-work)). Its economy at
+  8:00 is still weaker than the openings', so the option is off by default
   ([The learned model's orders](#the-learned-models-orders)).
 - **The openings' model does not run inside the game.** For openings its
   output is known before the game starts, so it is exported to a data file and
@@ -1223,11 +1225,12 @@ ones the decision table has: all 240 logged decisions of the game with
 `builder_v1` and 190 of 191 with `builder_v1_no_skill` gave exactly the row
 computed again from the state export. No script error, and every team kept the
 action budget. Its economy at 8:00 is weaker than the openings': 11.0 and 12.3
-metal income against 13.1, with one extractor fewer. One finding holds it
-back: about half the model's orders end at once, mostly `assist` and
-extractors for the commander, and the builder is idle again within half a
-second. That is how BARb's tasks carry the orders out, not the model, and it
-is the next thing to fix.
+metal income against 13.1, with one extractor fewer. One finding held it back:
+about half the model's orders ended at once, mostly `assist` and extractors
+for the commander, and the builder was idle again within half a second. That
+was how BARb's tasks carried the orders out, not the model; it is fixed in
+[Orders that turn into work](#orders-that-turn-into-work), and these games
+were played before.
 
 10-minute 8v8 games on Supreme Isthmus, seed 1, Reason8 as Armada against
 stock BARb as Cortex, one game per row, one at a time on a machine running six
@@ -1294,6 +1297,103 @@ its trees and then each tree alone. On Windows `test_trees.exe` read the file
 over WSL's file share, which makes its time an upper bound; its memory is not
 measured there. A decision walks all 28,900 trees and takes 1.7 ms, on a
 machine running six other engines.
+
+### Orders that turn into work
+
+**Summary.** The model's orders now turn into work or are left to BARb once.
+In an 8v8 game with `builder_v1`, 8% of the decisions ended at once, against
+67% before; nearly every build order ends with the structure built. Most
+orders that had ended at once were not ended at all: BARb asks the script for
+a task while it reevaluates the task a builder is on, and the model was
+consulted again each time, so a builder walking to its site got the same order
+over and over. The model is now consulted only for an idle builder. More
+decisions are left to BARb (37% against 5%): jobs with nothing to do, mostly
+`repair` and `reclaim` by rezbots and turrets, held back for 30 s and then
+left to BARb. The economy at 8:00 is closer to the openings' but still below
+it: 10.9 metal income against 9.4 before and 12.4 with the openings, 3.8
+extractors against 2.9 and 4.4. One game each: a first look, not a ranking.
+
+What the orders that ended at once were, in the game before the change, from
+the end of every order's task that the log now has:
+
+`assist`, factories, other structures, extractors
+: The builder was still on the task. BARb's `IBuilderTask::Reevaluate` asks
+  the script for a task for a builder on its way to the site, and all the time
+  for one guarding a factory; each call consulted the model, logged a
+  decision, entered the order history and enqueued a new task nobody took. Of
+  207 `assist` orders, 176 were such repeats, of 90 factories 83, of 211 other
+  structures 101 and of 88 extractors 57. Labs chosen again while the first
+  was being built came from the same cause.
+
+Extractors
+: Besides the repeats, 9 tasks ended unfinished within a second: the spot was
+  in an ally's area, where BARb's extractor task drops itself, or taken.
+  BARb's fallback could also give an energy, reclaim or converter task in
+  place of an extractor.
+
+Jobs
+: `repair`, `reclaim` and `resurrect` often had no target near the builder (19
+  of 39 not given). A construction turret's job went the way of a factory's
+  order and was never given (17). A rezbot's reclaim often ends within a few
+  frames: BARb's reclaim task drops itself at the builder's first idle event
+  (`IReclaimTask::OnUnitIdle`); why the rezbot is idle again so soon is not
+  known. Neither a single feature nor an area around the builder kept it
+  reclaiming, so the bot keeps BARb's choice of target and holds the answer
+  back.
+
+What came of the idle builders, the 8 Reason8 teams together:
+
+| outcome                                         | before | after |
+| ----------------------------------------------- | -----: | ----: |
+| decisions                                       |    682 |   446 |
+| ended at once                                   |    458 |    34 |
+| left to BARb                                    |     36 |   167 |
+| of them, could not be given                     |     36 |   111 |
+| of them, every likely answer held back          |      0 |    56 |
+| orders carried out (in the order history)       |        |   245 |
+| decisions whose inputs were logged and compared |    172 |   116 |
+| of them, the same row as from the state export  |    172 |   116 |
+
+By kind of answer, chosen / could not be given / ended at once:
+
+| answer          |     before |    after |
+| --------------- | ---------: | -------: |
+| `assist`        | 207/13/174 |   69/8/3 |
+| `reclaim`       |     20/9/6 | 62/36/12 |
+| `repair`        |    12/12/0 |  53/53/0 |
+| `resurrect`     |      7/2/2 | 48/14/13 |
+| extractor       |    88/0/75 |   33/0/1 |
+| factory         |    90/0/83 |    9/0/0 |
+| other structure |  211/0/117 |   44/0/0 |
+| unit            |     47/0/1 |   72/0/5 |
+
+The teams' economy at 8:00 from the state export, the mean of the 8 Reason8
+teams, and of the 8 stock BARb teams they played against:
+
+| game                 | metal income | extractors | BARb's metal income | BARb's extractors |
+| -------------------- | -----------: | ---------: | ------------------: | ----------------: |
+| openings (default)   |         12.4 |        4.4 |                14.2 |               4.5 |
+| `builder_v1`, before |          9.4 |        2.9 |                14.3 |               4.8 |
+| `builder_v1`, after  |         10.9 |        3.8 |                15.4 |               5.0 |
+
+- 10-minute 8v8 games on Supreme Isthmus, seed 1, Reason8 as Armada against
+  stock BARb as Cortex, played one at a time on a machine running six other
+  engines; each game played again with the state export for the check. The
+  model draws its orders at random, so the two model games went different
+  ways: the second made more rezbots and turrets, whose jobs are most of what
+  is left to BARb.
+- The model's orders ended at first contact, from 3:04 to the end of the
+  window before and from 1:25 after, so the economy at 8:00 is partly BARb's.
+- After the change, every logged decision's inputs were the row computed again
+  from the state export: the order history counts what was carried out the
+  same way in the library and in the check.
+- The extractors chosen all went to usual spots (32 of 32); BARb's spot was
+  not needed.
+- The lobby case, two teams of four on a map of 16 positions with the bots
+  away from the positions, cannot be set up with `reason8 bot game`: the map
+  list has no layout for two teams of four on Supreme Isthmus. The usual spots
+  are now measured from the AI's own start, which is where the lobby game went
+  wrong.
 
 ### The model's orders, with the stand-in
 
