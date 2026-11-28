@@ -220,12 +220,13 @@ Kind
   shift-queued `MOVE` are two, as they are two clicks.
 
 Action
-: A frame that counts as an action under ADR 0008's rule
-  (`reason8.analysis.apm.ActionCounter`), counting either only the player's
-  clicked commands (`COMMAND` packets, to the current selection) or all of
-  their commands, widgets' included (`all` in [`apm.md`](apm.md), the figure
-  the budget is drawn from). Every number below is per action and counts the
-  commands of the action's frame, clicked ones only or all.
+: A frame that counts as an action under the rule ADR 0008 had then, one
+  action a frame (`reason8.analysis.apm.ActionCounter` without kinds),
+  counting either only the player's clicked commands (`COMMAND` packets, to
+  the current selection) or all of their commands, widgets' included (`all` in
+  [`apm.md`](apm.md), the figure the budget is drawn from). Every number below
+  is per action and counts the commands of the action's frame, clicked ones
+  only or all.
 
 Action span
 : An action and the commands of the frames after it until the next action:
@@ -394,11 +395,57 @@ action is 2.1 to 18.4 (2.1, 2.5, 6.3, 6.6 and 8.7 in the first game; 10.8,
   by 1% (clicked) and 18% (with widgets), while the bot's would rise by about
   4.8 times in real time.
 
+## Under the count by kind of order
+
+ADR 0008 now counts each kind of order in a frame as an action, and leaves out
+the commands a unit gets in the frame it is finished, as BAR's gadget does;
+the bands were rounded again from players' actions counted the same way
+([`apm.md`](apm.md#the-count-by-kind-of-order)), the 30-40 band's to 14
+actions in any second, 60 in any 10 s, 40 in any minute of the first two, 90
+in any later minute and 250 in any 5 minutes. The governor counts this way:
+when one action fits, it sends the held commands of that kind, and every other
+kind waits for an action of its own.
+
+One game, to see that it works: 8v8 on Supreme Isthmus, seed 1, 10 game
+minutes, headless at 5.3 times real time, eight Reason8 teams (with the model
+deciding idle builders' next orders, ADR 0019: 319 decisions logged) against
+eight `BARbLimited`, both on this library.
+
+| per team-game, median (range)  | Reason8            | `BARbLimited`      |
+| ------------------------------ | ------------------ | ------------------ |
+| actions a minute               | 39.5 (26.2–41.8)   | 40.7 (37.8–41.9)   |
+| commands sent per action       | 3.4                | 3.8                |
+| commands held at least a frame | 82% (34–88%)       | 85% (75–90%)       |
+| replaced while held            | 33%                | 36%                |
+| longest wait                   | 212 frames (7.1 s) | 265 frames (8.8 s) |
+
+- **The budget holds and nothing is lost.** `reason8 bot check` passed the
+  governor of all 16 teams: every command accounted for, none dropped, every
+  window kept. The most actions in any window were 9 in a second, 34 in a
+  minute of the first two, 89 in a later minute and 249 in 5 minutes, against
+  caps of 14, 40, 90 and 250. The orders that follow the model's decisions go
+  through the governor like the rest: the model gives BARb a task, and BARb
+  gives the unit commands through the governed callback.
+- **The bot waits longer.** In the 8v8 games under the old count three
+  quarters of the commands were held, 8% were replaced while held and none
+  waited over 59 frames (2 s). Now 82% are held, a third are replaced by a
+  newer order to the same unit before they go, and the longest wait is 7 s at
+  the median and 11.5 s at most. From minute 6 on, Reason8's teams act about
+  37 times a minute, the pace the 5-minute budget allows, while BARb gives
+  each of them hundreds of commands a minute (team 1: 290 to 800).
+- **The replay overcounts more.** Counted from the replay, Reason8's teams
+  took 12 to 25% more actions than their governors logged (team 1: 469 against
+  418), and the replay goes over the 5-minute cap for seven of them. Most of
+  the difference is the settings BARb gives a new unit (`AUTOREPAIRLEVEL`,
+  `ONOFF`): the governor leaves them out in the frame the unit is finished,
+  while the headless replay records them frames after the unit's first
+  command, which is all the replay can take for the frame it was finished.
+
 ## Not measured
 
-- Whether the bot's actions would still fit its band's budget if each kind of
-  order in a frame counted as an action, and what holding the rest would do to
-  its play.
+- What holding longer under the count by kind of order costs in play: that
+  needs paired games, Reason8 under the new count against the same AI under
+  the old one.
 - Whether BARb's own timeouts on tasks (a builder whose order is held for two
   seconds) change what it does later; the economy measures of
   [`evaluation.md`](../reference/evaluation.md#our-barb-library) cover the
