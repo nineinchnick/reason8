@@ -13,6 +13,7 @@ What the builders, the jobs and the context add to prediction is measured in
 [`context.md`](../research/context.md). Code: `reason8/context/`.
 
 ```sh
+uv run reason8 context sample                  # once: which games
 uv run reason8 context build                   # -> data/datasets/context_v2/
 uv run reason8 context check                   # the join, on 20 games
 uv run reason8 context measure --split test    # docs/research/context.md
@@ -34,17 +35,23 @@ flowchart LR
     units[("unit files<br/>in data/bar")]
     table[("context_v2<br/>decision table")]
     build["reason8 context build"]
-    sample -- "reason8 headless batch" --> state
+    draw["reason8 context sample"]
+    draw --> sample
+    sample -- "reason8 headless list,<br/>headless batch" --> state
+    openings --> draw
     sample & openings & tables & state & units --> build
     build --> table
 ```
 
 The sample
-: `data/logs/context-sample.parquet`: 3,000 games drawn with a fixed seed from
-  the `ok` games of `openings_v2` (1,350 Supreme Isthmus, 1,350 All That
-  Glitters, 300 Rosetta), with `match_id`, `replay_file_name`, `map` and
-  `split`. `reason8 headless batch` re-simulates them, the first 10 minutes of
-  each.
+: `data/logs/context-sample.parquet`: 3,000 games drawn by
+  `reason8 context sample` with seed 48 from the `ok` games of `openings_v2`
+  (1,350 Supreme Isthmus, 1,350 All That Glitters, 300 Rosetta), leaving out
+  the games earlier batches had re-simulated, with `match_id`,
+  `replay_file_name`, `map` and `split`. `context-sample.json` next to it says
+  how a sample was drawn (the rule is in `reason8 context sample --help`).
+  `reason8 headless list` writes their replays for `reason8 headless batch`,
+  which re-simulates them, the first 10 minutes of each.
 
 The build orders
 : The rows of the opening dataset (`openings_v2`,
@@ -289,11 +296,11 @@ In `data/datasets/context_v2/`:
 
 `manifest.json`
 : When and from which code it was built, the source dataset (name, build time,
-  commit), the sample file and its SHA-256, the split rule, when the state is
-  taken, the unit types, the answers (jobs, job commands, builder kinds), the
-  groups with their columns, the columns that hold names, and the counts of
-  games, openings, decisions by kind and by number of builders, rows and
-  steps.
+  commit), the sample file and its SHA-256 and how it was drawn (`drawn`, when
+  `context sample` drew it), the split rule, when the state is taken, the unit
+  types, the answers (jobs, job commands, builder kinds), the groups with
+  their columns, the columns that hold names, and the counts of games,
+  openings, decisions by kind and by number of builders, rows and steps.
 
 `README.md`
 : The counts, for a reader of the data directory.
