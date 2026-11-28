@@ -13,10 +13,12 @@ uv run reason8 analysis apm --report    # every table this is drawn from
 
 The pass reads the commands, selections and events tables of the parsed
 replays ([`replay-format.md`](../reference/replay-format.md#tables)), a day
-per process (`--jobs`, 4 by default; each holds one day of commands). On the
-two weeks of the tables sample (2,830 replays) it takes 325 s with 3
-processes, where reading the JSON documents took 383 s with 4, with the same
-tables. The numbers below were measured from the JSON documents.
+per process (`--jobs`, 4 by default), 20 replays at a time. On the two weeks
+of the tables sample (2,830 replays) it took 325 s with 3 processes, where
+reading the JSON documents took 383 s with 4. The numbers below were measured
+from the tables of the whole slice, counting each kind of order in a frame
+([below](#what-counts-as-an-action)): about 3.5 hours with 3 processes on a
+machine that was also playing games, within 8 GB.
 
 The limits recommended for the bot are in ADR 0008; this document holds the
 measurements.
@@ -24,18 +26,23 @@ measurements.
 ## Summary
 
 People act at a slow, steady rate: a typical player takes 13 actions a minute
-that they clicked themselves, and 36 once the commands their widgets send are
-added (close to the APM BAR shows in game). Better players are busier, not
-faster at the peak: skill doubles the rate per minute (averaged over a game,
-11 to 24 clicked actions a minute from the lowest band to the highest, 25 to
-56 with widgets), while the most clicked actions in any 10 seconds has a p90
-of 22 to 23 in every band. Clicking peaks between minutes 2 and 10 and slows
-late in the game; widget commands keep growing with the army.
+that they clicked themselves, and 35 once the commands their widgets send are
+added. Better players are busier, not faster at the peak: skill doubles the
+rate per minute (averaged over a game, 11 to 24 clicked actions a minute from
+the lowest band to the highest, 24 to 56 with widgets), while the most clicked
+actions in any 10 seconds has a p90 of 23 to 24 in every band. Clicking peaks
+between minutes 2 and 10 and slows late in the game; widget commands keep
+growing with the army.
 
-An action is counted the way BAR counts it, so a dragged line of buildings or
-a held right button is one action. Counting every click instead doubles the
-p90 (68 a minute instead of 34). The counts are not yet checked against BAR's
-own in-game number.
+An action is one kind of order in a frame, so a dragged line of buildings, a
+formation move or a held right button is one action, while a move and a
+shift-queued move are two. Counting every click instead doubles the p90 (68 a
+minute instead of 35). Counting each kind of order rather than each frame, as
+BAR's own counter does, changes the rates per minute by a few percent and
+raises the short bursts: the p90 of the most actions with widgets in any
+second goes from 11 to 13, in any 10 seconds from 47 to 56
+([The count by kind of order](#the-count-by-kind-of-order)). The counts are
+not yet checked against BAR's own in-game number.
 
 Used in [ADR 0008](../decisions/0008-play-under-human-like-limits.md): the
 bot's action budget per skill band is rounded from these measurements.
@@ -61,17 +68,31 @@ and widgets alike, and it counts:
 - a command only if at least one of its units got no command in the 7 frames
   before; every command marks its units for the next 7 frames ("don't count
   severe command spam");
-- not commands to drones or to units still being built, and not the first
-  command of a unit just finished (its factory's rally orders).
+- not commands to drones or to units still being built, nor the commands a
+  unit gets in the frame it is finished (`UnitFinished`, so the settings a
+  widget gives a new unit at once).
 
-We count the same way, per player: a `COMMAND` packet goes to the player's
+We count per player as ADR 0008 says: a `COMMAND` packet goes to the player's
 current selection (the last `select` event, pregame ones included), an
-`AICOMMAND`/`AICOMMANDS` packet to the units it lists. The last rule needs the
-game state and is left out; it touches only commands sent in the frame a unit
-is finished. With the rules above a dragged line of buildings is one action,
-and so is a held right button (each repeat comes within 7 frames of the one
-before), which is what ADR 0008 asks for: an action is a step, however many
-orders it holds.
+`AICOMMAND`/`AICOMMANDS` packet to the units it lists, and
+
+- one action for each kind of order in a frame: the command, the unit it
+  builds and its options, whatever its parameters and units. The gadget counts
+  at most one a frame; one frame of a player rarely holds more than one kind
+  (0.6% of clicked actions), and one frame of the bot's command governor often
+  did ([`command-governor.md`](command-governor.md#what-one-action-holds));
+- a command only if at least one of its units got no command in the 7 frames
+  before its frame, as the gadget;
+- not the commands a widget gives a unit in the frame of the unit's first
+  command. The gadget leaves out the commands a unit gets in the frame it is
+  finished (`UnitFinished`), the settings widgets give a new unit; the replay
+  doesn't say when a unit was finished, and the frame of its first command
+  stands in for it. A click is always counted. Drones are not left out.
+
+With these rules a dragged line of buildings is one action, and so are a
+formation move and a held right button (each repeat comes within 7 frames of
+the one before), which is what ADR 0008 asks for: an action is a step, however
+many orders of one kind it holds.
 
 Gex (`Varunda/gex`), which shows APM per player on its match pages, takes it
 from the same gadget: its game-event widget copies the gadget's counting and
@@ -98,7 +119,8 @@ Four counts are kept for every player:
   build priorities, idle modes, factory guard).
 
 `all`
-: Both, counted together: close to BAR's in-game APM.
+: Both, counted together: what the bot's budget is drawn from. BAR's in-game
+  APM counts at most one action a frame and has to be a little lower.
 
 `clicked_raw`
 : `COMMAND` packets, at most one per frame, without the 7-frame rule: closest
@@ -141,36 +163,36 @@ Actions in each whole minute, by the phase of the game the minute is in.
 | phase     |      n | mean | p25 | median | p75 | p90 | p99 |
 | --------- | -----: | ---: | --: | -----: | --: | --: | --: |
 | 0-2 min   | 1.37 M |   11 |   3 |      8 |  15 |  23 |  44 |
-| 2-5 min   | 2.06 M |   20 |  10 |     17 |  27 |  40 |  67 |
-| 5-10 min  | 3.41 M |   21 |  10 |     17 |  29 |  42 |  70 |
-| 10-15 min | 3.09 M |   18 |   9 |     15 |  25 |  37 |  64 |
-| 15-20 min | 2.52 M |   16 |   7 |     13 |  22 |  33 |  59 |
-| 20-30 min | 3.25 M |   15 |   6 |     12 |  19 |  30 |  56 |
+| 2-5 min   | 2.06 M |   20 |  10 |     17 |  27 |  40 |  68 |
+| 5-10 min  | 3.41 M |   21 |  10 |     18 |  29 |  42 |  71 |
+| 10-15 min | 3.09 M |   19 |   9 |     15 |  25 |  37 |  65 |
+| 15-20 min | 2.52 M |   16 |   7 |     13 |  22 |  33 |  60 |
+| 20-30 min | 3.25 M |   15 |   6 |     12 |  19 |  30 |  57 |
 | 30+ min   | 2.42 M |   12 |   5 |     10 |  16 |  25 |  51 |
-| all       | 18.1 M |   17 |   7 |     13 |  22 |  34 |  62 |
+| all       | 18.1 M |   17 |   7 |     13 |  23 |  35 |  63 |
 
 `all`:
 
 | phase     |      n | mean | p25 | median | p75 | p90 | p99 |
 | --------- | -----: | ---: | --: | -----: | --: | --: | --: |
-| 0-2 min   | 1.37 M |   20 |  11 |     18 |  26 |  36 |  63 |
-| 2-5 min   | 2.06 M |   36 |  22 |     31 |  45 |  62 | 100 |
-| 5-10 min  | 3.41 M |   43 |  26 |     39 |  57 |  75 | 114 |
-| 10-15 min | 3.09 M |   44 |  26 |     40 |  57 |  76 | 117 |
-| 15-20 min | 2.52 M |   45 |  25 |     40 |  59 |  82 | 138 |
-| 20-30 min | 3.25 M |   46 |  23 |     38 |  61 |  89 | 164 |
-| 30+ min   | 2.42 M |   56 |  21 |     40 |  74 | 122 | 257 |
-| all       | 18.1 M |   43 |  22 |     36 |  56 |  80 | 159 |
+| 0-2 min   | 1.37 M |   19 |  10 |     16 |  25 |  35 |  61 |
+| 2-5 min   | 2.06 M |   35 |  21 |     30 |  45 |  63 | 101 |
+| 5-10 min  | 3.41 M |   43 |  25 |     39 |  57 |  76 | 116 |
+| 10-15 min | 3.09 M |   43 |  25 |     39 |  57 |  76 | 120 |
+| 15-20 min | 2.52 M |   45 |  23 |     39 |  59 |  83 | 147 |
+| 20-30 min | 3.25 M |   46 |  21 |     37 |  60 |  91 | 180 |
+| 30+ min   | 2.42 M |   52 |  18 |     35 |  66 | 114 | 259 |
+| all       | 18.1 M |   42 |  21 |     35 |  55 |  80 | 163 |
 
-`widget` on its own has a median of 19 (p90 62, p99 147), growing from 9 in
-the first two minutes to 27 after minute 30 (p99 248). `clicked_raw` has a
+`widget` on its own has a median of 18 (p90 61, p99 149), growing from 7 in
+the first two minutes to 21 after minute 30 (p99 247). `clicked_raw` has a
 median of 17 (p90 68, p99 152), and its p90 is twice that of `clicked` from
 minute 2 to minute 15 (75 to 88 against 37 to 42): that is where holding the
 right button and click spam are.
 
 The first minute holds the pregame queue, which the widget sends in frames 5
-to 13 (up to 9 actions). In minute 0 the median is 5 `clicked`, 8 `widget` and
-13 `all` actions. 10.5% of the minutes in the first two minutes have no
+to 13 (up to 9 actions). In minute 0 the median is 5 `clicked`, 6 `widget` and
+11 `all` actions. 10.5% of the minutes in the first two minutes have no
 `clicked` action, 0.6 to 1.9% of those from minute 2 to 20, 3.0% from 20 to 30
 and 5.6% after that (players away from the keyboard, or waiting).
 
@@ -180,23 +202,23 @@ Actions per minute, every minute of the game:
 
 | skill band | clicked p25 | median | p75 | p90 | p99 | all p25 | median | p75 | p90 | p99 |
 | ---------- | ----------: | -----: | --: | --: | --: | ------: | -----: | --: | --: | --: |
-| below 10   |           5 |      9 |  15 |  25 |  54 |      14 |     22 |  34 |  51 | 101 |
-| 10-20      |           6 |     11 |  18 |  28 |  57 |      18 |     28 |  43 |  64 | 131 |
-| 20-30      |           8 |     13 |  22 |  33 |  61 |      24 |     38 |  57 |  82 | 166 |
-| 30-40      |          10 |     18 |  28 |  40 |  67 |      31 |     47 |  67 |  91 | 181 |
-| 40 and up  |          13 |     21 |  33 |  45 |  70 |      37 |     55 |  75 |  97 | 181 |
-| all        |           7 |     13 |  22 |  34 |  62 |      22 |     36 |  56 |  80 | 159 |
+| below 10   |           5 |      9 |  15 |  25 |  54 |      13 |     21 |  33 |  50 | 103 |
+| 10-20      |           6 |     11 |  18 |  29 |  57 |      16 |     27 |  42 |  63 | 132 |
+| 20-30      |           8 |     13 |  22 |  33 |  62 |      22 |     36 |  56 |  81 | 169 |
+| 30-40      |          10 |     18 |  28 |  40 |  68 |      29 |     46 |  66 |  91 | 187 |
+| 40 and up  |          13 |     22 |  33 |  46 |  70 |      36 |     55 |  76 |  99 | 199 |
+| all        |           7 |     13 |  23 |  35 |  63 |      21 |     35 |  55 |  80 | 163 |
 
 Average actions per minute over a player's game, one value per player-game:
 
 | skill band | clicked p25 | median | p75 | p90 | p99 | all p25 | median | p75 | p90 | p99 |
 | ---------- | ----------: | -----: | --: | --: | --: | ------: | -----: | --: | --: | --: |
-| below 10   |         7.8 |     11 |  15 |  20 |  33 |      19 |     25 |  31 |  39 |  59 |
-| 10-20      |         9.4 |     13 |  17 |  23 |  36 |      24 |     31 |  39 |  49 |  75 |
-| 20-30      |          12 |     16 |  21 |  27 |  40 |      32 |     40 |  51 |  62 |  94 |
+| below 10   |         7.8 |     11 |  15 |  20 |  33 |      18 |     24 |  31 |  38 |  57 |
+| 10-20      |         9.5 |     13 |  18 |  23 |  36 |      23 |     30 |  39 |  48 |  72 |
+| 20-30      |          12 |     16 |  21 |  27 |  40 |      31 |     40 |  50 |  62 |  89 |
 | 30-40      |          15 |     20 |  26 |  32 |  46 |      39 |     48 |  59 |  71 | 106 |
-| 40 and up  |          19 |     24 |  30 |  36 |  47 |      46 |     56 |  66 |  77 | 109 |
-| all        |          11 |     16 |  22 |  28 |  42 |      30 |     39 |  51 |  64 |  95 |
+| 40 and up  |          19 |     24 |  30 |  36 |  48 |      46 |     56 |  67 |  79 | 116 |
+| all        |          12 |     16 |  22 |  29 |  42 |      29 |     39 |  51 |  64 |  93 |
 
 ### By skill and phase
 
@@ -207,7 +229,7 @@ Median `clicked` per minute:
 | below 10   |       6 |      11 |       11 |        10 |         9 |         8 |       7 |
 | 10-20      |       7 |      13 |       14 |        12 |        11 |        10 |       8 |
 | 20-30      |       8 |      16 |       17 |        15 |        13 |        12 |      10 |
-| 30-40      |      10 |      22 |       23 |        19 |        17 |        15 |      13 |
+| 30-40      |      10 |      22 |       23 |        20 |        17 |        15 |      13 |
 | 40 and up  |      13 |      28 |       27 |        23 |        20 |        18 |      15 |
 
 p90 of `clicked` per minute:
@@ -216,29 +238,29 @@ p90 of `clicked` per minute:
 | ---------- | ------: | ------: | -------: | --------: | --------: | --------: | ------: |
 | below 10   |      17 |      28 |       31 |        27 |        24 |        22 |      19 |
 | 10-20      |      19 |      32 |       36 |        31 |        28 |        25 |      22 |
-| 20-30      |      22 |      37 |       40 |        36 |        32 |        29 |      25 |
-| 30-40      |      26 |      45 |       47 |        42 |        37 |        34 |      30 |
-| 40 and up  |      31 |      54 |       50 |        45 |        40 |        38 |      34 |
+| 20-30      |      22 |      37 |       41 |        36 |        32 |        29 |      26 |
+| 30-40      |      27 |      46 |       48 |        42 |        37 |        35 |      30 |
+| 40 and up  |      32 |      55 |       51 |        45 |        41 |        39 |      34 |
 
 Median `all` per minute:
 
 | skill band | 0-2 min | 2-5 min | 5-10 min | 10-15 min | 15-20 min | 20-30 min | 30+ min |
 | ---------- | ------: | ------: | -------: | --------: | --------: | --------: | ------: |
-| below 10   |      14 |      21 |       25 |        23 |        23 |        22 |      20 |
-| 10-20      |      16 |      25 |       31 |        30 |        30 |        29 |      29 |
-| 20-30      |      18 |      31 |       39 |        41 |        41 |        41 |      46 |
-| 30-40      |      20 |      39 |       50 |        50 |        51 |        51 |      57 |
-| 40 and up  |      24 |      49 |       60 |        58 |        60 |        59 |      66 |
+| below 10   |      13 |      21 |       24 |        23 |        22 |        21 |      18 |
+| 10-20      |      15 |      24 |       30 |        30 |        29 |        28 |      25 |
+| 20-30      |      16 |      30 |       39 |        41 |        40 |        39 |      39 |
+| 30-40      |      19 |      39 |       50 |        50 |        50 |        49 |      51 |
+| 40 and up  |      23 |      49 |       60 |        58 |        60 |        59 |      60 |
 
 p90 of `all` per minute:
 
 | skill band | 0-2 min | 2-5 min | 5-10 min | 10-15 min | 15-20 min | 20-30 min | 30+ min |
 | ---------- | ------: | ------: | -------: | --------: | --------: | --------: | ------: |
-| below 10   |      26 |      41 |       50 |        48 |        51 |        56 |      67 |
-| 10-20      |      30 |      48 |       60 |        59 |        64 |        72 |      94 |
-| 20-30      |      35 |      59 |       72 |        75 |        83 |        92 |     131 |
-| 30-40      |      41 |      72 |       84 |        86 |        95 |       103 |     154 |
-| 40 and up  |      48 |      85 |       93 |        92 |       102 |       112 |     166 |
+| below 10   |      25 |      41 |       51 |        49 |        52 |        56 |      62 |
+| 10-20      |      29 |      48 |       61 |        60 |        65 |        72 |      86 |
+| 20-30      |      34 |      59 |       73 |        76 |        84 |        94 |     123 |
+| 30-40      |      40 |      72 |       85 |        86 |        96 |       105 |     146 |
+| 40 and up  |      46 |      86 |       94 |        94 |       106 |       116 |     162 |
 
 Better players click more in every phase, most of all from minute 2 to 10,
 when they place buildings and send out the first units. The gap in `all`
@@ -252,47 +274,87 @@ game, one value per player-game. Median:
 
 | skill band | clicked 1 s | 10 s | 60 s | all 1 s | 10 s | 60 s | clicked_raw 1 s | 10 s |
 | ---------- | ----------: | ---: | ---: | ------: | ---: | ---: | --------------: | ---: |
-| below 10   |           4 |   14 |   35 |       6 |   20 |   65 |               7 |   28 |
-| 10-20      |           4 |   15 |   40 |       7 |   24 |   79 |               7 |   33 |
-| 20-30      |           4 |   15 |   45 |       7 |   28 |   96 |               8 |   38 |
-| 30-40      |           4 |   16 |   52 |       7 |   28 |  103 |               9 |   42 |
-| 40 and up  |           4 |   17 |   58 |       7 |   29 |  109 |              10 |   44 |
-| all        |           4 |   15 |   46 |       7 |   26 |   92 |               8 |   38 |
+| below 10   |           4 |   14 |   35 |       7 |   22 |   68 |               7 |   28 |
+| 10-20      |           4 |   15 |   40 |       8 |   25 |   82 |               7 |   33 |
+| 20-30      |           4 |   16 |   46 |       9 |   30 |  100 |               8 |   38 |
+| 30-40      |           4 |   16 |   52 |       9 |   30 |  106 |               9 |   42 |
+| 40 and up  |           4 |   17 |   59 |       9 |   31 |  113 |              10 |   44 |
+| all        |           4 |   16 |   46 |       8 |   28 |   96 |               8 |   38 |
 
 p90:
 
 | skill band | clicked 1 s | 10 s | 60 s | all 1 s | 10 s | 60 s | clicked_raw 1 s | 10 s |
 | ---------- | ----------: | ---: | ---: | ------: | ---: | ---: | --------------: | ---: |
-| below 10   |           5 |   23 |   67 |       9 |   35 |  118 |              11 |   52 |
-| 10-20      |           5 |   23 |   71 |      10 |   42 |  146 |              12 |   55 |
-| 20-30      |           5 |   23 |   74 |      11 |   50 |  178 |              14 |   59 |
-| 30-40      |           5 |   23 |   77 |      11 |   49 |  179 |              14 |   61 |
-| 40 and up  |           5 |   22 |   80 |      11 |   48 |  178 |              15 |   62 |
-| all        |           5 |   23 |   75 |      11 |   47 |  168 |              14 |   59 |
+| below 10   |           5 |   23 |   67 |      11 |   38 |  127 |              11 |   52 |
+| 10-20      |           5 |   24 |   71 |      12 |   49 |  160 |              12 |   55 |
+| 20-30      |           5 |   23 |   74 |      13 |   59 |  200 |              14 |   59 |
+| 30-40      |           5 |   23 |   78 |      14 |   59 |  201 |              14 |   61 |
+| 40 and up  |           5 |   23 |   81 |      14 |   60 |  205 |              15 |   62 |
+| all        |           5 |   23 |   75 |      13 |   56 |  186 |              14 |   59 |
 
 p99:
 
 | skill band | clicked 1 s | 10 s | 60 s | all 1 s | 10 s | 60 s | clicked_raw 1 s | 10 s |
 | ---------- | ----------: | ---: | ---: | ------: | ---: | ---: | --------------: | ---: |
-| below 10   |           5 |   32 |  109 |      13 |   56 |  202 |              25 |   86 |
-| 10-20      |           5 |   32 |  111 |      14 |   69 |  265 |              24 |   81 |
-| 20-30      |           5 |   31 |  109 |      15 |   79 |  330 |              24 |   85 |
-| 30-40      |           5 |   31 |  112 |      15 |   81 |  355 |              23 |   82 |
-| 40 and up  |           5 |   29 |  103 |      15 |   81 |  374 |              25 |   84 |
-| all        |           5 |   31 |  110 |      14 |   77 |  321 |              24 |   83 |
+| below 10   |           7 |   32 |  109 |      15 |   65 |  224 |              25 |   86 |
+| 10-20      |           9 |   32 |  111 |      17 |   82 |  296 |              24 |   81 |
+| 20-30      |          10 |   31 |  110 |      19 |  101 |  378 |              24 |   85 |
+| 30-40      |          12 |   31 |  112 |      20 |  110 |  421 |              23 |   82 |
+| 40 and up  |          12 |   29 |  104 |      21 |  122 |  463 |              25 |   84 |
+| all        |          10 |   31 |  110 |      19 |   99 |  371 |              24 |   83 |
 
-The 1-second `clicked` figure is set by the counting rule, not by the player:
-commands to the same units count once every 7 frames, so one selection gets at
-most 5 actions a second. Only 0.2% of the player-games go above 5 (the highest
-is 17). Over 10 seconds every band peaks at about 15 actions (p90 23), and the
-best players are no faster at the peak; what skill changes is how often
-players are near it. The 60-second window does grow with skill, as the
-per-minute rates do.
+The 1-second `clicked` figure is set mostly by the counting rule, not by the
+player: commands to the same units count once every 7 frames, so one selection
+gets at most 5 actions a second unless a frame holds several kinds of order.
+6.6% of the player-games go above 5 (the highest is 39), against 0.2% when
+each frame counted once. Over 10 seconds every band peaks at 14 to 17 actions
+(p90 23 to 24), and the best players are no faster at the peak; what skill
+changes is how often players are near it. The 60-second window does grow with
+skill, as the per-minute rates do.
 
 Within one minute the bursts are smaller. The most `clicked` actions in any 10
 seconds that start in a minute has a median of 6 (p90 14, p99 22), and of
-`all` 13 (p90 25, p99 48); `all` in any second of a minute has a median of 4
-and a p99 of 11.
+`all` 13 (p90 27, p99 55); `all` in any second of a minute has a median of 4
+and a p99 of 13.
+
+## The count by kind of order
+
+Until 2026-11-28 this document counted at most one action a frame, as BAR's
+gadget does, and every command to a unit as the gadget would but for the frame
+a unit is finished. ADR 0008 now counts each kind of order in a frame and
+leaves out a new unit's first commands
+([What counts as an action](#what-counts-as-an-action)). The same games,
+counted both ways:
+
+| per player-minute or player-game, all bands |   each frame |    each kind |
+| ------------------------------------------- | -----------: | -----------: |
+| `clicked` a minute, median (p90)            |      13 (34) |      13 (35) |
+| `widget` a minute, median (p90)             |      19 (62) |      18 (61) |
+| `all` a minute, median (p90, p99)           | 36 (80, 159) | 35 (80, 163) |
+| `all` a minute in the first 2 min, median   |           18 |           16 |
+| `all` a minute after 30 min, median         |           40 |           35 |
+| `all` averaged over a game, median          |           39 |           39 |
+| most `all` in any 1 s, p90                  |           11 |           13 |
+| most `all` in any 10 s, p90                 |           47 |           56 |
+| most `all` in any 60 s, p90                 |          168 |          186 |
+| player-games with over 5 `clicked` in 1 s   |         0.2% |         6.6% |
+
+- **Rates a minute hardly move.** The two changes pull against each other:
+  frames with several kinds of order add actions, and the commands widgets
+  give new units take them away. The second wins where many units are finished
+  at once, in the first two minutes and late in the game; the medians of the
+  game average are the same in every band but the two lowest, which lose one
+  (25 to 24, 31 to 30).
+- **Short bursts grow.** A burst is where several kinds land in one frame: a
+  click with the widget's follow-up, or widget housekeeping of many units at
+  once. The p90 of the most actions in any second goes from 9, 10, 11, 11 and
+  11 in the five bands to 11, 12, 13, 14 and 14, in any 10 seconds from 35,
+  42, 50, 49 and 48 to 38, 49, 59, 59 and 60.
+
+ADR 0008's bands are rounded from these figures. With the count by kind their
+1-second and 10-second caps rise (the 30-40 band's from 11 and 50 to 14 and
+60), the 40-and-up band's cap on a minute of the first two falls from 50 to 45
+(its p90 from 48 to 46), and the other caps stay within rounding.
 
 ## What is left open
 
@@ -300,6 +362,9 @@ and a p99 of 11.
   moves, area commands) and those widgets send on their own. Both are in
   `all`, as in BAR's own counter, so `all` overstates what the player decided
   and `clicked` understates it.
+- **When a unit is finished is guessed** from its first command. A unit that
+  gets no command when it is finished, and a unit id used again after its unit
+  died, are counted as BAR's gadget would not.
 - **Selections are not counted.** A `select` event is a click too (StarCraft's
   APM counts it), but the bot gives orders without selecting.
 - **The skill is the lobby's value before the game**, the same for every
