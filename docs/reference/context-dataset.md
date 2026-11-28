@@ -25,6 +25,20 @@ building it again needs the code of its build (see its manifest).
 
 ## What goes in
 
+```mermaid
+flowchart LR
+    sample[("context-sample.parquet<br/>3,000 games")]
+    openings[("openings_v2<br/>build orders")]
+    tables[("replay tables<br/>job orders, selections")]
+    state[("state tables<br/>game, resources, events")]
+    units[("unit files<br/>in data/bar")]
+    table[("context_v2<br/>decision table")]
+    build["reason8 context build"]
+    sample -- "reason8 headless batch" --> state
+    sample & openings & tables & state & units --> build
+    build --> table
+```
+
 The sample
 : `data/logs/context-sample.parquet`: 3,000 games drawn with a fixed seed from
   the `ok` games of `openings_v2` (1,350 Supreme Isthmus, 1,350 All That
