@@ -179,6 +179,20 @@ def test_check_infolog_counts_per_team(tmp_path):
     assert teams[6]["commander_steps"] == 4
 
 
+def test_check_infolog_reaction_waits(tmp_path):
+    lines = [
+        "team 3: unit 7 idle, answering in 4 s",
+        "team 3: unit 9 idle, answering in 35 s",
+        "team 5: unit 2 idle, answering in 1 s",
+    ]
+    log = write_log(tmp_path, [f"Skirmish AI <Reason8-0.1>: Reason8 opening: {x}" for x in lines])
+    waits = check.check_infolog(log, "Reason8")["reaction_waits_by_team"]
+    assert waits == {
+        3: {"waits": 2, "seconds": 39, "longest_seconds": 35},
+        5: {"waits": 1, "seconds": 1, "longest_seconds": 1},
+    }
+
+
 def test_check_infolog_opening_ended(tmp_path):
     lines = [
         "team 2: side 'armada', map 'M', start 1 2: position P5 (start 1 2), opening 4 of 5, "
