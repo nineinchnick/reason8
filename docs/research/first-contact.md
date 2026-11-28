@@ -28,30 +28,21 @@ table.
 
 ## Summary
 
-- **Sample:** the first 12 minutes of 72 games of the slice, 24 per map, 1,152
-  players, played again headlessly with no desync.
-- **First contact** is the first time a unit of the player other than a scout
-  is damaged by an enemy unit. Its median is 4:08 on All That Glitters, 3:20
-  on Rosetta and 4:40 on Supreme Isthmus; 87%, 90% and 76% of the players have
-  it within 8 minutes.
-- **A third to almost half of an 8-minute opening comes after it:** 33%, 44%
-  and 31% of the build orders of the first 8 minutes.
-- **It depends on the position.** Front positions meet the enemy after 2 to
-  4.5 minutes (the two positions on the isthmus of Supreme Isthmus after 2:05;
-  its two pond positions, also called front, after 7:23), air positions after
-  4 to 5 minutes, sea positions after 4 to 4.5. Tech positions mostly do not
-  within 8 minutes: 29% do on Glitters and 22% on Isthmus. Within a front
-  position the middle half of the players is about 1 to 1.5 minutes apart.
-- **A side** is in contact after about 2 minutes (1:50 to 2:23): somebody's
-  raider has been shot at.
-- **The definition matters by about a minute.** Counting hits given and scouts
-  moves the median 45 to 70 seconds earlier; waiting for the first unit lost
-  or for 500 damage moves it 30 to 65 seconds later. Leaving out commanders
-  shooting at each other changes nothing.
-- **Cutoffs for games that were not re-simulated:** the median of the map and
-  position keeps 53 to 70% of the window's orders; 8 to 11% of what it keeps
-  was ordered after the player's own contact, and it drops 8 to 16% of what
-  was ordered before.
+Players meet the enemy early, so an 8-minute window is too long for an
+opening: a third to almost half of its build orders answer a fight. The first
+time a player's unit other than a scout is hit by an enemy is a median of 4:08
+on All That Glitters, 3:20 on Rosetta and 4:40 on Supreme Isthmus, and 33%,
+44% and 31% of the orders of the first 8 minutes come after it. It depends on
+where the player starts: front positions are hit after 2 to 4.5 minutes, air
+and sea positions after 4 to 5, and most tech positions not within 8. Other
+definitions of contact move the median by about a minute either way. The
+sample is small (72 games, 45 to 51 players per position): enough to tell a
+position hit after 2 minutes from one hit after 4, not for half a minute.
+
+Used in [ADR 0012](../decisions/0012-end-openings-at-first-contact.md): an
+opening ends at the player's first contact by this definition, and in games
+not played again at the median of their map and position, which keeps 8 to 11%
+of orders given after contact and drops 8 to 16% of those given before.
 
 ## Method
 
