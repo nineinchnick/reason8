@@ -40,6 +40,7 @@ void AiMain()  // Initialize config params
 
 void AiUpdate()  // SlowUpdate, every 30 frames with initial offset of skirmishAIId
 {
+	Reason8::Update();  // Reason8: end the opening when it no longer applies
 }
 
 }  // namespace Main

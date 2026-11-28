@@ -14,6 +14,11 @@
  * there is no opening for the side, or the opening is over, they return
  * null/false and BARb's own code decides, as in stock BARb.
  *
+ * The opening ends early, and BARb takes the commander and the factory, when
+ * it no longer applies (EndOpening): when a commander step is not finished
+ * STEP_LIMIT_SECONDS after it was first queued. Update() checks it once a
+ * second, from main.as.
+ *
  * Every decision is logged with the prefix "Reason8 opening:". With our BARb
  * library the live state (live_state.as) is logged too: at every commander
  * step, and every 30 s of game time while units go idle.
@@ -133,10 +138,16 @@ class SOpening {
 
 // A step is skipped after this many failed tries (task aborted, or BARb offered something else)
 const int MAX_TRIES = 5;
+// A commander step not finished this long after it was first queued ends the opening. In
+// human openings on Supreme Isthmus 99% of the gaps between two structure orders are
+// shorter (docs/reference/in-game.md, "When the opening ends").
+const int STEP_LIMIT_SECONDS = 111;
 
 bool isOpeningChosen = false;
+bool isOpeningOver = false;  // ended early (EndOpening): BARb decides for every unit
 SOpening@ opening = null;
 uint commanderStep = 0;
+int stepFrame = -1;  // when the current commander step was first queued
 int tries = 0;
 int retryFrame = 0;  // a failed step is tried again from this frame on
 int stateLoggedStep = -1;  // the commander step the live state was last logged for
@@ -455,6 +466,7 @@ void NextCommanderStep()
 {
 	++commanderStep;
 	tries = 0;
+	stepFrame = -1;
 	@commanderTask = null;
 	if (opening !is null && commanderStep == opening.commander.length())
 		Log("commander steps done at frame " + ai.frame + ", BARb takes over");
@@ -469,7 +481,7 @@ IUnitTask@ MakeCommanderTask(CCircuitUnit@ unit)
 	if (!unit.circuitDef.IsRoleAny(Unit::Role::COMM.mask))
 		return null;
 	SOpening@ plan = GetOpening(unit.GetPos(ai.frame));
-	if (plan is null)
+	if (plan is null || isOpeningOver)
 		return null;
 	if (commanderTask !is null)
 		return commanderTask;  // the commander dropped the current step and is idle again
@@ -483,6 +495,8 @@ IUnitTask@ MakeCommanderTask(CCircuitUnit@ unit)
 		LogState();  // what the step is decided on
 	}
 	while (commanderStep < plan.commander.length()) {
+		if (stepFrame < 0)
+			stepFrame = ai.frame;
 		const string unitName = plan.commander[commanderStep].unit;
 		const Task::BuildType type = plan.commander[commanderStep].type;
 		CCircuitDef@ buildDef = GetOrderedDef(unitName);
@@ -573,7 +587,7 @@ void CommanderTaskRemoved(IUnitTask@ task, bool done)
 bool StartFactoryOpening(CCircuitUnit@ factory)
 {
 	SOpening@ plan = GetOpening(factory.GetPos(ai.frame));
-	if (plan is null || openingFactory !is null || factoryStep > 0)
+	if (plan is null || isOpeningOver || openingFactory !is null || factoryStep > 0)
 		return false;
 
 	const string factoryName = factory.circuitDef.GetName();
@@ -672,6 +686,48 @@ void FactoryRemoved(CCircuitUnit@ unit)
 	Log("factory lost at frame " + ai.frame + ", BARb takes over");
 	@openingFactory = null;
 	@factoryTask = null;
+}
+
+/*
+ * Ends the opening before it is played to the end, because it no longer
+ * applies: BARb takes the commander and the factory. The commander's current
+ * step is aborted (BARb finishes or reclaims a building it had started); the
+ * factory finishes the unit it is making. `reason` is one word, for
+ * `reason8 bot check`; `detail` says what happened.
+ */
+void EndOpening(const string& in reason, const string& in detail)
+{
+	if (isOpeningOver)
+		return;
+	isOpeningOver = true;
+	Log("opening ended at frame " + ai.frame + ", " + reason + ": " + detail
+		+ "; commander steps done " + commanderStep + " of " + opening.commander.length()
+		+ ", factory units done " + factoryStep + " of " + factoryUnits.length()
+		+ "; BARb takes over");
+	IUnitTask@ step = commanderTask;
+	@commanderTask = null;
+	@openingFactory = null;
+	@factoryTask = null;
+	if (step !is null)
+		step.Abort();
+}
+
+/*
+ * Called once a second from main.as. Ends the opening when it no longer
+ * applies. A commander stuck on a step is never idle, so this cannot wait for
+ * the builder hooks.
+ */
+void Update()
+{
+	if (opening is null || isOpeningOver)
+		return;
+	if (commanderStep < opening.commander.length() && stepFrame >= 0
+		&& ai.frame - stepFrame > STEP_LIMIT_SECONDS * SECOND)
+	{
+		EndOpening("step", "step " + (commanderStep + 1) + " "
+			+ opening.commander[commanderStep].unit + " not finished "
+			+ STEP_LIMIT_SECONDS + " s after it was queued");
+	}
 }
 
 }  // namespace Reason8
