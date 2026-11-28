@@ -32,7 +32,9 @@ from reason8.cloud import stack
 from reason8.data import storage
 from reason8.paths import REPO_ROOT
 
-DEFAULT_INSTANCE_TYPES = "m7a.2xlarge,m7i.2xlarge,m6a.2xlarge,m6i.2xlarge"
+# 8 cores without hyper-threading: the types with 8 threads on 4 cores play five games at
+# once a third slower (`docs/reference/cloud.md`)
+DEFAULT_INSTANCE_TYPES = "m7a.2xlarge"
 WAITER_CONFIG = {"Delay": 10, "MaxAttempts": 180}
 NO_UPDATES = "No updates are to be performed"
 

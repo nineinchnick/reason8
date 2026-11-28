@@ -54,6 +54,7 @@ sequenceDiagram
 ```sh
 export REASON8_S3_URI=s3://<bucket>
 uv run reason8 cloud up                     # once, and after each code change
+uv run reason8 cloud content --data-dir data/bar   # engines, games, maps
 uv run reason8 cloud run --list data/workers/context.txt --instances 10 \
     --max-frame 36000 --out-area state-v7
 uv run reason8 cloud status                 # as often as you like
@@ -70,9 +71,16 @@ Each command prints its own details with `--help`.
   which origin must have), waits until the stack is done, prints its outputs,
   the spot quota and how many instances it allows. Options: `--max-instances`
   (the group's cap, 10), `--instance-types` (spot types of the same shape, the
-  default first: m7a.2xlarge, m7i.2xlarge, m6a.2xlarge, m6i.2xlarge),
-  `--engines` (games per instance, 5), `--idle-minutes` (5), `--volume-gib`
-  (100), `--commit`.
+  one the quota and cost are sized by first; m7a.2xlarge by default, which has
+  8 cores without hyper-threading), `--engines` (games per instance, 5),
+  `--idle-minutes` (5), `--volume-gib` (100), `--commit`.
+
+`cloud content`
+: Packs the engines, game versions and maps of a content dir
+  (`--data-dir data/bar`) into one archive in the bucket. A worker unpacks it
+  before its first game and fetches only what it lacks from BAR's servers;
+  without it the first games of every instance wait for those downloads. Run
+  it again after new engines or game versions were fetched.
 
 `cloud run`
 : Queues the games of a list (the format `reason8 headless list` writes and

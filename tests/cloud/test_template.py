@@ -33,7 +33,7 @@ def test_the_group_is_capped_starts_empty_and_runs_spot_only(template):
     assert distribution["OnDemandBaseCapacity"] == 0
     assert distribution["OnDemandPercentageAboveBaseCapacity"] == 0
     assert distribution["SpotAllocationStrategy"] == "price-capacity-optimized"
-    assert template["Parameters"]["InstanceTypes"]["Default"].startswith("m7a.2xlarge,")
+    assert template["Parameters"]["InstanceTypes"]["Default"] == "m7a.2xlarge"
 
 
 def test_nothing_can_reach_the_instances(template):

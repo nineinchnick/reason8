@@ -21,10 +21,11 @@ Parameters:
     Description: The most instances the group may run at once (its MaxSize).
   InstanceTypes:
     Type: CommaDelimitedList
-    Default: m7a.2xlarge,m7i.2xlarge,m6a.2xlarge,m6i.2xlarge
+    Default: m7a.2xlarge
     Description: >-
       Spot instance types of the same shape (8 vCPUs, 32 GiB); the first one
-      is the one `reason8 cloud` sizes the quota and the cost by.
+      is the one `reason8 cloud` sizes the quota and the cost by. The default
+      has 8 cores without hyper-threading.
   EnginesPerInstance:
     Type: Number
     Default: 5

@@ -21,15 +21,21 @@ personal data and must stay in that bucket. The jobs are batches that run for
 hours and then nothing for days: nothing should keep running, or costing,
 between them.
 
-Estimates to be replaced by a trial run:
+A trial of 60 games on one spot instance (an m7i.2xlarge: 8 threads on 4
+cores, 32 GiB), all played without a failure:
 
-| what                                          | estimate                |
-| --------------------------------------------- | ----------------------- |
-| m7a.2xlarge spot price (8 vCPUs, 32 GiB)      | $0.18 to $0.28 per hour |
-| games per instance and hour (five engines)    | about 70                |
-| cost per game in the cloud                    | about $0.003            |
-| electricity per game on the local machines    | $0.0004 to $0.0008      |
-| setting up an instance (minutes of its price) | about one cent          |
+| what                                        | measured                  |
+| ------------------------------------------- | ------------------------- |
+| spot price                                  | about $0.21 per hour      |
+| a game of 20 minutes, five at once          | 347 s (median)            |
+| games per instance and hour                 | 52 running, 37 with start |
+| cost per game                               | $0.004 to $0.0055         |
+| instance ready after launch                 | about a minute            |
+| first game done, content from BAR's servers | after 20 minutes          |
+| peak memory per engine                      | 6.2 GB                    |
+| electricity per game on the local machines  | $0.0004 to $0.0008        |
+
+The local electricity is an estimate from assumed power draw.
 
 ## Decision
 
