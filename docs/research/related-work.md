@@ -21,30 +21,28 @@ marked below.
 Statements marked *(inferred)* are our conclusions, not something Apex's docs
 or commits say outright.
 
-## TL;DR
+## Summary
 
-- **Apex kept BARb's body and replaced its decisions.** Pathing, placement,
-  threat maps and unit orders are still CircuitAI. What to build, where, and
-  what each factory makes is now one priced "market" written in AngelScript.
-  The script grew from about 550 lines (stock `hard` profile) to about
-  115,000.
-- **Its own army control lost to stock BARb, twice.** Both times the fix was
-  to hand the army back to BARb's code. Its gains are in economy and
-  production. *This supports our roadmap: leave army control with BARb.*
-- **Learning from who won mostly failed.** Three training methods in a row
-  were stopped because the signal was lost in noise. The one learned part that
-  shipped predicts a narrow, directly observed outcome (will this build job
-  survive?). *Imitation gives a label for every decision, which is exactly
-  what those methods lacked.*
-- **Apex already tried imitation, briefly.** [`tools/imitate.py`][imitate]
-  learns BARb's building mix (37.7% accuracy against a 25.7% baseline) and has
-  a `--human` mode that was run on one replay. Neither is switched on in the
-  game. *The human-replay niche is still open.*
-- **Its replay extraction is small and the idea is sound:** play the replay in
-  `spring-headless` with a spectator widget that prints events. About 330
-  lines in total. We should write our own version rather than copy it.
-- **There is no licence on the repository**, so we read it for ideas and copy
-  nothing.
+Apex supports Reason8's plan and leaves its niche open. It is a BARb fork by
+one player that kept BARb's body and replaced its decisions with about 115,000
+lines of hand-written prices. Its own army control lost to stock BARb twice,
+and both times the fix was to hand the army back. Learning from who won failed
+three times in a row: a game's result is too weak a signal for the games one
+person can simulate. Its only learned part with a measured gain predicts a
+directly observed outcome, whether a build job survives. It tried imitating
+BARb's building mix and ran one human replay, but uses neither in the game.
+Its replay extraction, a headless replay with a spectator widget, is a sound
+idea, and Reason8 re-simulates replays the same way with its own code
+([`state-extraction.md`](state-extraction.md)). The repository has no licence,
+so we take ideas and copy no code.
+
+Used in [ADR 0004](../decisions/0004-learn-from-human-replays-by-imitation.md)
+(imitate human replays, which label every decision),
+[ADR 0006](../decisions/0006-build-on-barb-and-replace-its-decisions-layer-by-layer.md)
+(army control stays with BARb) and
+[ADR 0003](../decisions/0003-define-success-as-in-game-measures.md) (win rate
+is too noisy to judge a model by). What else we take or do differently is
+[below](#what-we-reuse-what-we-do-differently).
 
 ## What Apex is
 
