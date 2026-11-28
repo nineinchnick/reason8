@@ -31,43 +31,26 @@ are the sources' own.
 
 ## Summary
 
-- **Drift:** the remedies that fix drift properly (DAgger, DART) need an
-  expert to label the bot's own states, and we have none. What needs neither
-  an expert nor many simulated games: sharpening the sampling (our 10%
-  threshold, AlphaStar Unplugged's temperature 0.8), not letting the model
-  lean on its own previous answers (the copycat problem), and conditioning on
-  a plan taken from human games, as AlphaStar does with its build-order
-  statistic. **Cheapest first step:** measure drift from the bot's own games
-  with numbers we already have the tools for, and train a variant with a
-  shorter order history to see whether it drifts less.
-- **Skill:** AlphaStar Unplugged passes MMR as an input and sets it to the
-  highest value in play, but reports no test of what changing it does; the
-  same paper found that conditioning on the game's result was ignored. Maia-2
-  shows that skill concatenated to the other inputs works less well than a
-  dedicated mechanism. Nothing found tests skill as a tree feature. **Check
-  that the trees use it** before relying on it: predictions at low and high
-  skill should differ, and per skill band the model should fit that band
-  better.
-- **Masking:** RL agents in microRTS mask invalid actions in training and in
-  play, and lose much of their strength without it. AlphaStar's open-source
-  supervised agent masks unit selections and targets, but not the action type.
-  In imitation every label is a valid action, so for trees the correct and
-  simple way is **one model, mask and renormalise at inference, and score
-  log-loss after the same mask**. Mask only what is impossible (build lists,
-  jobs the builder type cannot do), not what is unaffordable.
-- **The map:** AlphaStar and microRTS agents output a target as a pointer into
-  a list of units or as a cell of a grid, both from large networks. The small
-  version that works with trees is **ranking candidates**: list the wrecks (or
-  build spots) near a builder, describe each by value, distance and what is
-  around it, and train a classifier or ranker to pick the one the player
-  chose.
-- **Hand-written AIs:** those that choose a reclaim target (BARb, M28AI,
-  RNGAI) choose it mainly by distance, with a value threshold and a check for
-  danger; M28AI and RNGAI also count the builders already sent to an area.
-  BARb picks the nearest reachable, safe feature worth at least 1 metal, near
-  the builder or, when a builder is idle, anywhere on the map. Those inputs
-  (value, distance, threat, builders already there) are the first features for
-  the learned target model.
+Prior work has no ready answer for a model that imitates players with no
+expert to ask. The remedies that fix drift properly (DAgger, DART) need an
+expert to label the bot's own states; no source shows that setting a skill
+input changes how a model plays (AlphaStar Unplugged sets it high but reports
+no test); and choosing a target on the map takes large networks. What
+transfers is cheap:
+
+- mask the answers the asking builder can never give, renormalise, and score
+  the model with the same mask;
+- measure drift from the bot's own games, then try a shorter order history, so
+  that the model leans less on its own earlier answers;
+- check on held-out games that skill changes the answers before relying on it;
+- for targets and placements later, rank candidates near the builder with
+  trees, on what hand-written AIs use: value, distance, danger and builders
+  already sent.
+
+[ADR 0019](../decisions/0019-first-model-trees-asked-by-every-builder.md)
+records the mask, the skill check, the drift measures and the test with a
+shorter history. A wider skill filter and ranked candidates for the target
+model are still proposals ([below](#what-the-records-took-from-this)).
 
 ## 1. Drift
 
