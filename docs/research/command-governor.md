@@ -8,9 +8,10 @@ our build of the library dropped the commands over the budget, 45% of them,
 with BARb believing they were given
 ([`in-game.md`](../reference/in-game.md#a-command-governor)). This document
 measures the governor that holds them instead and sends them later, and the
-live state the same library gives the scripts. How it works is in
-[`in-game.md`](../reference/in-game.md#our-barb-library); code: `ai/native`,
-`reason8/bot/budget.py`, `reason8/bot/live_state.py`.
+live state the same library gives the scripts, and what one action holds. How
+it works is in [`in-game.md`](../reference/in-game.md#our-barb-library); code:
+`ai/native`, `reason8/bot/budget.py`, `reason8/bot/live_state.py`,
+`reason8/analysis/orders.py`.
 
 ## Method
 
@@ -155,8 +156,10 @@ three teams whose governors sent 330, 315 and 83.
 
 So `reason8 bot check` judges the budget by the governor's log, which records
 the frame each command left the AI, and reports the replay's count next to it.
-In a game played in real time the delay should be a frame or two; that is not
-measured.
+In the two games played in real time the replay records the commands of an
+action in the frame the governor sent them (one game) or 4 to 5 frames later
+(the other), and the counts agree within 1.2%
+([What one action holds](#how-it-is-counted)).
 
 ## The live state
 
@@ -186,10 +189,216 @@ Medians over the teams of the per-team median difference:
   5,308 lines (62%); the snapshot is written every 5 s, and a unit finished
   since it is the usual difference.
 
+## What one action holds
+
+ADR 0008 counts the commands of one frame as at most one action, which fits a
+player: one click on 20 selected units is 20 commands in one frame. The
+governor uses the same rule: when one action fits the budget it sends every
+command it holds in that frame, to any number of units, with any mix of
+orders. This section measures what one counted action holds for players and
+for the bot. Code: `reason8/analysis/orders.py`.
+
+```sh
+uv run reason8 analysis orders --every 16 --jobs 1 --out data/orders
+uv run reason8 analysis orders --out data/orders \
+    --bot lobby=data/runs/lobby-2026-11-27 --bot lobby=data/runs/lobby-2026-11-28 \
+    --bot headless=data/eval/end-opening/after
+uv run reason8 analysis orders --out data/orders --report
+```
+
+### How it is counted
+
+Order
+: A command with its unit to build, parameters and options (and, for an
+  INSERT, its position and options), without the units it goes to. One click
+  to a selection is one order; a dragged line of ten buildings is ten; a
+  formation move, which gives each unit its own spot, is one order per unit.
+
+Kind
+: An order without its parameters: the command, unit to build and options. A
+  line of one building is one kind, and so is a formation move; a `MOVE` and a
+  shift-queued `MOVE` are two, as they are two clicks.
+
+Action
+: A frame that counts as an action under ADR 0008's rule
+  (`reason8.analysis.apm.ActionCounter`), counting either only the player's
+  clicked commands (`COMMAND` packets, to the current selection) or all of
+  their commands, widgets' included (`all` in [`apm.md`](apm.md), the figure
+  the budget is drawn from). Every number below is per action and counts the
+  commands of the action's frame, clicked ones only or all.
+
+Action span
+: An action and the commands of the frames after it until the next action:
+  what the 7-frame rule lets through for free. It adds little on either side
+  (below), so the tables use the action's frame.
+
+Players
+: Every 16th day of the tables (13 days from 2025-12-10 to 2026-11-17), the
+  games without bots: 2,879 games, 46,060 player-games, 20.9 million clicked
+  actions and 54.3 million actions with widgets. Intervals are 95% bootstrap
+  intervals over games.
+
+Bot
+: The governed Reason8 teams of two lobby games played in real time on Supreme
+  Isthmus (a 3v3 with five Reason8 teams, 24.7 minutes, and a game with three
+  Reason8 teams and four of stock BARb, which has no governor), 8 team-games
+  in all, and the 20 headless 8v8 games of the comparison with `BARbLimited`
+  with the opening's new ends
+  ([`evaluation.md`](../reference/evaluation.md#our-barb-library)), 8.5
+  minutes, 160 team-games of each AI. The bot's commands come from the
+  replays, and its intervals are bootstrap intervals over team-games.
+
+The governor's log records the frames of its actions, not the commands of
+each, so the bot's actions are counted in the replay. In the lobby games that
+is exact: in the second game every action of the replay is at a frame the
+governor logged (3,825 replay actions for 3,822 logged), and in the first 95%
+are 4 or 5 frames after one (3,894 for 3,847). In the headless games the
+replay scatters the commands of one action over up to 30 frames
+([The replay as a check](#the-replay-as-a-check)), which splits a flush into
+several smaller ones: their numbers are a lower bound. The governor's own
+totals give commands per action without frames: 5.1 in the headless games
+(pooled; team-games 1.6 to 13.0), 20.4 in the lobby games (3.1 to 42.6).
+
+### Players
+
+| per counted action               |          n |         commands |      unit orders |  distinct orders | more than one order | more than one kind | p90 | p99 |
+| -------------------------------- | ---------: | ---------------: | ---------------: | ---------------: | ------------------: | -----------------: | --: | --: |
+| clicked commands                 | 20,899,661 | 1.51 (1.50–1.52) | 6.16 (6.04–6.27) | 1.50 (1.49–1.51) |      4.8% (4.7–4.9) |     0.6% (0.6–0.6) |   1 |  14 |
+| all commands                     | 54,301,788 | 5.32 (5.23–5.41) | 7.09 (6.98–7.21) | 4.65 (4.59–4.72) |   40.2% (40.0–40.5) |  10.4% (10.2–10.5) |  10 |  50 |
+| all commands, with the free ones | 54,301,788 | 6.37 (6.27–6.49) | 9.59 (9.45–9.73) | 5.51 (5.44–5.58) |   48.9% (48.7–49.0) |  13.1% (12.9–13.2) |  12 |  60 |
+
+Unit orders are commands times the units each goes to. p90 and p99 are of
+distinct orders.
+
+Distinct orders per action:
+
+| per counted action | 1     | 2    | 3-5   | 6-10 | 11-20 | more |
+| ------------------ | ----- | ---- | ----- | ---- | ----- | ---- |
+| clicked commands   | 95.2% | 1.2% | 1.3%  | 1.0% | 0.7%  | 0.6% |
+| all commands       | 59.8% | 9.6% | 13.1% | 7.9% | 5.9%  | 3.6% |
+
+Distinct kinds per action:
+
+| per counted action | mean | one kind | at most 2 | at most 3 | p99 | p99.9 |
+| ------------------ | ---: | -------: | --------: | --------: | --: | ----: |
+| clicked commands   | 1.01 |    99.4% |    99.95% |    99.97% |   1 |     2 |
+| all commands       | 1.18 |    89.6% |     95.9% |     96.7% |   4 |     5 |
+
+- **A click is one kind of order.** 95.2% of clicked actions hold one order
+  and 99.4% one kind. Those with more orders are dragged lines of one building
+  (1.5% of actions, 13 buildings on average); clicked actions with more than
+  one kind are 0.6%, and with more than two 0.03%.
+- **Widgets add orders, not kinds.** With widget commands 40% of actions hold
+  more than one order, but most of those are one kind sent to several spots:
+  28% of all actions, 11.6 orders on average, nearly all from widgets alone
+  (`MOVE` 64%, `FIGHT` 21%, `REMOVE` 13% of them). These are formation moves
+  and area commands that follow a drag of the player, and queue clean-up.
+- **Several kinds come from widget housekeeping.** The 10% of actions with
+  more than one kind are 9.1% widgets alone, 0.8% a click with widget
+  commands, and 0.2% clicks. The most common are the orders a widget gives a
+  unit its factory just finished (`FIGHT MOVE_STATE PRIORITY REPAIR`, 29% of
+  them; BAR's own APM gadget leaves out the first command of a finished unit,
+  which our count can't), build priorities and queue clean-up
+  (`PRIORITY REMOVE`, 29%), and `MOVE REPAIR` (5%).
+- **Skill and phase change little.** Clicked actions hold 1.34 (40 and up) to
+  1.56 (20-30) orders, and more than one kind in 0.3% to 1.0% of actions in
+  every band. With widgets, orders per action grow with skill (3.2 below 10,
+  5.0 to 5.1 from 30 up) and over the game (2.2 in the first two minutes, 3.6
+  at 5 to 10, 6.9 after 30), and so does the share with more than one kind
+  (7.6% in the first two minutes, 4.3% to 4.9% from 2 to 10, 18.7% after 30)
+  as armies grow and widgets manage more units.
+- **Automation widgets don't change it.** Actions of the players with a widget
+  that automates build orders enabled
+  ([`automation-widgets.md`](automation-widgets.md)): 4.5 (4.1–4.9) orders,
+  more than one kind in 9.4% (8.6–10.3), against 4.7 and 10.4% for the rest.
+
+### The bot
+
+| per counted action             |      n |           commands |   distinct orders | more than one order | more than one kind | p90 | p99 | most |
+| ------------------------------ | -----: | -----------------: | ----------------: | ------------------: | -----------------: | --: | --: | ---: |
+| Reason8, lobby                 |  7,719 | 18.39 (9.59–26.33) | 9.94 (5.91–13.36) |   85.3% (74.4–91.8) |  84.7% (73.7–91.2) |  22 |  39 |   77 |
+| Reason8, headless, lower bound | 45,098 |   4.76 (4.37–5.12) |  3.77 (3.51–4.01) |   64.9% (62.6–67.1) |  63.9% (61.6–66.1) |   9 |  18 |   34 |
+| BARbLimited, headless, l. b.   | 52,137 |   4.55 (4.32–4.77) |  3.51 (3.36–3.68) |   66.5% (64.9–68.1) |  65.2% (63.6–66.8) |   8 |  15 |   30 |
+| stock BARb, lobby, no governor | 38,345 |   1.94 (1.64–2.30) |  1.69 (1.53–1.88) |   45.5% (37.2–53.9) |  44.8% (36.5–53.1) |   3 |   6 |   29 |
+
+Each of the bot's commands goes to one unit, so its commands are its unit
+orders.
+
+| per counted action, kinds      | mean | one kind | at most 2 | at most 3 | p99 |
+| ------------------------------ | ---: | -------: | --------: | --------: | --: |
+| Reason8, lobby                 | 4.81 |    15.3% |     30.7% |     41.3% |  13 |
+| Reason8, headless, lower bound | 2.86 |    36.1% |     57.0% |     72.9% |  10 |
+| stock BARb, lobby, no governor | 1.58 |    55.2% |     89.9% |     97.5% |   4 |
+
+Reason8 in the lobby games, by phase:
+
+| phase     | actions | commands | distinct orders | more than one kind | p90 orders |
+| --------- | ------: | -------: | --------------: | -----------------: | ---------: |
+| 0-2 min   |     322 |      2.5 |             2.4 |              59.6% |          4 |
+| 2-5 min   |     849 |      4.8 |             3.8 |              74.2% |          8 |
+| 5-10 min  |   1,190 |     10.8 |             6.5 |              81.3% |         16 |
+| 10-15 min |   1,395 |     13.5 |             8.3 |              80.8% |         18 |
+| 15-20 min |   1,605 |     18.1 |            10.0 |              84.8% |         21 |
+| 20-30 min |   1,847 |     31.8 |            15.4 |              94.7% |         31 |
+| 30+ min   |     511 |     34.5 |            17.4 |              99.6% |         29 |
+
+Per team-game of Reason8 in the lobby games, the mean distinct orders per
+action is 2.1 to 18.4 (2.1, 2.5, 6.3, 6.6 and 8.7 in the first game; 10.8,
+13.4 and 18.4 in the second, which was busier: 21 to 39 commands per action).
+
+- **An action of the bot is many different orders.** In real time, 85% of
+  Reason8's actions hold more than one kind of order, against 0.6% of a
+  player's clicks and 10% of a player's actions with widgets; it averages 4.8
+  kinds and 9.9 distinct orders an action, and 13 kinds at p99, where a
+  player's p99 is 1 (clicked) or 4 (with widgets).
+- **It grows with the game.** In the first two minutes an action holds 2.4
+  orders, about a player's with widgets (2.2), but 60% of them mix kinds
+  (players: 7.6%); from 5 to 10 minutes 6.5 orders, and 15 to 17 after 20
+  minutes, when nearly every action mixes kinds.
+- **The mixes are many units' business at once.** Kinds mix because the
+  governor sends what it held for different units together: paths (a `MOVE`
+  and shift-queued `MOVE`s: 98% of the mixed actions whose only command is
+  `MOVE`, in the second lobby game), a new unit's settings
+  (`FIRE_STATE MOVE_STATE REPAIR`, `AUTOREPAIRLEVEL ONOFF`), queue edits
+  (`REMOVE`) and attack orders (`ATTACK FIGHT MOVE`), in any combination: the
+  most common set is 12.5% of the mixed actions and the tenth 1.1%.
+- **The headless games show the same at the opening's scale.** Even split by
+  the replay's frames, an action holds 3.8 orders, fewer than a player's with
+  widgets (4.7), but 2.9 kinds against 1.2, and 64% of the actions mix kinds
+  against 10%. `BARbLimited` on the same library is the same (3.5 orders, 65%
+  mixed).
+- **Without the governor BARb's frames are small.** Stock BARb in the lobby
+  game gives 1.7 orders a frame: it spreads its commands over many frames
+  (6,300 to 12,800 actions a team-game). The governor's flushes, not BARb, put
+  many orders in one action.
+- **Free commands add little.** The span of an action, with the commands the
+  7-frame rule lets through after it, holds 10.5 orders instead of 9.9 for
+  Reason8 and 5.5 instead of 4.7 for players.
+
+### What it says about the counting rule
+
+- **A flush of different orders in one frame is not something players do.** A
+  player's action is one kind of order: 99.4% of clicked actions, and 89.6%
+  with widgets, whose extra kinds are housekeeping of units the player did not
+  click (new units' settings, priorities, queue clean-up). Even with widgets,
+  more than three kinds in one action are rare (3.3%) and the p99.9 is 5. The
+  bot's actions hold a median of four kinds or more and up to 18: one counted
+  action of the bot is what several actions of a player would be.
+- **Distinct orders alone are the wrong bound.** One kind can hold many orders
+  in a human action: a dragged line (13 buildings on average, p99 of clicked
+  actions 14) and formation moves (11.6 orders); ADR 0008 counts these as one
+  action, and they are what players do.
+- **A human-like bound is one kind per action,** with any number of targets:
+  clicked actions hold more in 0.6%, actions with widgets in 10.4%, nearly all
+  of it widgets' housekeeping. Counted that way, a player's actions would rise
+  by 1% (clicked) and 18% (with widgets), while the bot's would rise by about
+  4.8 times in real time.
+
 ## Not measured
 
-- A game played in real time, where the replay should record the bot's
-  commands within a frame or two of when they were sent.
+- Whether the bot's actions would still fit its band's budget if each kind of
+  order in a frame counted as an action, and what holding the rest would do to
+  its play.
 - Whether BARb's own timeouts on tasks (a builder whose order is held for two
   seconds) change what it does later; the economy measures of
   [`evaluation.md`](../reference/evaluation.md#our-barb-library) cover the
