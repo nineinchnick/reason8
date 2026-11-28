@@ -66,8 +66,10 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from reason8.analysis.apm import ActionCounter
-from reason8.bot import budget, live_state, next_order
+from reason8.bot import budget, live_state, model_inputs, next_order
+from reason8.game.maps import load_map_list
 from reason8.headless.state import read_records
+from reason8.models import trees
 from reason8.paths import REPO_ROOT
 from reason8.replays.parse import default_parser, parse_replay
 from reason8.replays.replay import BuildOrder, Replay
@@ -391,6 +393,7 @@ def check_infolog(infolog: Path, ai_short_name: str) -> dict:
     governor_messages: list[str] = []
     state_lines: dict[int, list[dict]] = {}
     model_teams: dict[int, dict] = {}
+    next_order_lines: dict[int, list[str]] = {}
     with infolog.open(encoding="utf-8", errors="replace") as file:
         for line in file:
             if any(needle in line for needle in ENGINE_ERRORS):
@@ -408,6 +411,9 @@ def check_infolog(infolog: Path, ai_short_name: str) -> dict:
                 text = message.removeprefix("Reason8 next order: ")
                 if team_line := OPENING_LINE.match(text):
                     next_order.count_line(model_teams, int(team_line.group(1)), team_line.group(2))
+                    next_order_lines.setdefault(int(team_line.group(1)), []).append(
+                        team_line.group(2)
+                    )
             if message.startswith("Reason8 opening:"):
                 team_line = OPENING_LINE.match(message.removeprefix("Reason8 opening: "))
                 if team_line and (state := live_state.parse_line(team_line.group(2))):
@@ -432,6 +438,7 @@ def check_infolog(infolog: Path, ai_short_name: str) -> dict:
         "next_order_by_team": {
             team: next_order.summary(counts) for team, counts in sorted(model_teams.items())
         },
+        "next_order_lines": next_order_lines,
         "errors": errors,
     }
 
@@ -447,6 +454,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="state file of the replay (reason8 headless run --snapshots --out)",
     )
     parser.add_argument("--parser", type=Path, help="sdfz-demo-parser binary")
+    parser.add_argument(
+        "--model",
+        type=Path,
+        help="the builder model the AI played (with --infolog and --state: compare the "
+        "inputs the library logged with the state export)",
+    )
 
 
 def run(args: argparse.Namespace) -> int:
@@ -474,6 +487,24 @@ def run(args: argparse.Namespace) -> int:
     result: dict = {"teams": teams}
     ok = bool(teams) and all(team["matches"] for team in teams)
     if log is not None:
+        order_lines = log.pop("next_order_lines")
+        if args.model and args.state:
+            model = trees.load(args.model)
+            records = list(read_records(args.state, snapshots=True))
+            map_name = Replay(document).meta.get("map")
+            map_list = load_map_list()
+            log["model_inputs_by_team"] = {
+                team: model_inputs.compare(
+                    lines,
+                    records,
+                    team,
+                    model,
+                    map_name=map_name,
+                    map_list=map_list,
+                )
+                for team, lines in sorted(order_lines.items())
+                if any(model_inputs.INPUTS_LINE.match(line) for line in lines)
+            }
         state_lines = log.pop("live_state_by_team")
         if args.state:
             log["live_state_by_team"] = {
