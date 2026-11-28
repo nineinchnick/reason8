@@ -1,0 +1,299 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Reason8 cloud workers: spot instances that re-simulate the replays of a
+  queue and write their state to the bucket (`reason8 cloud up`, ADR 0020).
+  Nothing runs until `reason8 cloud run` raises the group's desired capacity,
+  and the workers terminate themselves when the queue is empty.
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: The private bucket that holds the replays and takes the results.
+  BucketPrefix:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|^[^/].*/$"
+    Description: Key prefix of the data in the bucket, empty or ending in a slash.
+  MaxInstances:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    Description: The most instances the group may run at once (its MaxSize).
+  InstanceTypes:
+    Type: CommaDelimitedList
+    Default: m7a.2xlarge,m7i.2xlarge,m6a.2xlarge,m6i.2xlarge
+    Description: >-
+      Spot instance types of the same shape (8 vCPUs, 32 GiB); the first one
+      is the one `reason8 cloud` sizes the quota and the cost by.
+  EnginesPerInstance:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    Description: Games a worker plays at once (an engine needs about 6 GB and 1.5 cores).
+  IdleMinutes:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    Description: A worker terminates its instance when the queue was empty this long.
+  RepositoryUrl:
+    Type: String
+    Description: The git repository the workers clone (https).
+  Commit:
+    Type: String
+    AllowedPattern: "^[0-9a-f]{40}$"
+    Description: The commit the workers check out.
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: The VPC of the subnets (`reason8 cloud up` takes the default VPC).
+  Subnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnets the instances start in, with public IP addresses (for downloads).
+  VolumeGiB:
+    Type: Number
+    Default: 100
+    MinValue: 20
+    Description: Root volume for the engines, game versions, maps and the games at work.
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/26.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+    Description: Public SSM parameter of the image (Ubuntu LTS, x86-64).
+
+Resources:
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+
+  GameQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      # a worker extends this while its game runs (`reason8 cloud worker`)
+      VisibilityTimeout: 900
+      ReceiveMessageWaitTimeSeconds: 20
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+        maxReceiveCount: 3
+
+  WorkerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # Session Manager, to look into a running instance; there is no SSH
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: reason8-worker
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadReplays
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub arn:${AWS::Partition}:s3:::${BucketName}/${BucketPrefix}replays/*
+              - Sid: WriteResultsFailuresAndLogs
+                Effect: Allow
+                Action: s3:PutObject
+                Resource:
+                  - !Sub arn:${AWS::Partition}:s3:::${BucketName}/${BucketPrefix}state/*
+                  - !Sub arn:${AWS::Partition}:s3:::${BucketName}/${BucketPrefix}state-*
+                  - !Sub arn:${AWS::Partition}:s3:::${BucketName}/${BucketPrefix}cloud/failures/*
+                  - !Sub arn:${AWS::Partition}:s3:::${BucketName}/${BucketPrefix}cloud/logs/*
+              - Sid: TakeGames
+                Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:ChangeMessageVisibility
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt GameQueue.Arn
+              - Sid: TerminateOwnInstance
+                Effect: Allow
+                Action: autoscaling:TerminateInstanceInAutoScalingGroup
+                Resource: !Sub arn:${AWS::Partition}:autoscaling:${AWS::Region}:${AWS::AccountId}:autoScalingGroup:*:autoScalingGroupName/${AWS::StackName}-workers
+
+  WorkerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref WorkerRole
+
+  WorkerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Reason8 workers, no inbound traffic
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - Description: downloads (engine, game, maps, packages) and AWS APIs
+          IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+
+  WorkerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        ImageId: !Ref ImageId
+        IamInstanceProfile:
+          Arn: !GetAtt WorkerInstanceProfile.Arn
+        InstanceInitiatedShutdownBehavior: terminate
+        MetadataOptions:
+          HttpEndpoint: enabled
+          HttpTokens: required
+          HttpPutResponseHopLimit: 1
+        BlockDeviceMappings:
+          - DeviceName: /dev/sda1
+            Ebs:
+              VolumeType: gp3
+              VolumeSize: !Ref VolumeGiB
+              Encrypted: true
+              DeleteOnTermination: true
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            AssociatePublicIpAddress: true
+            DeleteOnTermination: true
+            Groups:
+              - !Ref WorkerSecurityGroup
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub ${AWS::StackName}-worker
+          - ResourceType: volume
+            Tags:
+              - Key: Name
+                Value: !Sub ${AWS::StackName}-worker
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            # Set up a Reason8 worker: tools, the repository at the pinned
+            # commit, and the worker as a systemd service.
+            set -euo pipefail
+            exec > >(tee -a /var/log/reason8-setup.log) 2>&1
+
+            # Leaves the logs in the bucket and takes the instance out of the
+            # group, which then shrinks instead of starting another instance.
+            cat > /usr/local/bin/reason8-give-up <<'SCRIPT'
+            #!/bin/bash
+            export AWS_DEFAULT_REGION=${AWS::Region} PATH=$PATH:/snap/bin
+            token=$(curl -sS -X PUT http://169.254.169.254/latest/api/token \
+              -H 'X-aws-ec2-metadata-token-ttl-seconds: 300')
+            instance=$(curl -sS -H "X-aws-ec2-metadata-token: $token" \
+              http://169.254.169.254/latest/meta-data/instance-id)
+            logs=s3://${BucketName}/${BucketPrefix}cloud/logs/$instance
+            journalctl -u reason8-worker --no-pager > /var/log/reason8-worker.log || true
+            aws s3 cp /var/log/reason8-setup.log "$logs/setup.log" || true
+            aws s3 cp /var/log/reason8-worker.log "$logs/journal.log" || true
+            aws autoscaling terminate-instance-in-auto-scaling-group \
+              --instance-id "$instance" --should-decrement-desired-capacity
+            SCRIPT
+            chmod 755 /usr/local/bin/reason8-give-up
+
+            snap wait system seed.loaded
+            snap install aws-cli --classic
+            trap /usr/local/bin/reason8-give-up ERR
+
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -q
+            apt-get install -y -q git 7zip curl ca-certificates
+            # the engine is unpacked with `7z`; some 7zip packages only ship 7zz
+            command -v 7z || ln -s "$(command -v 7zz)" /usr/local/bin/7z
+            curl -LsSf https://astral.sh/uv/install.sh \
+              | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
+
+            useradd --system --create-home --home-dir /srv/reason8 --shell /usr/sbin/nologin reason8
+            sudo -u reason8 git clone --quiet ${RepositoryUrl} /srv/reason8/repo
+            sudo -u reason8 git -C /srv/reason8/repo checkout --quiet --detach ${Commit}
+            sudo -u reason8 -H sh -c 'cd /srv/reason8/repo && uv sync --frozen --no-dev'
+
+            cat > /etc/systemd/system/reason8-give-up.service <<'UNIT'
+            [Unit]
+            Description=Upload the Reason8 logs and terminate this instance
+
+            [Service]
+            Type=oneshot
+            ExecStart=/usr/local/bin/reason8-give-up
+            UNIT
+
+            cat > /etc/systemd/system/reason8-worker.service <<'UNIT'
+            [Unit]
+            Description=Reason8 cloud worker: re-simulates the replays of the queue
+            Wants=network-online.target
+            After=network-online.target
+            StartLimitIntervalSec=1h
+            StartLimitBurst=5
+            OnFailure=reason8-give-up.service
+
+            [Service]
+            User=reason8
+            WorkingDirectory=/srv/reason8/repo
+            Environment=AWS_DEFAULT_REGION=${AWS::Region}
+            ExecStart=/usr/local/bin/uv run --frozen --no-dev reason8 cloud worker \
+              --s3-uri s3://${BucketName}/${BucketPrefix} --queue-url ${GameQueue} \
+              --engines ${EnginesPerInstance} --idle-minutes ${IdleMinutes} \
+              --work-dir /srv/reason8/work
+            Restart=on-failure
+            RestartSec=30
+
+            [Install]
+            WantedBy=multi-user.target
+            UNIT
+
+            systemctl daemon-reload
+            systemctl enable --now reason8-worker.service
+            trap - ERR
+            aws s3 cp /var/log/reason8-setup.log \
+              "s3://${BucketName}/${BucketPrefix}cloud/logs/$(cat /var/lib/cloud/data/instance-id)/setup.log" \
+              || true
+
+  WorkerGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      # the role's policy names the group, so its name is fixed
+      AutoScalingGroupName: !Sub ${AWS::StackName}-workers
+      MinSize: "0"
+      MaxSize: !Ref MaxInstances
+      # no DesiredCapacity: it starts at MinSize (0), and a stack update then
+      # leaves the capacity `reason8 cloud run` set alone
+      VPCZoneIdentifier: !Ref Subnets
+      MixedInstancesPolicy:
+        InstancesDistribution:
+          OnDemandBaseCapacity: 0
+          OnDemandPercentageAboveBaseCapacity: 0
+          SpotAllocationStrategy: price-capacity-optimized
+        LaunchTemplate:
+          LaunchTemplateSpecification:
+            LaunchTemplateId: !Ref WorkerLaunchTemplate
+            Version: !GetAtt WorkerLaunchTemplate.LatestVersionNumber
+          Overrides:
+            - InstanceRequirements:
+                VCpuCount:
+                  Min: 1
+                MemoryMiB:
+                  Min: 1
+                AllowedInstanceTypes: !Ref InstanceTypes
+
+Outputs:
+  QueueUrl:
+    Value: !Ref GameQueue
+  DeadLetterQueueUrl:
+    Value: !Ref DeadLetterQueue
+  GroupName:
+    Value: !Ref WorkerGroup
+  MaxInstances:
+    Value: !Ref MaxInstances
+  InstanceTypes:
+    Value: !Join [",", !Ref InstanceTypes]
+  EnginesPerInstance:
+    Value: !Ref EnginesPerInstance
+  BucketUri:
+    Value: !Sub s3://${BucketName}/${BucketPrefix}
+  Commit:
+    Value: !Ref Commit
