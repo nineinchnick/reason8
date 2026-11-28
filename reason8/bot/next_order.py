@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
@@ -382,3 +383,110 @@ def run(args: argparse.Namespace) -> int:
         f"{len(stand_in['rows'])} stand-in rows -> {args.out_dir / STAND_IN_NAME}"
     )
     return 0
+
+
+# --- the log of a game in which the model decided builders' orders (`reason8 bot check`)
+
+DECIDED = re.compile(
+    r"frame (\d+): (\w+) (\d+) (\w+): "
+    r"(model chose|below threshold|nothing possible|no answers)(?: (\w+) [\d.]+)?"
+)
+NOT_CARRIED_OUT = re.compile(
+    r"frame (\d+): (\w+) (\d+) (\w+): cannot carry out (\w+): (.*); left to BARb"
+)
+ON_SPOT = re.compile(r"frame \d+: \w+ \d+: \w+ on (usual spot|BARb's metal spot)")
+MODEL = re.compile(r"model (\S+) .*?, (\d+) rows for (\d+) builder units")
+POSITION = re.compile(r"position (\S+) \(start .*?\), (\d+) usual metal spots")
+ENDED = re.compile(r"model orders ended at frame (\d+), (\w+): (.*); BARb takes over")
+UNFINISHED = "its task ended unfinished"
+FRAMES_PER_MINUTE = 30 * 60
+OUTCOMES = ("model chose", "below threshold", "nothing possible", "no answers")
+
+
+def new_team() -> dict:
+    return {
+        "model": None,
+        "model_rows": None,
+        "position": None,
+        "usual_spots": 0,
+        "idle_builders": 0,  # times an idle builder needed an order and the model was consulted
+        "outcomes": dict.fromkeys(OUTCOMES, 0),
+        "not_given": 0,  # chosen, but no task could be made for it
+        "unfinished": 0,  # chosen and given, but its task ended unfinished
+        "not_given_reasons": {},
+        "by_kind": {},
+        "by_minute": [],
+        "orders_chosen": {},
+        "extractors": {"usual spot": 0, "BARb's metal spot": 0},
+        "ended": None,
+    }
+
+
+def count_line(teams: dict[int, dict], team: int, text: str) -> None:
+    """Add one ``Reason8 next order: team N: <text>`` log line to its team's counts."""
+    counts = teams.setdefault(team, new_team())
+    if decided := DECIDED.match(text):
+        frame, kind, outcome, order = (
+            int(decided.group(1)),
+            decided.group(4),
+            decided.group(5),
+            decided.group(6),
+        )
+        counts["idle_builders"] += 1
+        counts["outcomes"][outcome] += 1
+        by_kind = counts["by_kind"].setdefault(kind, {"idle_builders": 0, "model_chose": 0})
+        by_kind["idle_builders"] += 1
+        minute = frame // FRAMES_PER_MINUTE
+        while len(counts["by_minute"]) <= minute:
+            counts["by_minute"].append({"idle_builders": 0, "left_to_barb": 0})
+        counts["by_minute"][minute]["idle_builders"] += 1
+        if outcome == "model chose":
+            by_kind["model_chose"] += 1
+            counts["orders_chosen"][order] = counts["orders_chosen"].get(order, 0) + 1
+        else:
+            counts["by_minute"][minute]["left_to_barb"] += 1
+    elif failed := NOT_CARRIED_OUT.match(text):
+        reason = failed.group(6)
+        if reason == UNFINISHED:
+            counts["unfinished"] += 1
+            return
+        counts["not_given"] += 1
+        counts["not_given_reasons"][reason] = counts["not_given_reasons"].get(reason, 0) + 1
+        minute = int(failed.group(1)) // FRAMES_PER_MINUTE
+        if minute < len(counts["by_minute"]):
+            counts["by_minute"][minute]["left_to_barb"] += 1
+    elif spot := ON_SPOT.match(text):
+        counts["extractors"][spot.group(1)] += 1
+    elif model := MODEL.match(text):
+        counts["model"], counts["model_rows"] = model.group(1), int(model.group(2))
+    elif position := POSITION.search(text):
+        counts["position"], counts["usual_spots"] = position.group(1), int(position.group(2))
+    elif ended := ENDED.match(text):
+        counts["ended"] = {
+            "frame": int(ended.group(1)),
+            "reason": ended.group(2),
+            "detail": ended.group(3),
+        }
+
+
+def summary(counts: Mapping) -> dict:
+    """One team's counts with the shares a reader looks for: of the idle builders, how many
+    got an order the model decided and that was carried out, and how many were left to
+    BARb."""
+    idle = counts["idle_builders"]
+    chosen = counts["outcomes"]["model chose"]
+    left = idle - chosen + counts["not_given"]
+
+    def share(part: int) -> float | None:
+        return round(part / idle, 3) if idle else None
+
+    return {
+        **counts,
+        "orders_chosen": dict(
+            sorted(counts["orders_chosen"].items(), key=lambda item: (-item[1], item[0]))
+        ),
+        "decided_by_model": chosen - counts["not_given"],
+        "decided_by_model_share": share(chosen - counts["not_given"]),
+        "left_to_barb": left,
+        "left_to_barb_share": share(left),
+    }

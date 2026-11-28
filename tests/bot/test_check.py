@@ -332,3 +332,36 @@ def test_check_replay_random_faction_without_orders():
     openings = {"tasks": TASKS, "openings": [ARMADA]}
     (team,) = check.check_replay(LobbyReplay([]), openings, "Reason8")
     assert team["error"] == "no opening for side 'random'"
+
+
+def test_check_infolog_model_orders(tmp_path):
+    lines = [
+        "team 2: frame 25: armcom 18284 commander: model chose armmex 0.40; 2 of 9 possible "
+        "of 9 at 10% or more: armwin 0.40 armmex 0.29",
+        "team 2: frame 25: armcom 18284: armmex on usual spot 1 of 9, BARb's spot 84 at 1 2",
+        "team 2: model orders ended at frame 6450, time: the game is past the opening window "
+        "of 480 s; BARb takes over",
+    ]
+    log = write_log(
+        tmp_path, [f"Skirmish AI <Reason8-0.1>: Reason8 next order: {x}" for x in lines]
+    )
+    result = check.check_infolog(log, "Reason8")
+    team = result["next_order_by_team"][2]
+    assert team["idle_builders"] == 1 and team["decided_by_model"] == 1
+    assert team["ended"]["reason"] == "time"
+    assert result["opening_by_team"] == {}
+
+
+def test_check_replay_of_a_team_whose_orders_the_model_decided():
+    openings = {"tasks": TASKS, "openings": [ARMADA]}
+    replay = LobbyReplay(armada_game(["armck", "armpw"]))  # not the opening
+    orders = {"idle_builders": 12, "decided_by_model": 10}
+    (team,) = check.check_replay(
+        replay, openings, "Reason8", sides={0: "armada"}, model_orders={0: orders}
+    )
+    assert team["mode"] == "model" and team["next_order"] == orders and team["matches"]
+    assert "ordered" not in team and "expected" not in team
+    (silent,) = check.check_replay(
+        replay, openings, "Reason8", sides={0: "armada"}, model_orders={0: {"idle_builders": 0}}
+    )
+    assert not silent["matches"]
