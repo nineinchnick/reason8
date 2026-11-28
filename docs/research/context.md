@@ -25,13 +25,39 @@ builders, jobs next to build orders, build power and skill. The second part is
 the first table, `context_v1`, with the build orders only; its numbers stay as
 they were measured.
 
+## Summary
+
+The game state helps to predict a builder's next order, but only by a few
+points; knowing which builder asks helps more. On the builder model's table
+(2,996 re-simulated games, scored on the test split), trees given only the
+order history predict the next answer right 56.0% of the time. Told what kind
+of builder asks and what it did last, they reach 60.5%; adding the game time,
+the team's economy, its own units, build power and skill (the inputs of ADR
+0019\) gives 63.8%, another 3.3 points. Economy and own units add the most;
+allies and wind add little. Skill passes ADR 0019's test, but only narrowly.
+The commander gains the most from the state, factories the least. Two points
+matter for play: the trees repeat their previous answer more often than
+players do (36.5% of steps against 30.7%), and a history of one step instead
+of three scores as well and repeats a little less. The mask of impossible
+answers removes under 1% of the probability and changes no top answer.
+
+The second part, on build orders only, was measured on the first 503 games and
+is preliminary; for what the state adds, the first part's numbers replace it.
+Its finding that trees on 411 games match the n-gram trained on the whole
+dataset was not measured again.
+
+Used in
+[ADR 0019](../decisions/0019-first-model-trees-asked-by-every-builder.md): the
+model's inputs, the mask, the test that keeps skill, and the shorter history
+played next to the full one.
+
 ## The builder model's table (`context_v2`)
 
 On the whole sample: 2,996 of its 3,000 games were re-simulated when the table
 was built (2026-11-27), 2,411 of them in training, 299 in validation and 286
 in test. The numbers are on the test split: 286 games, 129,525 scored steps.
 
-### Summary
+### Findings
 
 - **Almost every order has its builder.** 99.98% of the structure orders and
   99.5% of the factory orders of the openings reached a unit that can build
@@ -394,7 +420,7 @@ training, 47 in validation and 45 in test. The test split is small and its
 intervals are wide; the same commands give the numbers on the whole sample
 once the batch is done.
 
-### Summary
+### Findings
 
 - **The join is exact.** On 20 games (28,895 rows) every row has the resources
   line of the second before its order with the same values, and the same units
