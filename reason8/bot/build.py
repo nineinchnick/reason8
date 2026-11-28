@@ -333,6 +333,15 @@ def live_state_script(available: bool) -> str:
             "{ Reason8BarbOrdered(unit, task); }\n"
             "void SetStart(const string& in position, const string& in role)\n"
             "{ Reason8SetStart(position, role); }\n"
+            "bool OrderEnded(int unitId, const string& in order, bool done, int lasted)\n"
+            "{ return Reason8OrderEnded(unitId, order, done, lasted); }\n"
+            "IUnitTask@ TaskInProgress(CCircuitUnit@ unit)\n"
+            "{ return Reason8TaskInProgress(unit); }\n"
+            "IUnitTask@ HelpBuild(CCircuitUnit@ unit, const string& in unitName)\n"
+            "{ return Reason8HelpBuild(unit, unitName); }\n"
+            "IUnitTask@ BarbSpotTask(CCircuitUnit@ unit, const string& in unitName,\n"
+            "\tint& out spot) { return Reason8BarbSpotTask(unit, unitName, spot); }\n"
+            "bool SpotUsable(int spot) { return Reason8SpotUsable(spot); }\n"
         )
     else:
         body = (
@@ -350,6 +359,12 @@ def live_state_script(available: bool) -> str:
             "bool SpotOpen(int) { return true; }\n"
             "void BarbOrdered(CCircuitUnit@, IUnitTask@) {}\n"
             "void SetStart(const string& in, const string& in) {}\n"
+            "bool OrderEnded(int, const string& in, bool, int) { return false; }\n"
+            "IUnitTask@ TaskInProgress(CCircuitUnit@) { return null; }\n"
+            "IUnitTask@ HelpBuild(CCircuitUnit@, const string& in) { return null; }\n"
+            "IUnitTask@ BarbSpotTask(CCircuitUnit@, const string& in, int& out spot)\n"
+            "{ spot = -1; return null; }\n"
+            "bool SpotUsable(int) { return true; }\n"
         )
     return header + "namespace Reason8 {\n\n" + body + "\n}  // namespace Reason8\n"
 

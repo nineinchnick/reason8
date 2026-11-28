@@ -137,7 +137,7 @@ fi
 barb=recoil/AI/Skirmish/BARb
 cp "$here/Budget.h" "$here/Governor.h" "$here/Governor.cpp" \
 	"$here/LiveState.h" "$here/LiveState.cpp" "$here/Choice.h" "$here/Model.h" \
-	"$here/StandIn.h" "$here/Trees.h" "$here/ModelInputs.h" "$here/NextOrder.h" "$here/NextOrder.cpp" "$barb/src/"
+	"$here/StandIn.h" "$here/Trees.h" "$here/ModelInputs.h" "$here/OrderBook.h" "$here/NextOrder.h" "$here/NextOrder.cpp" "$barb/src/"
 build_header="#define REASON8_ENGINE_TAG \"$tag\""
 if [ "$(cat "$barb/src/Reason8Build.h" 2>/dev/null)" != "$build_header" ]; then
 	echo "$build_header" >"$barb/src/Reason8Build.h"

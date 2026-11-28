@@ -1,4 +1,4 @@
-/* Tests of Choice.h, StandIn.h and ModelInputs.h without the engine. ai/native/build.sh
+/* Tests of Choice.h, OrderBook.h, StandIn.h and ModelInputs.h without the engine. ai/native/build.sh
  * compiles and runs it before it builds the library:
  *
  *   g++ -std=c++20 -I ai/native ai/native/test_next_order.cpp -o test_next_order && ./test_next_order
@@ -7,6 +7,7 @@
 
 #include "Choice.h"
 #include "ModelInputs.h"
+#include "OrderBook.h"
 #include "StandIn.h"
 
 #include <cmath>
@@ -16,6 +17,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <vector>
 
 using reason8::Answers;
 using reason8::Choose;
@@ -210,6 +212,68 @@ void RoundedAsTheExportWrites()
 	EXPECT(reason8::ExportRounded(38.0055, 0) == 38.0);
 }
 
+void EndedAtOnceIsShortAndEmpty()
+{
+	using reason8::CARRIED_OUT_FRAMES;
+	using reason8::EndedAtOnce;
+	EXPECT(EndedAtOnce("armmex", false, 0));
+	EXPECT(EndedAtOnce("armmex", false, CARRIED_OUT_FRAMES - 1));
+	EXPECT(!EndedAtOnce("armmex", false, CARRIED_OUT_FRAMES));  // lasted: carried out, then ended
+	EXPECT(!EndedAtOnce("armwin", true, 5));  // a build finished: helped finish it
+	EXPECT(EndedAtOnce("reclaim", true, 5));  // a job with nothing to do
+	EXPECT(EndedAtOnce("assist", false, 0));
+	EXPECT(!EndedAtOnce("assist", true, CARRIED_OUT_FRAMES * 60));
+}
+
+void OrdersEnterTheHistoryOnceCarriedOut()
+{
+	reason8::OrderBook book;
+	using reason8::CARRIED_OUT_FRAMES;
+	EXPECT(!book.Chosen(1, "armmex", 100).has_value());
+	EXPECT(!book.Chosen(2, "assist", 110).has_value());
+	EXPECT(book.Due(100 + CARRIED_OUT_FRAMES - 1).empty());
+	const auto due = book.Due(110 + CARRIED_OUT_FRAMES);
+	EXPECT(due.size() == 2 && due[0].unitId == 1 && due[1].unitId == 2);  // oldest first
+	EXPECT(book.Due(1000).empty());  // once only
+
+	// a builder deciding again while its order is pending carried it out
+	book.Chosen(3, "armwin", 200);
+	const auto previous = book.Chosen(3, "armmex", 210);
+	EXPECT(previous.has_value() && previous->answer == "armwin" && previous->frame == 200);
+	EXPECT(book.TakePending(3).has_value());
+	EXPECT(!book.TakePending(3).has_value());
+}
+
+void AnOrderNotCarriedOutIsHeldBack()
+{
+	reason8::OrderBook book;
+	using reason8::COOL_DOWN_FRAMES;
+	book.Chosen(1, "assist", 100);
+	EXPECT(book.Failed(1, "assist", 105));  // was pending: never entered the history
+	EXPECT(book.Due(1000).empty());
+	EXPECT(book.HeldBack(1, "assist", 105));
+	EXPECT(book.HeldBack(1, "assist", 105 + COOL_DOWN_FRAMES - 1));
+	EXPECT(!book.HeldBack(1, "assist", 105 + COOL_DOWN_FRAMES));
+	EXPECT(!book.HeldBack(2, "assist", 105));  // another builder
+	EXPECT(!book.HeldBack(1, "reclaim", 105));  // another answer
+	EXPECT(book.HeldBackAnswers(1, 106) == std::vector<std::string>{"assist"});
+
+	// a failure of another answer leaves the pending order alone
+	book.Chosen(1, "armmex", 200);
+	EXPECT(!book.Failed(1, "armwin", 200));
+	EXPECT(book.Due(200 + reason8::CARRIED_OUT_FRAMES).size() == 1);
+}
+
+void HeldBackAnswersAreNotChosen()
+{
+	reason8::OrderBook book;
+	book.Failed(7, "assist", 0);
+	const Answers answers = {{"assist", 0.8f}, {"armmex", 0.2f}};
+	const auto choice = Choose(answers, [&](const std::string& answer) { return !book.HeldBack(7, answer, 10); }, 0.f);
+	EXPECT(choice.outcome == Outcome::CHOSEN && choice.chosen.name == "armmex");
+	EXPECT(Near(choice.possible.front().probability, 1.f));  // rescaled without it
+}
+
 }  // namespace
 
 int main()
@@ -225,6 +289,10 @@ int main()
 	HistoryChainsRuns();
 	TypesAndFactions();
 	RoundedAsTheExportWrites();
+	EndedAtOnceIsShortAndEmpty();
+	OrdersEnterTheHistoryOnceCarriedOut();
+	AnOrderNotCarriedOutIsHeldBack();
+	HeldBackAnswersAreNotChosen();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failed\n", failures);
 		return EXIT_FAILURE;

@@ -84,7 +84,11 @@ who makes it.
   same mask, so that the model chosen there is the one that plays.
 - **Choosing from the answer:** after the mask, the bot samples among the
   answers with a probability of at least 10%. When no answer reaches the
-  threshold or the chosen one cannot be carried out, BARb decides.
+  threshold or the chosen one cannot be carried out, BARb decides. An order
+  cannot be carried out when it cannot be given or its task ends within a
+  second; that answer is then held back for that builder for 30 s of game
+  time, so that the bot does not give the same order again while nothing
+  changed. The model is consulted only for an idle builder.
 - **Skill stays an input only if the bot plays better with it:** on held-out
   games the predictions must change between low and high skill and the fit per
   skill band must improve; a model that passes is then played with and without
@@ -95,8 +99,12 @@ who makes it.
   range seen in training, because trees answer the same for every value above
   it.
 - **Where:** metal extractors go to the metal spots in the order players
-  usually take them from that map and start position; BARb places every other
-  structure and picks the target of every job.
+  usually take them from that map and start position, of those near the bot's
+  own start, else to the free spot BARb would take next; a builder ordered a
+  structure of a type the team is building already helps build it instead (a
+  factory anywhere, another structure near the builder); BARb places every
+  other structure and picks the target of every job, the way its own tasks do
+  for that job.
 - **Until when:** first contact
   ([ADR 0012](0012-end-openings-at-first-contact.md)), then BARb plays on.
 
@@ -110,10 +118,11 @@ who makes it.
   choices compared with held-out human games, how far the bot's state is from
   human states at fixed minutes, and the classifier of
   [ADR 0003](0003-define-success-as-in-game-measures.md).
-- In the game the order history is the model's own earlier answers, and a
-  model can learn to repeat them: repeating the last order is right for 32% of
-  steps. A model with a shorter history is played next to the full one to see
-  whether it drifts less.
+- In the game the order history is the model's own earlier answers that were
+  carried out (their task lasted a second), with BARb's orders to the builders
+  left to it, and a model can learn to repeat them: repeating the last order
+  is right for 32% of steps. A model with a shorter history is played next to
+  the full one to see whether it drifts less.
 - The account's rating is a weak label of skill. A measure of how well someone
   played, taken from their actions in the game, would be a better input and a
   better way to choose training games; it has to be found.

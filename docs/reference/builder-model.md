@@ -335,9 +335,9 @@ and whether that is exactly what the model was trained on.
   orders and jobs, a run of orders of one answer at most 6 frames apart being
   one step ([ADR 0013](../decisions/0013-evaluate-on-held-out-games.md)).
 : *Library:* the number of steps of the bot's earlier orders by the same rule:
-  the model's orders that were given (one the script reports it could not
-  carry out in its frame is none) and BARb's orders to the builders left to
-  it.
+  the model's orders that were carried out (their task lasted a second, or
+  finished a build sooner; [`in-game.md`](in-game.md#when-the-model-decides)),
+  at the frame they were, and BARb's orders to the builders left to it.
 : *Exact:* the same rule, but on the bot's decisions, not a player's; see
   [below](#inputs-the-library-cannot-compute-exactly).
 

@@ -280,7 +280,7 @@ def test_live_state_scripts_declare_the_same_functions():
     ours = build.live_state_script(True)
     stock = build.live_state_script(False)
     assert ours.count("{") == ours.count("}") and stock.count("{") == stock.count("}")
-    assert declarations(ours) == declarations(stock) and len(declarations(ours)) == 13
+    assert declarations(ours) == declarations(stock) and len(declarations(ours)) == 18
 
 
 def test_library_bindings_are_those_the_scripts_call():
