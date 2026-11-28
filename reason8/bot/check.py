@@ -44,6 +44,10 @@ The AI is found in the replay by its short name (--ai), and in the log by its
 short name or, for an AI built under another short name before the log said
 so, as Reason8; then only the lines about its teams in the replay count.
 
+Waits (--infolog): `reaction_waits_by_team` in the log part counts, per team,
+  the reaction delays its idle factories and builders waited out (ADR 0008):
+  how many, the seconds in all and the longest. Units standing idle show here.
+
 Log (--infolog): whether the AI loaded, which version and scripts, and script
   errors. An AI that fails to load or compile does not stop the game: its team
   stands still. With our BARb library (`reason8 bot build`), also the command
@@ -351,6 +355,23 @@ ENDED = re.compile(
 )
 
 
+WAIT = re.compile(r"unit \d+ idle, answering in (\d+) s")
+
+
+def count_wait(waits: dict[int, dict], team: int, text: str) -> None:
+    """Add a line about an idle unit waiting out its reaction delay to the team's waits:
+    how many there were, their total and the longest, in seconds. A bot whose units stand
+    idle shows here, which the orders alone do not tell."""
+    match = WAIT.fullmatch(text)
+    if not match:
+        return
+    seconds = int(match.group(1))
+    counts = waits.setdefault(team, {"waits": 0, "seconds": 0, "longest_seconds": 0})
+    counts["waits"] += 1
+    counts["seconds"] += seconds
+    counts["longest_seconds"] = max(counts["longest_seconds"], seconds)
+
+
 def count_opening_line(teams: dict[int, dict], message: str) -> None:
     """Add one ``Reason8 opening: team N: ...`` log line to its team's counts."""
     match = OPENING_LINE.match(message)
@@ -412,6 +433,7 @@ def check_infolog(infolog: Path, ai_short_name: str, teams_played: set[int] | No
     state_lines: dict[int, list[dict]] = {}
     model_teams: dict[int, dict] = {}
     next_order_lines: dict[int, list[str]] = {}
+    waits: dict[int, dict] = {}
     with infolog.open(encoding="utf-8", errors="replace") as file:
         for line in file:
             if any(needle in line for needle in ENGINE_ERRORS):
@@ -444,6 +466,8 @@ def check_infolog(infolog: Path, ai_short_name: str, teams_played: set[int] | No
                 if team_line and (state := live_state.parse_line(team_line.group(2))):
                     state_lines.setdefault(int(team_line.group(1)), []).append(state)
                     continue
+                if team_line:
+                    count_wait(waits, int(team_line.group(1)), team_line.group(2))
                 opening_lines += 1
                 count_opening_line(teams, message.removeprefix("Reason8 opening: "))
             if any(needle in message for needle in SCRIPT_ERRORS):
@@ -460,6 +484,7 @@ def check_infolog(infolog: Path, ai_short_name: str, teams_played: set[int] | No
         "opening_by_team": dict(sorted(teams.items())),
         "governor_by_team": governor,
         "live_state_by_team": dict(sorted(state_lines.items())),
+        "reaction_waits_by_team": dict(sorted(waits.items())),
         "next_order_by_team": {
             team: next_order.summary(counts) for team, counts in sorted(model_teams.items())
         },
