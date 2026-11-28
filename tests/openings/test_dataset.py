@@ -8,6 +8,7 @@ import polars as pl
 
 from reason8.openings.contact import BY_POSITION, MEASURED, WINDOW
 from reason8.openings.dataset import (
+    BUILT_AWAY,
     INCLUDED,
     NOT_A_RELEASE,
     REMOVED_UNIT,
@@ -20,6 +21,7 @@ from reason8.openings.dataset import (
     WRONG_SHAPE,
     build_dataset,
     extract_game,
+    first_places_distances,
     game_exclusion,
     load_sequences,
     ordered_faction,
@@ -238,6 +240,31 @@ def test_step_starts_with_jobs_as_answers():
     assert steps.to_list() == [0, 1, 2, 3, None]
 
 
+def test_first_places_distances_take_the_nearest_of_the_first_three_structures():
+    orders = pl.DataFrame(
+        {
+            "match_id": [1] * 6 + [2, 3],
+            "player_slot": [0] * 6 + [0, 0],
+            "seq_idx": [0, None, 1, 2, 3, 4, 0, 0],
+            "kind": ["factory", "structure", "structure", "structure", "structure", "structure"]
+            + ["factory", "structure"],
+            "x": [None, 0.0, 900.0, 0.0, 800.0, 0.0, None, 30.0],
+            "z": [None, 0.0, 0.0, 1000.0, 0.0, 0.0, None, 40.0],
+        }
+    )
+    starts = pl.DataFrame(
+        {
+            "match_id": [1, 2, 3],
+            "player_slot": [0, 0, 0],
+            "start_x": [0.0, 0.0, 0.0],
+            "start_z": [0.0, 0.0, 0.0],
+        }
+    )
+    distances = first_places_distances(orders, starts).collect().sort("match_id")
+    # a factory unit and a removal do not count, nor the structure after the first three
+    assert distances.rows() == [(1, 0, 800.0), (3, 0, 50.0)]
+
+
 def test_ordered_faction_and_removed_units():
     assert ordered_faction(["cormex", "corwin", "armmex"]) == "Cortex"
     assert ordered_faction(["legmex"]) == "Legion"
@@ -352,15 +379,20 @@ def test_build_dataset(tmp_path):
         "position_cutoff_quantile": 0.5,
         "position_cutoff_seconds": settings["position_cutoffs"],
     }
-    # of the 159 openings kept: players 0 and 7 of the re-simulated game, and player 8 of
+    # of the 149 openings kept: players 0 and 7 of the re-simulated game, and player 8 of
     # each of the 10 games through the position
     assert manifest["counts"]["openings_by_cutoff_source"] == {
-        WINDOW: 147,
+        WINDOW: 137,
         BY_POSITION: 10,
         MEASURED: 2,
     }
     assert manifest["counts"]["games_by_status"] == {INCLUDED: 10, UNIT_TWEAKS: 1}
-    assert manifest["counts"]["openings_by_status"] == {INCLUDED: 159, REMOVED_UNIT: 1}
+    # player 13 of the fixture places its first extractor 1,011 units from its start
+    assert manifest["counts"]["openings_by_status"] == {
+        INCLUDED: 149,
+        BUILT_AWAY: 10,
+        REMOVED_UNIT: 1,
+    }
     assert manifest["vocabulary"]["arm cor"]["build"] == 32018
     assert manifest["code"]["commit"]
 
@@ -369,6 +401,9 @@ def test_build_dataset(tmp_path):
     assert games_frame["replay_file_name"].to_list()[0] == "game0.sdfz"
     openings_frame = pl.read_parquet(out / "openings.parquet")
     assert openings_frame.height == 160
+    built_away = openings_frame.filter(pl.col("status") == BUILT_AWAY)
+    assert set(built_away["player_slot"]) == {13}
+    assert built_away["first_places_distance"].min() > 1000
     assert set(openings_frame.filter(pl.col("faction_picked") == "Random")["faction"]) <= {
         "Armada",
         "Cortex",
@@ -440,5 +475,5 @@ def test_build_dataset(tmp_path):
     assert window["opening"]["cutoff"] == WHOLE_WINDOW
     assert window["opening"]["measured_games"] == 0
     assert window["opening"]["position_cutoff_seconds"] is None
-    assert window["counts"]["openings_by_cutoff_source"] == {WINDOW: 159}
+    assert window["counts"]["openings_by_cutoff_source"] == {WINDOW: 149}
     assert sum(window["counts"]["rows"].values()) > total_rows
