@@ -8,8 +8,8 @@ Usage::
 
 Re-simulating a game costs minutes of an engine (docs/research/state-extraction.md), so the
 decision table (`reason8 context build`) is built from a sample of the games of the opening
-dataset, not from all of them, and `reason8 headless batch` re-simulates the sample's games.
-The rule:
+dataset, not from all of them; `reason8 headless list` writes the replays of its games that
+are not re-simulated yet for `reason8 headless batch`. The rule:
 
 1. the games of the opening dataset (``openings_v2``) whose status is ``ok``;
 2. without the games that already have a state file in an ``--exclude-state`` directory, if
