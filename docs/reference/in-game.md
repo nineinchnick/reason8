@@ -230,10 +230,12 @@ The AI lives in [`ai/Reason8`](../../ai/Reason8):
   map and start position, five openings (`variant` 0 to 4, the one the model
   finds most likely first): where the position's players start, the structures
   the commander builds with where the human placed each (`places`), and the
-  first units of its first factory, by unit name. A separate `tasks` map says
-  which BARb task type builds each structure. An opening without a map is
-  played on any map, by side only; the tests use a file of deliberately
-  unusual ones, so that a game shows at once whether they were played.
+  first units of its first factory, by unit name. An opening whose first three
+  places are all more than 700 units from the position's start is not exported
+  for it. A separate `tasks` map says which BARb task type builds each
+  structure. An opening without a map is played on any map, by side only; the
+  tests use a file of deliberately unusual ones, so that a game shows at once
+  whether they were played.
 
 `script/hard/reason8/opening.as`
 : The logic, about 400 lines of AngelScript. It finds the position of the AI's

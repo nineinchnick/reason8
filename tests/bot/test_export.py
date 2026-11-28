@@ -145,3 +145,29 @@ def test_choose_opening_at_the_logged_position():
     chosen = choose_opening(openings, "armada", "Isthmus", (100, 100), variant=1, position="P2")
     assert chosen is openings[2]
     assert choose_opening(openings, "armada", "Isthmus", (100, 100), position="P9") is openings[0]
+
+
+def test_export_leaves_out_openings_built_away_from_the_position():
+    from reason8.bot.export import Candidate, export, first_places_distance
+    from reason8.models.ngram import NgramModel, OpeningSteps, chain
+
+    key = ("Isthmus", "P1", "Armada")
+    units = ["armmex"] * 3 + ["armwin"] * 12
+    model = NgramModel("bigram", chain(2)).fit(
+        [OpeningSteps(0, "Armada", *key[:2], None, None, None, tuple(units))]
+    )
+
+    def candidate(match_id, first_place):
+        # the first extractor at `first_place`, the next ones far away
+        places = [first_place, (5000.0, 5000.0), (5000.0, 5100.0)]
+        steps = [Step("armmex", "structure", 1, (place,)) for place in places]
+        steps += [Step("armwin", "structure", 1, ((100.0, 100.0),))] * 12
+        return Candidate(match_id, 0, tuple(steps))
+
+    candidates = {key: [candidate(1, (120.0, 80.0)), candidate(2, (900.0, 100.0))]}
+    document = export(model, candidates, {key[:2]: (100.0, 100.0)}, UNIT_DEFS)
+    # the nearest of the first three places counts: 28 units for the first, 800 for the other
+    assert [opening["places"][0] for opening in document["openings"]] == [[120, 80]]
+    assert document["openings"][0]["candidates"] == 1
+    assert first_places_distance([None, [700, 100], [100, 800]], (100, 100)) == 600
+    assert first_places_distance([None], (0, 0)) is None
