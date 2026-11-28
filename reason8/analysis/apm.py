@@ -387,8 +387,13 @@ def event_stream(source: tables.Source, replays: Iterable[str]) -> pl.LazyFrame:
     )
 
 
-def day_apm(source: tables.Source) -> dict[str, GameApm]:
-    """Replay -> its actions, for the replays of a source (one day, to keep memory low)."""
+#: Replays whose events are read at once: a busy day's events at once take over 10 GB.
+REPLAYS_PER_READ = 20
+
+
+def day_apm(source: tables.Source, chunk: int = REPLAYS_PER_READ) -> dict[str, GameApm]:
+    """Replay -> its actions, for the replays of a source (one day), read `chunk` replays
+    at a time to keep memory low."""
     headers = tables.replay_headers(
         source.scan(tables.GAMES).collect(), source.scan(tables.PLAYERS).collect()
     )
@@ -398,10 +403,12 @@ def day_apm(source: tables.Source) -> dict[str, GameApm]:
         if game_exclusion(header) is not None
     }
     included = sorted(set(headers) - set(results))
-    stream = event_stream(source, included).collect()
-    for (name,), rows in stream.group_by("replay", maintain_order=True):
-        events = list(zip(*(rows[field].to_list() for field in EVENT_FIELDS), strict=True))
-        results[name] = game_apm(headers[name], name, events)
+    for start in range(0, len(included), chunk):
+        stream = event_stream(source, included[start : start + chunk]).collect()
+        for (name,), rows in stream.group_by("replay", maintain_order=True):
+            events = list(zip(*(rows[field].to_list() for field in EVENT_FIELDS), strict=True))
+            results[name] = game_apm(headers[name], name, events)
+        del stream
     for name in included:
         if name not in results:  # no events at all
             results[name] = game_apm(headers[name], name, [])

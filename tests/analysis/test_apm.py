@@ -6,6 +6,7 @@ from reason8.analysis.apm import (
     PLAYER_SCHEMA,
     WITH_BOTS,
     ActionCounter,
+    day_apm,
     end_frames,
     game_apm,
     measure,
@@ -14,6 +15,7 @@ from reason8.analysis.apm import (
     player_actions,
     report,
 )
+from reason8.replays import tables
 from reason8.replays.replay import FORMAT, Replay
 from tests import synthetic
 
@@ -168,3 +170,17 @@ def test_measure_and_report(tmp_path):
     text = report(tmp_path / "apm")
     assert "## Actions per minute, `clicked`, by game phase" in text
     assert "| 40 and up | 6 |" in text  # player-minutes of the two players with 45.5
+
+
+def test_day_apm_reads_in_chunks(tmp_path):
+    events = [select(0, 0, 100)] + [click(frame, 0) for frame in range(0, 2 * MINUTE, 50)]
+    out = synthetic.write_tables(
+        tmp_path / "tables",
+        {"2026-11-01_a": make_replay(events), "2026-11-01_b": make_replay(events[:5])},
+    )
+    (day,) = tables.open_source(out).by_day()
+    whole = day_apm(day)
+    assert {name: result.players for name, result in day_apm(day, chunk=1).items()} == {
+        name: result.players for name, result in whole.items()
+    }
+    assert sorted(whole) == ["2026-11-01_a", "2026-11-01_b"]
