@@ -240,9 +240,11 @@ The AI lives in [`ai/Reason8`](../../ai/Reason8):
 `script/hard/reason8/opening.as`
 : The logic, about 400 lines of AngelScript. It finds the position of the AI's
   side and map whose start is nearest to the commander, picks one of its
-  openings at random, and gives the commander one build task per step and the
-  factory one task per unit, moving on when a task is done and trying again,
-  after a pause, when it fails.
+  openings at random, of those with one of the first three places within 700
+  units of the commander (in lobby games with fewer players than positions the
+  bot starts hundreds of units from a position's start), and gives the
+  commander one build task per step and the factory one task per unit, moving
+  on when a task is done and trying again, after a pause, when it fails.
 
 `script/hard/manager/builder.as`, `factory.as`
 : Copies of BARb's two scripts with six added calls into `opening.as`, marked

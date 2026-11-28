@@ -360,10 +360,41 @@ void LogStateEvery30Seconds()
 	nextStateFrame = ai.frame - ai.frame % STATE_LOG_FRAMES + STATE_LOG_FRAMES;
 }
 
+// An opening is played only when one of its first FIRST_PLACES commander places is within
+// this many map units of the commander's own start. The export leaves out openings built
+// further from their position's start; this covers a bot that starts away from it, as in
+// lobby games with fewer players than positions.
+const float MAX_FIRST_PLACES_DISTANCE = 700.f;
+const uint FIRST_PLACES = 3;
+
+// Whether one of the first FIRST_PLACES known places of `candidate`'s commander steps is
+// within MAX_FIRST_PLACES_DISTANCE of (x, z); true when none is known.
+bool StartsNear(const SOpening& in candidate, float x, float z)
+{
+	array<string> encoded = Split(candidate.steps, ";");
+	uint known = 0;
+	for (uint i = 0; i < encoded.length() && known < FIRST_PLACES; ++i) {
+		array<string> fields = Split(encoded[i], " ");
+		if (fields.length() != 4)
+			continue;
+		const float placeX = float(parseInt(fields[2]));
+		const float placeZ = float(parseInt(fields[3]));
+		if (placeX < 0.f)
+			continue;
+		++known;
+		const float dx = placeX - x;
+		const float dz = placeZ - z;
+		if (dx * dx + dz * dz <= MAX_FIRST_PLACES_DISTANCE * MAX_FIRST_PLACES_DISTANCE)
+			return true;
+	}
+	return known == 0;
+}
+
 /*
  * The opening to play, chosen once: of the openings for the AI's side and map,
- * the one whose start is nearest to `position` (the commander's place at the
- * start); without one for the map, the first for the side and any map.
+ * those of the position whose start is nearest to `position` (the commander's
+ * place at the start), and of them one at random that starts near it
+ * (StartsNear); without one, the first for the side and any map.
  */
 SOpening@ GetOpening(const AIFloat3& in position_)
 {
@@ -388,16 +419,25 @@ SOpening@ GetOpening(const AIFloat3& in position_)
 			position = openings[i].position;
 		}
 	}
-	// the opening: one of the position's openings, at random
+	// the opening: one of the position's openings that start near the commander, at random
 	array<uint> variants;
+	array<int> near;  // of `variants`, those to choose from
 	for (uint i = 0; i < openings.length(); ++i) {
-		if (openings[i].side == side && openings[i].map == mapName && openings[i].position == position)
-			variants.insertLast(i);
+		if (openings[i].side != side || openings[i].map != mapName || openings[i].position != position)
+			continue;
+		variants.insertLast(i);
+		if (StartsNear(openings[i], position_.x, position_.z)) {
+			near.insertLast(int(variants.length()) - 1);
+		} else {
+			Log("position " + position + ", opening " + variants.length()
+				+ ": its first places are further than " + int(MAX_FIRST_PLACES_DISTANCE)
+				+ " from the start, not played");
+		}
 	}
 	int variant = -1;
-	if (variants.length() > 0) {
+	if (near.length() > 0) {
 		// teams that start in the same second share the random sequence: add the team
-		variant = (AiRandom(0, 9999) + ai.teamId) % int(variants.length());
+		variant = near[(AiRandom(0, 9999) + ai.teamId) % int(near.length())];
 		@opening = openings[variants[variant]];
 	}
 	for (uint i = 0; opening is null && i < openings.length(); ++i) {
