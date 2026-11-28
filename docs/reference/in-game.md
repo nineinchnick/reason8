@@ -1441,13 +1441,27 @@ build both in CI.
 
 ## Installing it in a real game
 
-Not tried in the BAR client. What we know:
+Reason8 has played real-time lobby (skirmish) games in the Windows BAR client:
+three 4v4 games, two on Supreme Isthmus and one on All That Glitters, of 30 to
+50 minutes, with Reason8 bots as allies and opponents of a human player next
+to stock BARb. Our library loaded, the action budget held, the openings were
+played and BARb took over after them. The games also showed bugs that have
+been fixed or filed since: a commander waiting on a step, openings built at
+another position, and a second factory from BARb.
 
-- Build the folder with `--skirmish-dir` pointing at the BAR install's
-  `engine/<version>/AI/Skirmish/`. The data folder's `AI/Skirmish/` worked
-  headlessly and may survive engine updates, which replace the engine folder
-  (Apex's README says an engine update wipes the AI folder). The library still
-  has to match the engine, so rebuild after an update either way.
+How it is installed and checked:
+
+- `reason8 bot build` writes into a separate folder, never into the real
+  install: `--data-dir` and `--skirmish-dir` point at a test copy of the
+  game's data, with the same engine and game version as the install. The built
+  `Reason8` folder is then copied by hand into the install's
+  `engine/<engine>/AI/Skirmish/`. The library has to match the engine, and an
+  engine update replaces the engine folder with the AI in it (Apex's README
+  says the same), so build and copy again after an update.
+- In the lobby the AI is added as `Reason8`, like any skirmish AI.
+- After the game, `reason8 bot check` reads the replay in the install's
+  `data/demos/` and the log `data/infolog.txt`: each team's opening, where it
+  ended and why, whether the orders matched it, and the governor's budget.
 - BAR's lobby lists every AI the engine finds (`VFS.GetAvailableAIs`), but its
   "Simple AI list" setting, on by default, shows only AIs it knows by name.
   Apex's installer turns the setting off for that reason.
@@ -1458,18 +1472,16 @@ Not tried in the BAR client. What we know:
   make that unnecessary.
 - On Windows the library is `SkirmishAI.dll`. `reason8 bot build` builds ours
   when the engine folder it installs into is a Windows one, for example from
-  WSL with `--data-dir "/mnt/c/<BAR install>/data"` and `--skirmish-dir`
-  pointing at that engine's `AI/Skirmish`. It played headless games in
-  `spring-headless.exe`; a game in the BAR client was not tried.
+  WSL with `--data-dir "/mnt/c/<test copy>/data"` and `--skirmish-dir`
+  pointing at that engine's `AI/Skirmish`.
 
 ## Not covered
 
-- A real lobby, Legion, Rosetta (only Supreme Isthmus and All That Glitters
-  were played), and Reason8 next to human players.
+- Legion and Rosetta (only Supreme Isthmus and All That Glitters were played),
+  and more than a few lobby games.
 - A model that runs during the game. The bridge and our own library were
   measured with a stand-in, not with a model.
-- Our library in a real lobby, on either platform; on Windows only headless
-  games were played.
+- Our library in a lobby game on Linux: only the Windows client was played.
 - The command budget in a game played in real time: in headless games the
   replay records the bot's commands up to a second late, so only the
   governor's own log shows the budget exactly
