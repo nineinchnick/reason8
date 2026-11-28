@@ -18,10 +18,14 @@ IUnitTask@ AiMakeTask(CCircuitUnit@ unit)
 	if (reactionFrames > 0)
 		return aiBuilderMgr.Enqueue(TaskB::Wait(reactionFrames));
 
-	// Reason8: the commander plays the opening first
+	// Reason8: the commander plays the opening first, or the model decides the order
 	IUnitTask@ task = Reason8::MakeCommanderTask(unit);
 	if (task is null)
+		@task = Reason8::NextOrderFor(unit, false);
+	if (task is null) {
 		@task = aiBuilderMgr.DefaultMakeTask(unit);
+		Reason8::BarbGave(unit, task);  // Reason8:
+	}
 	Reason8::TaskGiven(unit, task, false);  // Reason8:
 	return task;
 }
@@ -33,6 +37,7 @@ void AiTaskAdded(IUnitTask@ task)
 void AiTaskRemoved(IUnitTask@ task, bool done)
 {
 	Reason8::CommanderTaskRemoved(task, done);  // Reason8:
+	Reason8::OrderTaskEnded(task, done);  // Reason8:
 	Reason8::TaskEnded(task, done);  // Reason8:
 }
 

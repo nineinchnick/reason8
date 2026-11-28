@@ -274,19 +274,90 @@ def test_a_linux_library_does_not_go_into_a_windows_engine(tmp_path):
 
 def test_live_state_scripts_declare_the_same_functions():
     def declarations(script: str) -> list[str]:
-        return re.findall(r"^((?:float|int|string) \w+)\(", script, re.M)
+        return re.findall(r"^((?:float|int|string|bool|void|IUnitTask@) \w+)\(", script, re.M)
 
     ours = build.live_state_script(True)
     stock = build.live_state_script(False)
     assert ours.count("{") == ours.count("}") and stock.count("{") == stock.count("}")
-    assert declarations(ours) == declarations(stock) and len(declarations(ours)) == 6
+    assert declarations(ours) == declarations(stock) and len(declarations(ours)) == 11
 
 
 def test_library_bindings_are_those_the_scripts_call():
-    header = (REPO_ROOT / "ai" / "native" / "LiveState.cpp").read_text(encoding="utf-8")
-    registered = set(re.findall(r'RegisterGlobalFunction\("\w+ (Reason8\w+)\(', header))
+    registered = set()
+    for name in ("LiveState.cpp", "NextOrder.cpp"):
+        source = (REPO_ROOT / "ai" / "native" / name).read_text(encoding="utf-8")
+        registered |= set(re.findall(r'RegisterGlobalFunction\("[\w@+]+ (Reason8\w+)\(', source))
     called = set(re.findall(r"(Reason8\w+)\(", build.live_state_script(True)))
-    assert called == registered
+    assert called == registered and "Reason8NextOrder" in called
+
+
+NEXT_ORDER = {
+    "metal_spots": [
+        {
+            "map": "Some Map v1",
+            "position": "P1",
+            "start": [100.4, 200],
+            "openings": 50,
+            "spots": [{"x": 1, "z": 2, "share": 0.9, "median_rank": 1.0}],
+        }
+    ],
+    "tasks": {"armmex": "mex", "armwin": "energy"},
+}
+STAND_IN = {
+    "rows": [
+        {"builder": "armcom", "minute": 0, "answers": {"armmex": 0.6, "assist": 0.4}},
+        {"builder": "armlab", "minute": 0, "answers": {}},
+    ]
+}
+
+
+def test_next_order_table():
+    table = build.next_order_table(NEXT_ORDER)
+    assert '\t"Some Map v1|P1|100 200|1 2"\n};' in table
+    assert '\t"armmex MEX",\n\t"armwin ENERGY"\n};' in table
+    empty = build.next_order_table({})
+    assert (
+        "const array<string> USUAL_SPOTS;" in empty and "const array<string> BUILD_TASKS;" in empty
+    )
+
+
+def test_next_order_table_rejects_bad_input():
+    with pytest.raises(SystemExit, match="bad task"):
+        build.next_order_table({"tasks": {"armmex": "nothing"}})
+    bad_map = {"metal_spots": [{**NEXT_ORDER["metal_spots"][0], "map": 'a"b'}]}
+    with pytest.raises(SystemExit, match="bad map"):
+        build.next_order_table(bad_map)
+
+
+def test_stand_in_text():
+    lines = build.stand_in_text(STAND_IN).splitlines()
+    assert lines[-1] == "armcom 0 armmex 0.6 assist 0.4"  # a row without answers is left out
+    assert all(line.startswith("#") for line in lines[:-1])
+    with pytest.raises(SystemExit, match="bad answer"):
+        build.stand_in_text({"rows": [{"builder": "a", "minute": 0, "answers": {"x y": 1}}]})
+
+
+def test_exported_next_order_files_build():
+    next_order = json.loads((SOURCE / "next_order.json").read_text(encoding="utf-8"))
+    stand_in = json.loads((SOURCE / "stand_in.json").read_text(encoding="utf-8"))
+    assert "USUAL_SPOTS = {" in build.next_order_table(next_order)
+    rows = [line for line in build.stand_in_text(stand_in).splitlines() if not line.startswith("#")]
+    assert len(rows) == len(stand_in["rows"])
+
+
+def test_assemble_with_next_order_files(tmp_path):
+    stock_hash = hashlib.sha256(b"// stock factory\n").hexdigest()
+    inputs = make_inputs(tmp_path, stock_hash)
+    (inputs["source_dir"] / "next_order.json").write_text(json.dumps(NEXT_ORDER))
+    (inputs["source_dir"] / "stand_in.json").write_text(json.dumps(STAND_IN))
+    files, facts = build.assemble(**inputs)
+    assert "next_order.json" not in files and "stand_in.json" not in files
+    assert b"armmex MEX" in files["script/hard/reason8/next_order_table.as"]
+    assert files["reason8/stand_in.txt"].endswith(b"armcom 0 armmex 0.6 assist 0.4\n")
+    assert facts["stand_in_rows"] == 2 and facts["usual_metal_spot_positions"] == 1
+    _, without = build.assemble(**make_inputs(tmp_path / "other", stock_hash))
+    assert without["next_order_sha256"] is None and without["stand_in_sha256"] is None
+    assert without["stand_in_rows"] == 0
 
 
 def test_library_scouts_are_those_of_first_contact():

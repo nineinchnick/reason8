@@ -24,6 +24,10 @@
  * Every decision is logged with the prefix "Reason8 opening:". With our BARb
  * library the live state (live_state.as) is logged too: at every commander
  * step, and every 30 s of game time while units go idle.
+ *
+ * When the AI option builder_orders is "model", the opening is not played:
+ * the model decides the next order of every idle builder instead
+ * (next_order.as).
  */
 
 #include "../../define.as"
@@ -31,6 +35,7 @@
 #include "../../task.as"
 #include "opening_table.as"
 #include "live_state.as"
+#include "next_order.as"
 
 
 namespace Reason8 {
@@ -523,7 +528,7 @@ void NextCommanderStep()
  */
 IUnitTask@ MakeCommanderTask(CCircuitUnit@ unit)
 {
-	if (!unit.circuitDef.IsRoleAny(Unit::Role::COMM.mask))
+	if (ModelOrdersMode() || !unit.circuitDef.IsRoleAny(Unit::Role::COMM.mask))
 		return null;
 	SOpening@ plan = GetOpening(unit.GetPos(ai.frame));
 	if (plan is null || isOpeningOver)
@@ -631,6 +636,8 @@ void CommanderTaskRemoved(IUnitTask@ task, bool done)
  */
 bool StartFactoryOpening(CCircuitUnit@ factory)
 {
+	if (ModelOrdersMode())
+		return false;
 	SOpening@ plan = GetOpening(factory.GetPos(ai.frame));
 	if (plan is null || isOpeningOver || openingFactory !is null || factoryStep > 0)
 		return false;
@@ -759,11 +766,16 @@ void EndOpening(const string& in reason, const string& in detail)
 
 /*
  * Called once a second from main.as. Ends the opening when it no longer
- * applies. A commander stuck on a step is never idle, so this cannot wait for
- * the builder hooks.
+ * applies, or the model's orders (next_order.as) when the model decides. A
+ * commander stuck on a step is never idle, so this cannot wait for the
+ * builder hooks.
  */
 void Update()
 {
+	if (ModelOrdersMode()) {
+		UpdateModelOrders();
+		return;
+	}
 	if (opening is null || isOpeningOver)
 		return;
 	if (commanderStep >= opening.commander.length() && openingFactory is null)
