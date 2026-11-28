@@ -1,0 +1,157 @@
+/* Tests of Choice.h and StandIn.h without the engine. ai/native/build.sh
+ * compiles and runs it before it builds the library:
+ *
+ *   g++ -std=c++20 -I ai/native ai/native/test_next_order.cpp -o test_next_order && ./test_next_order
+ *
+ * GPL-2.0-or-later. */
+
+#include "Choice.h"
+#include "StandIn.h"
+
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <map>
+#include <sstream>
+#include <string>
+
+using reason8::Answers;
+using reason8::Choose;
+using reason8::Mask;
+using reason8::Outcome;
+
+namespace {
+
+int failures = 0;
+
+void Expect(bool condition, const std::string& what, int line)
+{
+	if (!condition) {
+		std::fprintf(stderr, "test_next_order.cpp:%d: %s\n", line, what.c_str());
+		++failures;
+	}
+}
+
+#define EXPECT(condition) Expect((condition), #condition, __LINE__)
+
+bool Near(float a, float b) { return std::fabs(a - b) < 1e-5f; }
+
+bool Any(const std::string&) { return true; }
+
+void MaskRemovesAndRescales()
+{
+	const Answers answers = {{"armmex", 0.2f}, {"reclaim", 0.3f}, {"armwin", 0.1f}, {"armlab", 0.f}};
+	const Answers kept = Mask(answers, [](const std::string& name) { return name != "reclaim"; });
+	EXPECT(kept.size() == 2);
+	EXPECT(kept[0].name == "armmex" && Near(kept[0].probability, 2.f / 3.f));
+	EXPECT(kept[1].name == "armwin" && Near(kept[1].probability, 1.f / 3.f));
+	EXPECT(Mask(answers, [](const std::string&) { return false; }).empty());
+}
+
+void NoAnswersAndNothingPossible()
+{
+	EXPECT(Choose({}, Any, 0.5f).outcome == Outcome::NO_ANSWERS);
+	const Answers answers = {{"assist", 1.f}};
+	EXPECT(Choose(answers, [](const std::string&) { return false; }, 0.5f).outcome
+		== Outcome::NOTHING_POSSIBLE);
+}
+
+void BelowThresholdNamesTheBest()
+{
+	Answers answers;
+	for (int index = 0; index < 12; ++index) {
+		answers.push_back({"unit" + std::to_string(index), index == 3 ? 1.1f : 1.f});
+	}
+	const reason8::Choice choice = Choose(answers, Any, 0.5f);
+	EXPECT(choice.outcome == Outcome::BELOW_THRESHOLD);
+	EXPECT(choice.chosen.name == "unit3");
+	EXPECT(choice.candidates == 0);
+}
+
+void SamplesOnlyAboveTheThreshold()
+{
+	// after rescaling: a 0.5, b 0.3, c 0.15, d 0.05 (below 10%)
+	const Answers answers = {{"a", 10.f}, {"b", 6.f}, {"c", 3.f}, {"d", 1.f}};
+	std::map<std::string, int> drawn;
+	const int draws = 9500;
+	for (int index = 0; index < draws; ++index) {
+		const float uniform = (index + 0.5f) / draws;
+		const reason8::Choice choice = Choose(answers, Any, uniform);
+		EXPECT(choice.outcome == Outcome::CHOSEN && choice.candidates == 3);
+		++drawn[choice.chosen.name];
+	}
+	EXPECT(drawn.count("d") == 0);
+	// in proportion among the candidates: 0.5, 0.3 and 0.15 of 0.95
+	EXPECT(std::abs(drawn["a"] - 5000) <= 1);
+	EXPECT(std::abs(drawn["b"] - 3000) <= 1);
+	EXPECT(std::abs(drawn["c"] - 1500) <= 1);
+	// the ends of the range stay inside it
+	EXPECT(Choose(answers, Any, 0.f).chosen.name == "a");
+	EXPECT(Choose(answers, Any, 0.99999f).chosen.name == "c");
+	EXPECT(Choose(answers, Any, 1.f).chosen.name == "c");
+}
+
+void TheMaskComesBeforeTheThreshold()
+{
+	// 0.09 is below the threshold, but becomes 0.18 once "assist" is removed
+	const Answers answers = {{"assist", 0.5f}, {"armmex", 0.41f}, {"armwin", 0.09f}};
+	int wind = 0;
+	for (int index = 0; index < 100; ++index) {
+		const reason8::Choice choice = Choose(answers, [](const std::string& name) { return name != "assist"; },
+			(index + 0.5f) / 100);
+		EXPECT(choice.candidates == 2);
+		wind += choice.chosen.name == "armwin";
+	}
+	EXPECT(wind == 18);
+}
+
+void JobsAreKnown()
+{
+	EXPECT(reason8::IsJob("assist") && reason8::IsJob("resurrect"));
+	EXPECT(!reason8::IsJob("armmex"));
+}
+
+void StandInReadsItsTable()
+{
+	std::istringstream text(
+		"# a comment\n"
+		"armcom 0 armmex 0.5 armwin 0.3\n"
+		"armcom 2 armwin 0.6 assist 0.4\n"
+		"broken\n"
+		"armlab 1 armck 1\n");
+	reason8::StandInModel model;
+	EXPECT(model.Load(text) == 3);
+	EXPECT(model.Units() == 2);
+	reason8::IdleBuilder builder;
+	builder.unit = "armcom";
+	builder.frame = 0;
+	EXPECT(model.Predict(builder).size() == 2 && model.Predict(builder)[0].name == "armmex");
+	builder.frame = 1 * 1800 + 5;  // minute 1: still the row of minute 0
+	EXPECT(model.Predict(builder)[0].name == "armmex");
+	builder.frame = 20 * 1800;  // past the last row: the last
+	EXPECT(model.Predict(builder)[0].name == "armwin" && Near(model.Predict(builder)[1].probability, 0.4f));
+	builder.unit = "armlab";
+	builder.frame = 0;  // before the first row: the first
+	EXPECT(model.Predict(builder).size() == 1);
+	builder.unit = "armck";
+	EXPECT(model.Predict(builder).empty());
+}
+
+}  // namespace
+
+int main()
+{
+	MaskRemovesAndRescales();
+	NoAnswersAndNothingPossible();
+	BelowThresholdNamesTheBest();
+	SamplesOnlyAboveTheThreshold();
+	TheMaskComesBeforeTheThreshold();
+	JobsAreKnown();
+	StandInReadsItsTable();
+	if (failures != 0) {
+		std::fprintf(stderr, "%d failed\n", failures);
+		return EXIT_FAILURE;
+	}
+	std::printf("test_next_order: all passed\n");
+	return EXIT_SUCCESS;
+}

@@ -1,16 +1,17 @@
 diff --git a/src/circuit/script/InitScript.cpp b/src/circuit/script/InitScript.cpp
-index c3aaefe..b42adc3 100644
+index c3aaefe..a153135 100644
 --- a/src/circuit/script/InitScript.cpp
 +++ b/src/circuit/script/InitScript.cpp
-@@ -36,6 +36,7 @@
+@@ -36,6 +36,8 @@
  #include "Game.h"
  #include "Team.h"
  #include "Lua.h"
 +#include "../../LiveState.h"  // Reason8
++#include "../../NextOrder.h"  // Reason8
  
  #include <format>
  
-@@ -633,6 +634,7 @@ void CInitScript::RegisterCore()
+@@ -633,6 +635,7 @@ void CInitScript::RegisterCore()
  
  	r = engine->RegisterObjectType("CCircuitAI", 0, asOBJ_REF | asOBJ_NOHANDLE); ASSERT(r >= 0);
  	r = engine->RegisterGlobalProperty("CCircuitAI ai", circuit); ASSERT(r >= 0);
@@ -18,3 +19,12 @@ index c3aaefe..b42adc3 100644
  
  	r = engine->RegisterObjectType("CCircuitDef", 0, asOBJ_REF | asOBJ_NOCOUNT); ASSERT(r >= 0);
  	r = engine->RegisterObjectType("CCircuitUnit", 0, asOBJ_REF | asOBJ_NOCOUNT); ASSERT(r >= 0);
+@@ -767,6 +770,8 @@ void CInitScript::RegisterMgr()
+ 	r = engine->RegisterObjectType("CThreatMap", 0, asOBJ_REF | asOBJ_NOHANDLE); ASSERT(r >= 0);
+ 	r = engine->RegisterGlobalProperty("CThreatMap aiThreat", thrMap); ASSERT(r >= 0);
+ 	r = engine->RegisterObjectMethod("CThreatMap", "void ApplyRange(CCircuitDef@)", asMETHOD(CThreatMap, ApplyRange), asCALL_THISCALL); ASSERT(r >= 0);
++
++	reason8::RegisterNextOrder(engine, circuit);  // Reason8
+ }
+ 
+ bool CInitScript::Init()
