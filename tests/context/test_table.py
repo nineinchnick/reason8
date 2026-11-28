@@ -516,3 +516,12 @@ def test_time_since_an_earlier_frame():
     )
     rows = table.with_times(orders)
     assert rows["since_previous_s"].to_list() == [None, 1.0, 1.0]
+
+
+def test_sample_drawn_reads_how_the_sample_was_drawn(tmp_path):
+    sample_path = tmp_path / "sample.parquet"
+    assert table.sample_drawn(sample_path) is None  # drawn by hand: nothing to say
+    assert table.sample_drawn(None) is None
+    description = {"rule": "a rule", "seed": 48, "counts": {"Map A": 3}, "source": {}}
+    (tmp_path / "sample.json").write_text(json.dumps({**description, "excluded_match_ids": ["1"]}))
+    assert table.sample_drawn(sample_path) == {**description, "drawn_at": None}
