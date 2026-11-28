@@ -33,11 +33,26 @@ namespace reason8 {
  *       "repair" or "resurrect"; null when BARb has none
  *   bool Reason8SpotOpen(int spot)
  *       whether BARb's metal spot `spot` has no extractor on it
+ *   void Reason8BarbOrdered(CCircuitUnit@ builder, IUnitTask@ task)
+ *       BARb gave the builder `task`: an order of the bot for the model's
+ *       order history all the same
+ *   void Reason8SetStart(const string& in position, const string& in role)
+ *       the team's start position and its role, for the model's inputs
  *
- * The model is the stand-in of StandIn.h, read from reason8/stand_in.txt in
- * the AI's folder, until the learned model is in. Every line goes to the
- * engine log with the prefix "Reason8 next order: team <id>: ". */
+ * The model is the learned one (Trees.h), read from reason8/builder_model.json
+ * in the AI's folder when the AI starts, its inputs computed from the game as
+ * the decision table defines them; without that file, the stand-in of
+ * StandIn.h, read from reason8/stand_in.txt. Every line goes to the engine log
+ * with the prefix "Reason8 next order: team <id>: ". */
 void RegisterNextOrder(asIScriptEngine* engine, circuit::CCircuitAI* circuit);
+
+/* Called on every frame of an AI before it handles it: the economy the model's
+ * inputs read is that of the last whole second, as the state export has it. */
+void NextOrderUpdate(int skirmishAIId, int frame);
+
+/* Called with every idle event of an AI's own units: the idle build power of
+ * the model's inputs. */
+void NextOrderUnitIdle(int skirmishAIId, int unitId);
 
 }  // namespace reason8
 

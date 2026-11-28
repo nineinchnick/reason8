@@ -47,9 +47,11 @@ import hashlib
 import json
 import re
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
 
 from reason8.bot import library as native
+from reason8.game.maps import MapMetadata, load_map_list
 from reason8.game.package import find_game_package, read_package
 from reason8.headless.run import find_engine
 from reason8.paths import REPO_ROOT
@@ -84,6 +86,9 @@ TASK_TYPES = {
 }
 UNIT_NAME = re.compile(r"^[a-z0-9_]+$")
 MAP_TEXT = re.compile(r"^[A-Za-z0-9 ._()\-]*$")  # map and position names, quoted as they are
+ROLE_TEXT = re.compile(r"^[a-z/]*$")  # a position's role: front, front/tech, ...
+#: The usual metal spots come from games of two teams of this many players.
+TEAM_SIZE = 8
 
 
 def sha256(data: bytes) -> str:
@@ -203,18 +208,42 @@ def opening_table(openings: dict) -> str:
     )
 
 
-def next_order_table(next_order: dict) -> str:
+def position_roles(
+    map_list: Mapping[str, MapMetadata], team_size: int = TEAM_SIZE
+) -> dict[tuple[str, str], str]:
+    """The role of each start position (front, tech, air, sea, or two of them) in a game of
+    two teams of `team_size` on each map of the map list, as the decision table gives a
+    player's position its role (`reason8.context.table`)."""
+    roles = {}
+    for map_name, metadata in map_list.items():
+        layout = (
+            metadata.start_positions.layout_for(2, team_size)
+            if metadata.start_positions is not None
+            else None
+        )
+        for side in layout.sides if layout is not None else ():
+            for point in side:
+                if point.role:
+                    roles[map_name, point.id] = point.role
+    return roles
+
+
+def next_order_table(next_order: dict, roles: Mapping[tuple[str, str], str] | None = None) -> str:
     """next_order.json as the AngelScript tables of ``next_order.as``: the usual metal spots
-    (``"<map>|<position>|<start x> <start z>|<x> <z> ..."``) and BARb's task type of each
-    structure (``"<unit> <TYPE>"``)."""
+    with the role of their position for the model's inputs
+    (``"<map>|<position>|<start x> <start z>|<x> <z> ...|<role>"``, the role empty when
+    `roles` has none) and BARb's task type of each structure (``"<unit> <TYPE>"``)."""
     spot_rows = []
     for row in next_order.get("metal_spots", []):
         for text in (row["map"], row["position"]):
             if not isinstance(text, str) or not MAP_TEXT.match(text):
                 raise SystemExit(f"{NEXT_ORDER_NAME}: bad map or position {text!r}")
+        role = (roles or {}).get((row["map"], row["position"]), "")
+        if not ROLE_TEXT.match(role):
+            raise SystemExit(f"bad role {role!r} of {row['map']} {row['position']}")
         start = " ".join(str(round(value)) for value in row["start"])
         spots = " ".join(f"{round(spot['x'])} {round(spot['z'])}" for spot in row["spots"])
-        spot_rows.append(f'"{row["map"]}|{row["position"]}|{start}|{spots}"')
+        spot_rows.append(f'"{row["map"]}|{row["position"]}|{start}|{spots}|{role}"')
     task_rows = []
     for unit, task in sorted(next_order.get("tasks", {}).items()):
         if not UNIT_NAME.match(unit) or task not in TASK_TYPES:
@@ -233,8 +262,8 @@ def next_order_table(next_order: dict) -> str:
         "\n"
         "namespace Reason8 {\n"
         "\n"
-        "// Usual metal spots, in the order players take them:\n"
-        '// "<map>|<position>|<start>|<x> <z> ...".\n'
+        "// Usual metal spots, in the order players take them, and the position's role:\n"
+        '// "<map>|<position>|<start>|<x> <z> ...|<role>".\n'
         + table("USUAL_SPOTS", spot_rows)
         + '// BARb\'s task for each structure: "<unit> <TYPE>".\n'
         + table("BUILD_TASKS", task_rows)
@@ -289,6 +318,10 @@ def live_state_script(available: bool) -> str:
             "IUnitTask@ BarbTask(CCircuitUnit@ unit, const string& in what)\n"
             "{ return Reason8BarbTask(unit, what); }\n"
             "bool SpotOpen(int spot) { return Reason8SpotOpen(spot); }\n"
+            "void BarbOrdered(CCircuitUnit@ unit, IUnitTask@ task)\n"
+            "{ Reason8BarbOrdered(unit, task); }\n"
+            "void SetStart(const string& in position, const string& in role)\n"
+            "{ Reason8SetStart(position, role); }\n"
         )
     else:
         body = (
@@ -304,6 +337,8 @@ def live_state_script(available: bool) -> str:
             "void OrderFailed(CCircuitUnit@, const string& in, const string& in) {}\n"
             "IUnitTask@ BarbTask(CCircuitUnit@, const string& in) { return null; }\n"
             "bool SpotOpen(int) { return true; }\n"
+            "void BarbOrdered(CCircuitUnit@, IUnitTask@) {}\n"
+            "void SetStart(const string& in, const string& in) {}\n"
         )
     return header + "namespace Reason8 {\n\n" + body + "\n}  // namespace Reason8\n"
 
@@ -338,13 +373,15 @@ def assemble(
     limits_only: bool = False,
     library: native.Library | None = None,
     short_name: str | None = None,
+    roles: Mapping[tuple[str, str], str] | None = None,
 ) -> tuple[dict[str, bytes], dict]:
     """(files of the AI folder by relative path, facts about the build).
 
     With `limits_only` the AI is stock BARb's decisions under Reason8's human-like limits
     (ADR 0008) and no openings, installed under the short name `LIMITS_ONLY_NAME`: the fair
     opponent for Reason8 (ADR 0003). `library` replaces the engine's library (None keeps
-    it); `short_name` installs the AI under another name.
+    it); `short_name` installs the AI under another name. `roles` are the start positions'
+    roles (`position_roles`), for the model's inputs.
     """
     files: dict[str, bytes] = {}
 
@@ -399,7 +436,9 @@ def assemble(
     stand_in_path = source_dir / STAND_IN_NAME
     next_order = read_optional(next_order_path)
     stand_in = read_optional(stand_in_path)
-    files[f"script/{profile}/{NEXT_ORDER_TABLE}"] = next_order_table(next_order).encode("utf-8")
+    files[f"script/{profile}/{NEXT_ORDER_TABLE}"] = next_order_table(next_order, roles).encode(
+        "utf-8"
+    )
     files[STAND_IN] = stand_in_text(stand_in).encode("utf-8")
     live_state = library is not None and library.live_state
     files[f"script/{profile}/{LIVE_STATE}"] = live_state_script(live_state).encode("utf-8")
@@ -421,6 +460,10 @@ def assemble(
         "stand_in_sha256": file_sha256(stand_in_path),
         "stand_in_rows": len(stand_in.get("rows", [])),
         "usual_metal_spot_positions": len(next_order.get("metal_spots", [])),
+        "positions_with_role": sum(
+            (row["map"], row["position"]) in (roles or {})
+            for row in next_order.get("metal_spots", [])
+        ),
     }
     return files, facts
 
@@ -444,6 +487,7 @@ def build(args: argparse.Namespace) -> dict:
         limits_only=args.limits_only,
         library=library,
         short_name=args.short_name,
+        roles=position_roles(load_map_list()),
     )
     facts = {"engine": engine_dir.name, "game": args.game, **facts}
 

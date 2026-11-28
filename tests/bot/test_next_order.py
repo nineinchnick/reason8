@@ -181,3 +181,23 @@ def test_model_orders_log_counts():
 def test_model_orders_log_without_idle_builders():
     team = next_order.summary(next_order.new_team())
     assert team["idle_builders"] == 0 and team["decided_by_model_share"] is None
+
+
+def test_learned_model_log_counts():
+    teams: dict[int, dict] = {}
+    for line in [
+        "model builder_v1 (the learned trees) from reason8/builder_model.json: 28900 trees, "
+        "489020 nodes, 281 inputs, read in 2.8 s, 13.7 MB; skill 43.894001 (the 0.9 quantile "
+        "of training)",
+        "map 'M', start 711 7215: position P1 (start 681 7376), role sea, 10 usual metal spots",
+        "frame 25: armcom 18284 commander: model chose armmex 0.98; 1 of 29 possible of 414 at "
+        "10% or more: armmex 0.98",
+        "frame 25: armcom 18284 commander: inputs faction=Armada; position=P1; time_s=0.833",
+        "frame 2417: armcom 18284 commander: BARb ordered armlab",
+    ]:
+        next_order.count_line(teams, 0, line)
+    team = next_order.summary(teams[0])
+    assert (team["model"], team["model_trees"], team["model_rows"]) == ("builder_v1", 28900, None)
+    assert team["skill"] == "skill 43.894001 (the 0.9 quantile of training)"
+    assert (team["position"], team["role"], team["usual_spots"]) == ("P1", "sea", 10)
+    assert team["idle_builders"] == 1 and team["inputs_logged"] == 1 and team["barb_orders"] == 1

@@ -5,10 +5,13 @@
 --                        only copy; the game archive has none for this AI.
 --   profile     = hard   The only profile the variant is built with.
 --
--- Two are Reason8's own, read by our BARb library:
+-- Three are Reason8's own, read by our BARb library:
 --   command_budget       How the AI keeps to the action budget of ADR 0008.
 --   builder_orders       Who decides the builders' orders during the opening:
 --                        the opening table, or the model (ADR 0019).
+--   skill                The player's skill the model is told (ADR 0019);
+--                        empty: the 90th percentile of the players it was
+--                        trained on.
 
 local options = {
 	{
@@ -108,9 +111,16 @@ local options = {
 			{
 				key = 'model',
 				name = 'Model',
-				desc = 'The model decides the next order of every idle builder (a stand-in until the learned model is in)',
+				desc = 'The model decides the next order of every idle builder',
 			},
 		},
+	},
+	{
+		key = 'skill',
+		name = 'Skill',
+		desc = 'The rating of the player the model plays as, when it decides builders\' orders; empty: the 90th percentile of its training players.\nkey: skill',
+		type = 'string',
+		def = '',
 	},
 }
 

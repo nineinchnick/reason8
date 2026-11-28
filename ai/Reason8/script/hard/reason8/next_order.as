@@ -106,7 +106,8 @@ bool BuildTaskOf(const string& in unitName, Task::BuildType& out type)
 
 /*
  * The usual metal spots of the map's position whose start is nearest to `position`,
- * chosen once. A row of USUAL_SPOTS is "<map>|<position>|<start x> <start z>|<x> <z> ...".
+ * chosen once, and that position and its role for the model's inputs. A row of
+ * USUAL_SPOTS is "<map>|<position>|<start x> <start z>|<x> <z> ...|<role>".
  */
 void ChooseUsualSpots(const AIFloat3& in position)
 {
@@ -114,10 +115,12 @@ void ChooseUsualSpots(const AIFloat3& in position)
 	const string mapName = ai.GetMapName();
 	float nearest = -1.f;
 	string chosen;
+	string chosenPosition;
+	string chosenRole;
 	string spots;
 	for (uint i = 0; i < USUAL_SPOTS.length(); ++i) {
 		array<string> parts = Split(USUAL_SPOTS[i], "|");
-		if (parts.length() != 4 || parts[0] != mapName)
+		if (parts.length() != 5 || parts[0] != mapName)
 			continue;
 		array<string> start = Split(parts[2], " ");
 		if (start.length() != 2)
@@ -127,9 +130,12 @@ void ChooseUsualSpots(const AIFloat3& in position)
 		if (nearest < 0.f || dx * dx + dz * dz < nearest) {
 			nearest = dx * dx + dz * dz;
 			chosen = parts[1] + " (start " + parts[2] + ")";
+			chosenPosition = parts[1];
+			chosenRole = parts[4];
 			spots = parts[3];
 		}
 	}
+	SetStart(chosenPosition, chosenRole);
 	array<string> values = Split(spots, " ");
 	for (uint i = 0; i + 1 < values.length(); i += 2) {
 		usualX.insertLast(float(parseFloat(values[i])));
@@ -137,7 +143,8 @@ void ChooseUsualSpots(const AIFloat3& in position)
 	}
 	OrderLog("map '" + mapName + "', start " + int(position.x) + " " + int(position.z) + ": "
 		+ (usualX.length() == 0 ? "no usual metal spots, BARb places extractors"
-			: "position " + chosen + ", " + usualX.length() + " usual metal spots"));
+			: "position " + chosen + ", role " + (chosenRole.length() == 0 ? "unknown" : chosenRole) + ", "
+			+ usualX.length() + " usual metal spots"));
 }
 
 /*
@@ -289,6 +296,8 @@ void BarbGave(CCircuitUnit@ unit, IUnitTask@ task)
 {
 	if (task is null || task.GetType() == Task::Type::WAIT)
 		return;
+	if (areModelOrders && !areModelOrdersOver)
+		BarbOrdered(unit, task);  // an order of the bot all the same, for the model's history
 	const int index = barbUnits.find(unit.id);
 	if (index >= 0)
 		barbUnits.removeAt(index);  // at its next idle the model decides again
