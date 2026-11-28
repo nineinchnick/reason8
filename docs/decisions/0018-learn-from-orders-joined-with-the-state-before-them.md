@@ -15,14 +15,14 @@ Before re-simulating the whole slice, a sample of a few thousand games
 measures what the state adds over the order-only baselines
 ([`results.md`](../results.md)).
 
-The first learned model is asked by every unit with build power what it does
-next, a unit to build or a job, and takes the asking builder and the team's
-build power and the player's skill as inputs
-([ADR 0019](0019-first-model-trees-asked-by-every-builder.md)). The commands
-of a replay say which units each order went to: a clicked command goes to the
-player's selection, a widget's command lists its units. The re-simulated game
-says what those units were, and the game's unit files what each type can build
-and do.
+The first learned model decides for every unit with build power what it does
+next, a unit to build or a job, and takes that builder and the team's build
+power and the player's skill as inputs
+([ADR 0019](0019-first-model-decides-each-builders-next-order.md)). The
+commands of a replay say which units each order went to: a clicked command
+goes to the player's selection, a widget's command lists its units. The
+re-simulated game says what those units were, and the game's unit files what
+each type can build and do.
 
 A model only helps the bot if the bot can read the same inputs while it plays.
 Our own build of BARb's library reads, through the engine's AI interface, the
@@ -64,11 +64,11 @@ Models of the opening learn from and are scored on the **decision table**
 - **Only the player's own team and its allies**: game time, the team's metal
   and energy (stored, storage, income, expense), the current wind and the
   map's wind range, the team's units by type, finished and under construction,
-  the allies' resources and units summed, the asking builder (its kind, type,
-  whether it moves, the answer it got before), the build power of the builder
-  and of the team's finished and idle builders by kind, and the player's
-  skill. No enemy units and no visibility data. A player sees their own and
-  their allies' units and resources, so this needs no line of sight.
+  the allies' resources and units summed, the builder the order is for (its
+  kind, type, whether it moves, the answer it got before), the build power of
+  the builder and of the team's finished and idle builders by kind, and the
+  player's skill. No enemy units and no visibility data. A player sees their
+  own and their allies' units and resources, so this needs no line of sight.
 - **Unit types are names without the faction prefix**, those that make up 99%
   of the orders of the training split, with the commander, and every other
   type counted together.
@@ -81,7 +81,7 @@ Models of the opening learn from and are scored on the **decision table**
   seconds after it is much likelier to repeat the answer than one after a long
   pause. Models are judged without it. Whether the builder was idle when it
   got the order is kept for the same reason and is not an input either: the
-  bot's builders ask when they are idle.
+  bot decides for a builder when it is idle.
 
 ## Consequences
 
@@ -104,9 +104,9 @@ Models of the opening learn from and are scored on the **decision table**
 - What a builder type can do is read from the unit files as written, not as
   the game changes them when it loads; a builder that built something its file
   does not list loses that order's builder, and the mask of
-  [ADR 0019](0019-first-model-trees-asked-by-every-builder.md) would remove
-  that answer. Both are rare ([`context.md`](../research/context.md)). Games
-  re-simulated in state format 7 carry the unit types as loaded
+  [ADR 0019](0019-first-model-decides-each-builders-next-order.md) would
+  remove that answer. Both are rare ([`context.md`](../research/context.md)).
+  Games re-simulated in state format 7 carry the unit types as loaded
   ([ADR 0010](0010-re-simulate-replays-headlessly-for-game-state.md)).
 - Whether a builder is idle is known only from the idle lines of the state
   export and the commands it got after them; a new builder counts as busy

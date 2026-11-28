@@ -7,7 +7,7 @@ the whole slice is re-simulated, this document measures on a sample how much
 each kind of state improves the prediction of the next order over the orders
 alone. The first learned model is asked by every builder what it does next, a
 unit to build or a job
-([ADR 0019](../decisions/0019-first-model-trees-asked-by-every-builder.md)).
+([ADR 0019](../decisions/0019-first-model-decides-each-builders-next-order.md)).
 The table it is measured on is decided in
 [ADR 0018](../decisions/0018-learn-from-orders-joined-with-the-state-before-them.md)
 and described in [`context-dataset.md`](../reference/context-dataset.md).

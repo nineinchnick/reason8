@@ -4,8 +4,9 @@ The orders players gave their builders in their openings, build orders and
 jobs, with the builders that got them and the game state just before each. It
 is built from the games of the context sample that have been re-simulated
 ([ADR 0010](../decisions/0010-re-simulate-replays-headlessly-for-game-state.md)),
-and it is what the first learned model, asked by every builder
-([ADR 0019](../decisions/0019-first-model-trees-asked-by-every-builder.md)),
+and it is what the first learned model, which decides every builder's next
+order
+([ADR 0019](../decisions/0019-first-model-decides-each-builders-next-order.md)),
 learns from and is scored on
 ([ADR 0018](../decisions/0018-learn-from-orders-joined-with-the-state-before-them.md)).
 What the builders, the jobs and the context add to prediction is measured in
@@ -223,11 +224,11 @@ builder
   one that went to the same builder (`<start>` for its first).
 
 build_power
-: `builder_build_power`: the asking builder's. `team_build_power` and
-  `team_build_power_<kind>`: the build power of the team's finished builders,
-  in all and by kind. `idle_build_power` and `idle_build_power_<kind>`: the
-  same of the builders that were idle (as `builder_idle`), so a builder that
-  has not gone idle yet counts as busy.
+: `builder_build_power`: that of the builder the order is for.
+  `team_build_power` and `team_build_power_<kind>`: the build power of the
+  team's finished builders, in all and by kind. `idle_build_power` and
+  `idle_build_power_<kind>`: the same of the builders that were idle (as
+  `builder_idle`), so a builder that has not gone idle yet counts as busy.
 
 skill
 : `skill`: the player's rating before the game, the column of the opening
@@ -251,7 +252,7 @@ In `data/datasets/context_v2/`:
   `builder_moves`, `build_power`, `can_assist`, `can_reclaim`, `can_repair`,
   `can_resurrect` and `build_options` (today's names). The answers a builder
   can give, which the models' mask keeps
-  ([ADR 0019](../decisions/0019-first-model-trees-asked-by-every-builder.md)),
+  ([ADR 0019](../decisions/0019-first-model-decides-each-builders-next-order.md)),
   are its build options and its jobs.
 
 `games.parquet`
