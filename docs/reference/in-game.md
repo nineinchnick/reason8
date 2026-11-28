@@ -480,6 +480,31 @@ What it measured is in
 
 ### How the hooks work
 
+What happens when a builder or factory has nothing to do, in the order the
+hooks ask (`builder.as`; `factory.as` is the same with `MakeFactoryTask`):
+
+```mermaid
+sequenceDiagram
+    participant Engine as Recoil engine
+    participant Library as our BARb library
+    participant Managers as builder.as, factory.as
+    participant Opening as opening.as
+    participant NextOrder as next_order.as
+    Engine->>Library: a unit has nothing to do
+    Library->>Managers: AiMakeTask(unit)
+    Managers->>Opening: ReactionWait
+    Opening-->>Managers: a wait task, until a player would notice
+    Managers->>Opening: MakeCommanderTask
+    Opening-->>Managers: the opening's next step (builder_orders=opening)
+    Managers->>NextOrder: NextOrderFor, when there is no step
+    NextOrder->>Library: Reason8NextOrder(builder)
+    Library-->>NextOrder: an answer drawn from the model, or none
+    NextOrder-->>Managers: BARb's task for it (builder_orders=model)
+    Managers->>Managers: BARb's DefaultMakeTask, when still none
+    Managers-->>Library: the task
+    Library->>Engine: its commands, through the command governor
+```
+
 Commander
 : `Builder::AiMakeTask` is called whenever a builder has nothing to do. For
   the commander, `opening.as` returns a task for the next step, created with
