@@ -73,6 +73,13 @@ Keep this file as `AGENTS.md` with no `CLAUDE.md`, `.claude/CLAUDE.md` or
   followed by a `: definition` line. With several columns, write one
   `: *Column:* value` line per column. Numeric tables stay tables.
 - Keep JSON examples pretty-printed.
+- Use Mermaid diagrams (a `mermaid` code block) where they make a flow, a
+  sequence between parts or a dependency easier to read than prose. Keep each
+  one small enough to read without scrolling, about a dozen nodes or
+  participants; split a bigger one. Keep the text next to it short instead of
+  repeating the diagram. Keep to what GitHub renders: `flowchart` and
+  `sequenceDiagram`, labels with punctuation in quotes, no HTML but `<br/>`,
+  no themes.
 
 ## Code
 
