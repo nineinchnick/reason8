@@ -67,6 +67,7 @@ from typing import Any
 import polars as pl
 
 from reason8.context import builders
+from reason8.context.sample import sample_file
 from reason8.game.maps import MapMetadata, load_map_list
 from reason8.game.positions import position_of, spot_radii
 from reason8.headless import tables as state_tables
@@ -131,10 +132,6 @@ CATEGORICAL = ("builder_kind", "builder_role", "builder_previous")
 GROUPS = tuple(groups([]))
 #: The groups `join_state` adds: the state of the game, the same for every builder.
 STATE_GROUPS = ("time", "pace", "economy", "wind", "own_units", "allies")
-
-
-def sample_file() -> Path:
-    return data_dir() / "logs" / "context-sample.parquet"
 
 
 def state_dir() -> Path:

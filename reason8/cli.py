@@ -10,6 +10,7 @@ from reason8.analysis import apm, map_meta, opening_shift, play_quality, reactio
 from reason8.bot import build, check, export, game, next_order
 from reason8.context import check as context_check
 from reason8.context import measure as context_measure
+from reason8.context import sample as context_sample
 from reason8.context import table as context_table
 from reason8.data import download, sync
 from reason8.evaluation import games as evaluation_games
@@ -59,6 +60,7 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
         "context",
         "the decision table: opening orders with the game state (docs/research/context.md)",
         [
+            ("sample", context_sample, "draw the games the decision table is built from"),
             ("build", context_table, "join the orders of re-simulated games with their state"),
             ("check", context_check, "check the joined state against the state tables"),
             ("measure", context_measure, "measure what each kind of context adds"),
