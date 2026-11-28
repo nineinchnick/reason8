@@ -8,6 +8,7 @@ from types import ModuleType
 
 from reason8.analysis import apm, map_meta, opening_shift, orders, play_quality, reactions
 from reason8.bot import build, check, export, game, next_order
+from reason8.cloud import worker as cloud_worker
 from reason8.context import check as context_check
 from reason8.context import measure as context_measure
 from reason8.context import sample as context_sample
@@ -53,6 +54,13 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
             ("list", batch_list, "write the replay list of a batch from a sample"),
             ("state", state, "summarise a state file"),
             ("tables", state_tables, "convert state files to Parquet tables"),
+        ],
+    ),
+    (
+        "cloud",
+        "re-simulate replays on spot instances in AWS (ADR 0020)",
+        [
+            ("worker", cloud_worker, "play the games of the queue on this instance"),
         ],
     ),
     ("contact", contact, "measure first contact in re-simulated replays"),
