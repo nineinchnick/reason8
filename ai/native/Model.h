@@ -12,6 +12,7 @@
 #include "Choice.h"
 
 #include <string>
+#include <unordered_map>
 
 namespace reason8 {
 
@@ -36,6 +37,31 @@ struct IdleBuilder {
 	int frame = 0;
 	float x = 0.f;  // where it stands
 	float z = 0.f;
+};
+
+/* The inputs of one decision by name, as the decision table names them
+ * (docs/reference/builder-model.md, "The inputs"): a number, or a name for a
+ * categorical input. An input not set is missing. */
+class Inputs {
+public:
+	void Set(const std::string& name, double number) { numbers[name] = number; }
+	void Set(const std::string& name, const std::string& value) { names[name] = value; }
+	void Set(const std::string& name, const char* value) { names[name] = value; }
+
+	const double* Number(const std::string& name) const
+	{
+		const auto found = numbers.find(name);
+		return found == numbers.end() ? nullptr : &found->second;
+	}
+	const std::string* Name(const std::string& name) const
+	{
+		const auto found = names.find(name);
+		return found == names.end() ? nullptr : &found->second;
+	}
+
+private:
+	std::unordered_map<std::string, double> numbers;
+	std::unordered_map<std::string, std::string> names;
 };
 
 /* A model: a probability per answer for the builder the order is for. An answer is a

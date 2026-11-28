@@ -137,7 +137,7 @@ fi
 barb=recoil/AI/Skirmish/BARb
 cp "$here/Budget.h" "$here/Governor.h" "$here/Governor.cpp" \
 	"$here/LiveState.h" "$here/LiveState.cpp" "$here/Choice.h" "$here/Model.h" \
-	"$here/StandIn.h" "$here/NextOrder.h" "$here/NextOrder.cpp" "$barb/src/"
+	"$here/StandIn.h" "$here/Trees.h" "$here/NextOrder.h" "$here/NextOrder.cpp" "$barb/src/"
 build_header="#define REASON8_ENGINE_TAG \"$tag\""
 if [ "$(cat "$barb/src/Reason8Build.h" 2>/dev/null)" != "$build_header" ]; then
 	echo "$build_header" >"$barb/src/Reason8Build.h"
@@ -151,9 +151,10 @@ if ! grep -q 'reason8::RegisterNextOrder' "$barb/src/circuit/script/InitScript.c
 	patch -s -d "$barb" -p1 <"$here/InitScript.patch"
 fi
 
-# 4. the tests of the command budget and of the choice, with the same
-#    compiler; then the engine tree configured for the AI only, the one
-#    target built and stripped
+# 4. the tests of the command budget, of the choice and of the trees, with
+#    the same compiler (the trees' test with BARb's jsoncpp, against the
+#    builder model's test vectors); then the engine tree configured for the
+#    AI only, the one target built and stripped
 cmake_options=(-G Ninja -Wno-dev
 	-DCMAKE_BUILD_TYPE=RELWITHDEBINFO
 	"-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O3 -g -DNDEBUG"
@@ -163,11 +164,17 @@ cmake_options=(-G Ninja -Wno-dev
 	-DBUILD_spring-dedicated=OFF)
 test_options=(-std=c++20 -O2 -Wall -Wextra -Werror -I "$here")
 tests=(test_budget test_next_order)
+vectors=$(realpath "$here/../../tests/models/builder_vectors.json")
+json_lib=$barb/src/lib
 if [ "$platform" = linux ]; then
 	for test in "${tests[@]}"; do
 		x86_64-conda-linux-gnu-g++ "${test_options[@]}" "$here/$test.cpp" -o "$test"
 		"./$test"
 	done
+	x86_64-conda-linux-gnu-g++ -std=c++20 -O2 -I "$json_lib" -c "$json_lib/json/jsoncpp.cpp" -o jsoncpp.o
+	x86_64-conda-linux-gnu-g++ "${test_options[@]}" -I "$json_lib" "$here/test_trees.cpp" jsoncpp.o \
+		-o test_trees
+	./test_trees "$vectors"
 
 	export PKG_CONFIG_LIBDIR=$work_dir/spring-static-libs/lib/pkgconfig:$work_dir/tools/env/lib/pkgconfig
 	export CMAKE_PREFIX_PATH=$work_dir/spring-static-libs:$work_dir/tools/env
@@ -184,12 +191,19 @@ else
 	for test in "${tests[@]}"; do
 		"${container[@]}" x86_64-w64-mingw32-g++-posix "${test_options[@]}" "$here/$test.cpp" \
 			-static -o "$test.exe"
-		if [ -e /proc/sys/fs/binfmt_misc/WSLInterop ]; then
-			"./$test.exe"
-		else
-			echo "$test.exe built but not run: this system runs no Windows programs" >&2
-		fi
 	done
+	"${container[@]}" x86_64-w64-mingw32-g++-posix -std=c++20 -O2 -I "$json_lib" \
+		-c "$json_lib/json/jsoncpp.cpp" -o jsoncpp.o
+	"${container[@]}" x86_64-w64-mingw32-g++-posix "${test_options[@]}" -I "$json_lib" \
+		"$here/test_trees.cpp" jsoncpp.o -static -o test_trees.exe
+	if [ -e /proc/sys/fs/binfmt_misc/WSLInterop ]; then
+		for test in "${tests[@]}"; do
+			"./$test.exe"
+		done
+		./test_trees.exe "$(wslpath -w "$vectors")"
+	else
+		echo "the tests' .exe built but not run: this system runs no Windows programs" >&2
+	fi
 
 	# the image's CMAKE_TOOLCHAIN_FILE picks MinGW, its MINGWLIBS the libraries
 	# shellcheck disable=SC2016 # expanded in the container
