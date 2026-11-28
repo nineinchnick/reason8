@@ -20,17 +20,30 @@ on its team's start point (``StartPosType=3``).
 from __future__ import annotations
 
 import argparse
+import re
+from collections.abc import Mapping
 from pathlib import Path
 
 from reason8.game.maps import Layout, load_map_list
 
 FRAMES_PER_MINUTE = 30 * 60
 SIDES = ("Armada", "Cortex", "Legion")
+OPTION_TEXT = re.compile(r"^[A-Za-z0-9_.\-]+$")
 
 
 def ai_fields(short_name: str) -> str:
     """What identifies an AI in the start script; BARb also needs its version."""
     return f"ShortName={short_name};" + (" Version=stable;" if short_name == "BARb" else "")
+
+
+def ai_options(options: Mapping[str, str]) -> str:
+    """The AI's options (its ``AIOptions.lua`` keys) as a section of its start script entry."""
+    for key, value in options.items():
+        if not OPTION_TEXT.match(key) or not OPTION_TEXT.match(value):
+            raise SystemExit(f"bad AI option {key}={value}")
+    if not options:
+        return ""
+    return " [OPTIONS] { " + " ".join(f"{key}={value};" for key, value in options.items()) + " }"
 
 
 def team_positions(layout: Layout) -> list[tuple[int, str]]:
@@ -51,8 +64,10 @@ def team_game_script(
     sides: tuple[str, str],
     seed: int,
     frames: int,
+    options: Mapping[str, str] | None = None,
 ) -> str:
-    """The start script: one AI team per recommended position, a spectating host."""
+    """The start script: one AI team per recommended position, a spectating host.
+    `options` are given to the first ally team's AI."""
     teams, ai_sections = [], []
     team_id = 0
     for ally_team, spawn_points in enumerate(layout.sides):
@@ -64,7 +79,8 @@ def team_game_script(
             )
             ai_sections.append(
                 f"\t[AI{team_id}] {{ Host=0; IsFromDemo=0; Name={ais[ally_team]}-{spawn_point.id}; "
-                f"{ai_fields(ais[ally_team])} Team={team_id}; }}"
+                f"{ai_fields(ais[ally_team])} Team={team_id};"
+                f"{ai_options(options or {}) if ally_team == 0 else ''} }}"
             )
             team_id += 1
     ally_teams = [f"\t[ALLYTEAM{index}] {{ NumAllies=0; }}" for index in range(len(layout.sides))]
@@ -108,7 +124,25 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--sides", nargs=2, choices=SIDES, default=("Armada", "Cortex"))
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--minutes", type=float, default=6, help="game time before the end")
+    parser.add_argument(
+        "--ai-option",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="an option of the first ally team's AI, e.g. builder_orders=model (repeatable)",
+    )
     parser.add_argument("--out", type=Path, required=True, help="where to write the script")
+
+
+def parse_options(options: list[str]) -> dict[str, str]:
+    """``KEY=VALUE`` arguments as a mapping."""
+    parsed = {}
+    for option in options:
+        key, equals, value = option.partition("=")
+        if not equals:
+            raise SystemExit(f"--ai-option {option!r}: expected KEY=VALUE")
+        parsed[key] = value
+    return parsed
 
 
 def team_game_layout(map_name: str, players: int = 8) -> Layout:
@@ -132,6 +166,7 @@ def run(args: argparse.Namespace) -> int:
         sides=tuple(args.sides),
         seed=args.seed,
         frames=round(args.minutes * FRAMES_PER_MINUTE),
+        options=parse_options(args.ai_option),
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(script, encoding="utf-8")
