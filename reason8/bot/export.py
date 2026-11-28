@@ -25,7 +25,9 @@ The opening is turned into what the AI plays (`reason8/bot/build.py`, ``opening.
 - the BARb task type of each structure, from the game's unit files
   (`reason8.game.unitdefs`);
 - the start position: where the players of that position started, the median of the starts
-  on its spot, so the AI can tell its own position from its commander's place.
+  on its spot, so the AI can tell its own position from its commander's place. An opening
+  whose first places are further than ``BUILT_AWAY_DISTANCE`` from it is not exported for
+  the position (`is_near_start`).
 
 Only Armada and Cortex are exported: BARb's configs open Legion games with Armada's
 extractor.
@@ -45,7 +47,12 @@ import polars as pl
 
 from reason8.game.unitdefs import UnitDef, build_task, game_unit_defs
 from reason8.models.ngram import NgramModel, OpeningSteps, load_model, models_dir
-from reason8.openings.dataset import INCLUDED, step_starts
+from reason8.openings.dataset import (
+    BUILT_AWAY_DISTANCE,
+    FIRST_PLACES,
+    INCLUDED,
+    step_starts,
+)
 from reason8.paths import REPO_ROOT, data_dir
 
 DEFAULT_OUT = REPO_ROOT / "ai" / "Reason8" / "openings.json"
@@ -302,6 +309,22 @@ def ai_opening(steps: Sequence[Step], unit_defs: Mapping[str, UnitDef]) -> dict:
     }
 
 
+def first_places_distance(
+    places: Sequence[Sequence[float] | None], start: Sequence[float]
+) -> float | None:
+    """From `start` to the nearest of the first `FIRST_PLACES` known places of an opening's
+    commander structures; None when none is known."""
+    known = [place for place in places if place][:FIRST_PLACES]
+    return min((math.dist(place, start) for place in known), default=None)
+
+
+def is_near_start(played: Mapping, start: Sequence[float]) -> bool:
+    """Whether an opening the AI plays (`ai_opening`) starts where it is exported for: its
+    first places are within `BUILT_AWAY_DISTANCE` of the position's start."""
+    distance = first_places_distance(played["places"], start)
+    return distance is None or distance <= BUILT_AWAY_DISTANCE
+
+
 def export(
     model: NgramModel,
     candidates: Mapping[tuple[str, str, str], list[Candidate]],
@@ -313,10 +336,16 @@ def export(
     openings = []
     for key in sorted(candidates):
         map_name, position, faction = key
-        chosen, scored = typical_openings(model, key, candidates[key])
         if (map_name, position) not in start_points:
             continue
         start_x, start_z = start_points[(map_name, position)]
+        # an opening built at another place than the position's start is not one of it
+        near = [
+            candidate
+            for candidate in candidates[key]
+            if is_near_start(ai_opening(candidate.steps, unit_defs), (start_x, start_z))
+        ]
+        chosen, scored = typical_openings(model, key, near)
         for variant, (candidate, score) in enumerate(chosen):
             played = ai_opening(candidate.steps, unit_defs)
             tasks.update(played.pop("tasks"))
