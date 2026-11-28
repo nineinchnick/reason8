@@ -1,17 +1,18 @@
 diff --git a/src/AIExport.cpp b/src/AIExport.cpp
-index 6e9da12..caccc1d 100644
+index 6e9da12..d7784d6 100644
 --- a/src/AIExport.cpp
 +++ b/src/AIExport.cpp
-@@ -9,6 +9,8 @@
+@@ -9,6 +9,9 @@
  
  #include "circuit/CircuitAI.h"
  #include "util/Profiler.h"
 +#include "Governor.h"  // Reason8
 +#include "LiveState.h"  // Reason8
++#include "NextOrder.h"  // Reason8
  
  #include <stdexcept>
  #include <map>
-@@ -38,6 +40,7 @@ EXPORT(int) init(int skirmishAIId, const struct SSkirmishAICallback* innerCallba
+@@ -38,6 +41,7 @@ EXPORT(int) init(int skirmishAIId, const struct SSkirmishAICallback* innerCallba
  	try {
  		circuit::CProfiler::GetInstance().InitNames(skirmishAIId);
  
@@ -19,7 +20,7 @@ index 6e9da12..caccc1d 100644
  		springai::OOAICallback* clb = springai::WrappOOAICallback::GetInstance(innerCallback, skirmishAIId);
  		circuit::CCircuitAI* ai = new circuit::CCircuitAI(clb);
  
-@@ -63,6 +66,7 @@ EXPORT(int) release(int skirmishAIId) {
+@@ -63,6 +67,7 @@ EXPORT(int) release(int skirmishAIId) {
  
  		delete ai;
  		delete clb;
@@ -27,12 +28,16 @@ index 6e9da12..caccc1d 100644
  
  		circuit::CProfiler::GetInstance().ReleaseNames(skirmishAIId);
  
-@@ -77,6 +81,12 @@ EXPORT(int) handleEvent(int skirmishAIId, int topic, const void* data) {
+@@ -77,6 +82,16 @@ EXPORT(int) handleEvent(int skirmishAIId, int topic, const void* data) {
  	int ret = ERROR_SHIFT + 1;
  
  	try {
-+		if (topic == EVENT_UPDATE)  // Reason8: send held commands first
++		if (topic == EVENT_UPDATE) {  // Reason8: send held commands first; the model's economy
 +			reason8::UpdateGovernor(skirmishAIId, static_cast<const SUpdateEvent*>(data)->frame);
++			reason8::NextOrderUpdate(skirmishAIId, static_cast<const SUpdateEvent*>(data)->frame);
++		}
++		if (topic == EVENT_UNIT_IDLE)  // Reason8: the model's idle build power
++			reason8::NextOrderUnitIdle(skirmishAIId, static_cast<const SUnitIdleEvent*>(data)->unit);
 +		if (topic == EVENT_UNIT_DAMAGED)  // Reason8: note the first contact
 +			reason8::UnitDamaged(skirmishAIId, static_cast<const SUnitDamagedEvent*>(data));
 +		if (topic == EVENT_UNIT_FINISHED)  // Reason8: its settings take no action

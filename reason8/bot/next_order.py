@@ -395,8 +395,13 @@ NOT_CARRIED_OUT = re.compile(
     r"frame (\d+): (\w+) (\d+) (\w+): cannot carry out (\w+): (.*); left to BARb"
 )
 ON_SPOT = re.compile(r"frame \d+: \w+ \d+: \w+ on (usual spot|BARb's metal spot)")
-MODEL = re.compile(r"model (\S+) .*?, (\d+) rows for (\d+) builder units")
-POSITION = re.compile(r"position (\S+) \(start .*?\), (\d+) usual metal spots")
+MODEL = re.compile(r"model (\S+) \((.*)")
+MODEL_ROWS = re.compile(r", (\d+) rows for (\d+) builder units")
+MODEL_TREES = re.compile(r": (\d+) trees, (\d+) nodes, (\d+) inputs")
+MODEL_SKILL = re.compile(r"; (skill .*)$")
+POSITION = re.compile(r"position (\S+) \(start .*?\), (?:role (\S+), )?(\d+) usual metal spots")
+INPUTS = re.compile(r"frame \d+: \w+ \d+ \w+: inputs ")
+BARB_ORDERED = re.compile(r"frame \d+: \w+ \d+ \w+: BARb ordered (\S+)$")
 ENDED = re.compile(r"model orders ended at frame (\d+), (\w+): (.*); BARb takes over")
 UNFINISHED = "its task ended unfinished"
 FRAMES_PER_MINUTE = 30 * 60
@@ -406,8 +411,11 @@ OUTCOMES = ("model chose", "below threshold", "nothing possible", "no answers")
 def new_team() -> dict:
     return {
         "model": None,
-        "model_rows": None,
+        "model_rows": None,  # the stand-in's
+        "model_trees": None,  # the learned model's
+        "skill": None,
         "position": None,
+        "role": None,
         "usual_spots": 0,
         "idle_builders": 0,  # times an idle builder needed an order and the model was consulted
         "outcomes": dict.fromkeys(OUTCOMES, 0),
@@ -418,6 +426,8 @@ def new_team() -> dict:
         "by_minute": [],
         "orders_chosen": {},
         "extractors": {"usual spot": 0, "BARb's metal spot": 0},
+        "barb_orders": 0,  # orders BARb gave the builders left to it, while the model decided
+        "inputs_logged": 0,  # decisions whose inputs the library logged
         "ended": None,
     }
 
@@ -425,7 +435,11 @@ def new_team() -> dict:
 def count_line(teams: dict[int, dict], team: int, text: str) -> None:
     """Add one ``Reason8 next order: team N: <text>`` log line to its team's counts."""
     counts = teams.setdefault(team, new_team())
-    if decided := DECIDED.match(text):
+    if INPUTS.match(text):
+        counts["inputs_logged"] += 1
+    elif BARB_ORDERED.match(text):
+        counts["barb_orders"] += 1
+    elif decided := DECIDED.match(text):
         frame, kind, outcome, order = (
             int(decided.group(1)),
             decided.group(4),
@@ -458,9 +472,16 @@ def count_line(teams: dict[int, dict], team: int, text: str) -> None:
     elif spot := ON_SPOT.match(text):
         counts["extractors"][spot.group(1)] += 1
     elif model := MODEL.match(text):
-        counts["model"], counts["model_rows"] = model.group(1), int(model.group(2))
+        counts["model"] = model.group(1)
+        if rows := MODEL_ROWS.search(text):
+            counts["model_rows"] = int(rows.group(1))
+        if trees := MODEL_TREES.search(text):
+            counts["model_trees"] = int(trees.group(1))
+        if skill := MODEL_SKILL.search(text):
+            counts["skill"] = skill.group(1)
     elif position := POSITION.search(text):
-        counts["position"], counts["usual_spots"] = position.group(1), int(position.group(2))
+        counts["position"], counts["role"] = position.group(1), position.group(2)
+        counts["usual_spots"] = int(position.group(3))
     elif ended := ENDED.match(text):
         counts["ended"] = {
             "frame": int(ended.group(1)),

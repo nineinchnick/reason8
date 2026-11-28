@@ -3,8 +3,9 @@
  *
  * During the opening the bot, as one player, consults one model, which sees
  * the team's whole state, about each idle builder, and passes its answer to
- * the choice (Choice.h). Any model fits behind this interface: the stand-in
- * of StandIn.h now, the learned one later. */
+ * the choice (Choice.h). Any model fits behind this interface: the learned
+ * trees of Trees.h, with the inputs of ModelInputs.h and NextOrder.cpp, or the
+ * stand-in of StandIn.h when the AI has no model file. */
 
 #ifndef REASON8_MODEL_H
 #define REASON8_MODEL_H
@@ -45,6 +46,7 @@ struct IdleBuilder {
 class Inputs {
 public:
 	void Set(const std::string& name, double number) { numbers[name] = number; }
+	void Set(const std::string& name, int number) { numbers[name] = number; }
 	void Set(const std::string& name, const std::string& value) { names[name] = value; }
 	void Set(const std::string& name, const char* value) { names[name] = value; }
 

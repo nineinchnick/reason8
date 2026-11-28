@@ -137,12 +137,12 @@ fi
 barb=recoil/AI/Skirmish/BARb
 cp "$here/Budget.h" "$here/Governor.h" "$here/Governor.cpp" \
 	"$here/LiveState.h" "$here/LiveState.cpp" "$here/Choice.h" "$here/Model.h" \
-	"$here/StandIn.h" "$here/Trees.h" "$here/NextOrder.h" "$here/NextOrder.cpp" "$barb/src/"
+	"$here/StandIn.h" "$here/Trees.h" "$here/ModelInputs.h" "$here/NextOrder.h" "$here/NextOrder.cpp" "$barb/src/"
 build_header="#define REASON8_ENGINE_TAG \"$tag\""
 if [ "$(cat "$barb/src/Reason8Build.h" 2>/dev/null)" != "$build_header" ]; then
 	echo "$build_header" >"$barb/src/Reason8Build.h"
 fi
-if ! grep -q 'reason8::UnitDamaged' "$barb/src/AIExport.cpp"; then
+if ! grep -q 'reason8::NextOrderUnitIdle' "$barb/src/AIExport.cpp"; then
 	git -C "$barb" checkout -q src/AIExport.cpp
 	patch -s -d "$barb" -p1 <"$here/AIExport.patch"
 fi

@@ -1,4 +1,4 @@
-/* Tests of Choice.h and StandIn.h without the engine. ai/native/build.sh
+/* Tests of Choice.h, StandIn.h and ModelInputs.h without the engine. ai/native/build.sh
  * compiles and runs it before it builds the library:
  *
  *   g++ -std=c++20 -I ai/native ai/native/test_next_order.cpp -o test_next_order && ./test_next_order
@@ -6,12 +6,14 @@
  * GPL-2.0-or-later. */
 
 #include "Choice.h"
+#include "ModelInputs.h"
 #include "StandIn.h"
 
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 
@@ -137,6 +139,77 @@ void StandInReadsItsTable()
 	EXPECT(model.Predict(builder).empty());
 }
 
+double NumberOf(const reason8::Inputs& inputs, const std::string& name)
+{
+	const double* value = inputs.Number(name);
+	return value == nullptr ? -1.0 : *value;
+}
+
+std::string NameOf(const reason8::Inputs& inputs, const std::string& name)
+{
+	const std::string* value = inputs.Name(name);
+	return value == nullptr ? "(missing)" : *value;
+}
+
+void HistoryCountsStepsAndOrders()
+{
+	const std::set<std::string> types = {"mex", "win", "com", "other"};
+	reason8::OrderHistory history;
+	reason8::Inputs first;
+	history.Fill(first, 7, types);
+	EXPECT(NumberOf(first, "step_idx") == 0 && NumberOf(first, "decision_index") == 0);
+	EXPECT(NameOf(first, "previous_1") == "<start>" && NameOf(first, "builder_previous") == "<start>");
+	EXPECT(NumberOf(first, "ordered_mex") == 0 && NumberOf(first, "ordered_assist") == 0);
+
+	history.Record(7, "armmex", 10);
+	history.Record(8, "armmex", 16);  // 6 frames later: the same step
+	history.Record(8, "armmex", 23);  // 7 frames later: a new step
+	history.Record(7, "assist", 23);
+	history.Record(9, "armlab", 23);  // a type not listed: other
+	reason8::Inputs inputs;
+	history.Fill(inputs, 8, types);
+	EXPECT(NumberOf(inputs, "step_idx") == 4);
+	EXPECT(NumberOf(inputs, "decision_index") == 5);
+	EXPECT(NameOf(inputs, "previous_1") == "armlab");
+	EXPECT(NameOf(inputs, "builder_previous") == "armmex");
+	EXPECT(NumberOf(inputs, "ordered_mex") == 3);
+	EXPECT(NumberOf(inputs, "ordered_other") == 1);
+	EXPECT(NumberOf(inputs, "ordered_win") == 0);
+	EXPECT(NumberOf(inputs, "ordered_assist") == 1);
+	reason8::Inputs other;
+	history.Fill(other, 7, types);
+	EXPECT(NameOf(other, "builder_previous") == "assist");
+}
+
+void HistoryChainsRuns()
+{
+	// each order is compared with the one directly before it, so a run chains
+	reason8::OrderHistory history;
+	for (int frame = 0; frame <= 30; frame += 5) {
+		history.Record(1, "armwin", frame);
+	}
+	EXPECT(history.Steps() == 1 && history.Orders() == 7);
+}
+
+void TypesAndFactions()
+{
+	const std::set<std::string> types = {"lab", "com", "other"};
+	EXPECT(reason8::UnitType("corlab") == "lab" && reason8::UnitType("legcom") == "com");
+	EXPECT(reason8::UnitType("dbg_sphere") == "dbg_sphere");
+	EXPECT(reason8::TypeOf("armlab", types) == "lab" && reason8::TypeOf("armvp", types) == "other");
+	EXPECT(reason8::FactionOf("legcom") == "Legion" && reason8::FactionOf("armcom") == "Armada");
+	EXPECT(reason8::FactionOf("xyz").empty());
+}
+
+void RoundedAsTheExportWrites()
+{
+	EXPECT(reason8::ExportRounded(533.997, -1) == 533.0);  // "%d" cuts
+	EXPECT(reason8::ExportRounded(2.04, 1) == 2.0);
+	EXPECT(reason8::ExportRounded(2.06, 1) == 2.1);
+	EXPECT(reason8::ExportRounded(30.5, 0) == 30.0);  // printf rounds half to even
+	EXPECT(reason8::ExportRounded(38.0055, 0) == 38.0);
+}
+
 }  // namespace
 
 int main()
@@ -148,6 +221,10 @@ int main()
 	TheMaskComesBeforeTheThreshold();
 	JobsAreKnown();
 	StandInReadsItsTable();
+	HistoryCountsStepsAndOrders();
+	HistoryChainsRuns();
+	TypesAndFactions();
+	RoundedAsTheExportWrites();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failed\n", failures);
 		return EXIT_FAILURE;

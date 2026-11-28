@@ -11,6 +11,7 @@ import pytest
 
 from reason8.bot import build
 from reason8.bot import library as native
+from reason8.game import maps
 from reason8.game import package as game_package
 from reason8.openings import contact
 from reason8.paths import REPO_ROOT
@@ -279,7 +280,7 @@ def test_live_state_scripts_declare_the_same_functions():
     ours = build.live_state_script(True)
     stock = build.live_state_script(False)
     assert ours.count("{") == ours.count("}") and stock.count("{") == stock.count("}")
-    assert declarations(ours) == declarations(stock) and len(declarations(ours)) == 11
+    assert declarations(ours) == declarations(stock) and len(declarations(ours)) == 13
 
 
 def test_library_bindings_are_those_the_scripts_call():
@@ -313,7 +314,9 @@ STAND_IN = {
 
 def test_next_order_table():
     table = build.next_order_table(NEXT_ORDER)
-    assert '\t"Some Map v1|P1|100 200|1 2"\n};' in table
+    assert '\t"Some Map v1|P1|100 200|1 2|"\n};' in table
+    with_role = build.next_order_table(NEXT_ORDER, {("Some Map v1", "P1"): "front/tech"})
+    assert '\t"Some Map v1|P1|100 200|1 2|front/tech"\n};' in with_role
     assert '\t"armmex MEX",\n\t"armwin ENERGY"\n};' in table
     empty = build.next_order_table({})
     assert (
@@ -327,6 +330,21 @@ def test_next_order_table_rejects_bad_input():
     bad_map = {"metal_spots": [{**NEXT_ORDER["metal_spots"][0], "map": 'a"b'}]}
     with pytest.raises(SystemExit, match="bad map"):
         build.next_order_table(bad_map)
+    with pytest.raises(SystemExit, match="bad role"):
+        build.next_order_table(NEXT_ORDER, {("Some Map v1", "P1"): "front|x"})
+
+
+def test_position_roles():
+    point = maps.SpawnPoint
+    layouts = (
+        maps.Layout(2, 1, ((point("1", 0, 0, "front"),), (point("2", 9, 9, "front"),))),
+        maps.Layout(2, 8, ((point("1", 0, 0, "tech"), point("3", 1, 1, None)),)),
+    )
+    map_list = {
+        "Some Map v1": maps.MapMetadata(maps.StartPositions(layouts), None, {}),
+        "No Positions v1": maps.MapMetadata(None, None, {}),
+    }
+    assert build.position_roles(map_list) == {("Some Map v1", "1"): "tech"}
 
 
 def test_stand_in_text():
