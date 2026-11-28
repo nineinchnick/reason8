@@ -467,28 +467,49 @@ def measure(
     directory, `reason8.replays.tables.open_source`), a day per process.
     """
     source = tables.open_source(tables_dir, since=since, until=until)
-    results: dict[str, GameApm] = {}
     days = source.by_day()
+    game_parts: list[pl.DataFrame] = []
+    player_parts: list[pl.DataFrame] = []
+    minute_parts: list[pl.DataFrame] = []
+    replays = 0
     with ProcessPoolExecutor(max_workers=max(1, jobs)) as pool:
         for count, found in enumerate(pool.map(day_apm, days), start=1):
-            results.update(found)
-            print(f"{count} of {len(days)} days, {len(results)} replays read", file=sys.stderr)
-    games: list[dict[str, Any]] = []
-    players: list[dict[str, Any]] = []
-    minute_parts: list[pl.DataFrame] = []
-    for name in sorted(results):
-        result = results[name]
+            # a day's rows become frames at once: kept as dicts, the slice's do not fit
+            game_part, player_part, minute_part = _day_frames(found)
+            game_parts.append(game_part)
+            player_parts.append(player_part)
+            minute_parts.append(minute_part)
+            replays += len(found)
+            print(f"{count} of {len(days)} days, {replays} replays read", file=sys.stderr)
+    games = _concat(game_parts, GAME_SCHEMA)
+    players = _concat(player_parts, PLAYER_SCHEMA)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    games.write_parquet(out_dir / "games.parquet")
+    players.write_parquet(out_dir / "players.parquet")
+    _concat(minute_parts, MINUTE_SCHEMA).write_parquet(out_dir / "minutes.parquet")
+    included = games.filter(pl.col("status") == INCLUDED).height
+    return {"replays": games.height, "games": included, "players": players.height}
+
+
+def _day_frames(found: Mapping[str, GameApm]) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+    """The games, players and minutes of one day's replays, in replay order (a day's
+    replays come after the days before it in name order too)."""
+    games, players, minutes = [], [], []
+    for name in sorted(found):
+        result = found[name]
         games.append(result.game)
         players += result.players
         if result.minutes:
-            minute_parts.append(pl.DataFrame(result.minutes, schema=MINUTE_SCHEMA))
-    out_dir.mkdir(parents=True, exist_ok=True)
-    pl.DataFrame(games, schema=GAME_SCHEMA).write_parquet(out_dir / "games.parquet")
-    pl.DataFrame(players, schema=PLAYER_SCHEMA).write_parquet(out_dir / "players.parquet")
-    minutes = pl.concat(minute_parts) if minute_parts else pl.DataFrame(schema=MINUTE_SCHEMA)
-    minutes.write_parquet(out_dir / "minutes.parquet")
-    included = sum(game["status"] == INCLUDED for game in games)
-    return {"replays": len(games), "games": included, "players": len(players)}
+            minutes.append(pl.DataFrame(result.minutes, schema=MINUTE_SCHEMA))
+    return (
+        pl.DataFrame(games, schema=GAME_SCHEMA),
+        pl.DataFrame(players, schema=PLAYER_SCHEMA),
+        _concat(minutes, MINUTE_SCHEMA),
+    )
+
+
+def _concat(parts: Sequence[pl.DataFrame], schema: Mapping[str, Any]) -> pl.DataFrame:
+    return pl.concat(parts) if parts else pl.DataFrame(schema=schema)
 
 
 def skill_band(column: str = "skill") -> pl.Expr:
