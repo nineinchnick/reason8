@@ -52,7 +52,7 @@ task, the commands in order and what each one talks to.
   (`--limit N --since YYYY-MM-DD --until YYYY-MM-DD`, `--dry-run`;
   [workflow](docs/reference/workflows.md#getting-replays-and-match-data)).
 
-`sync push|pull [replays|tables|matches]`
+`sync push|pull [replays|tables|matches|state|state-NAME]`
 : Copy the data directory to or from the private S3 bucket
   (`--since YYYY-MM-DD --until YYYY-MM-DD` for some days, `--match`,
   `--dry-run`).
@@ -82,6 +82,12 @@ task, the commands in order and what each one talks to.
   sample, in parts for several machines; summarise a state file; convert state
   files to Parquet tables
   ([workflow](docs/reference/workflows.md#re-simulating-replays-for-game-state)).
+
+`cloud up|run|status|down`
+: Re-simulate a batch of replays on EC2 spot instances: deploy the stack of
+  the workers; queue the games of a list and start instances; see how far it
+  is and what it cost so far; stop it ([reference](docs/reference/cloud.md),
+  [ADR 0020](docs/decisions/0020-re-simulate-in-bulk-on-spot-instances.md)).
 
 `contact`
 : Measure first contact in re-simulated replays (`--report` prints the
@@ -409,10 +415,12 @@ per skill band.
 
 ## Compute
 
-Training and headless simulation run **locally first**. Bulk jobs (re-running
-thousands of replays, large evaluation runs) can move to a **cloud cluster**
-of containerised headless engines when local machines aren't enough
-([ADR 0016](docs/decisions/0016-download-and-store-the-data.md)).
+Training and headless simulation run **locally first**
+([ADR 0016](docs/decisions/0016-download-and-store-the-data.md)). Batches of
+thousands of replays can also run on EC2 **spot instances** that take the
+games from a queue and write their state to the bucket, and that terminate
+themselves when the queue is empty (`reason8 cloud`,
+[ADR 0020](docs/decisions/0020-re-simulate-in-bulk-on-spot-instances.md)).
 
 The bot is judged in games: `reason8 eval games` plays Reason8 and stock BARb
 in paired 8v8 games, many at a time, and `reason8 eval report` compares their

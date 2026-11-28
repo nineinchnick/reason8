@@ -56,9 +56,9 @@ version matters. The window is pinned to 2026-05-23 .. 2026-11-22
 
 **Storage.** Keep the data in a private S3 bucket (eu-central-1, all public
 access blocked, encrypted at rest, no versioning) that mirrors the data
-directory: `replays/`, `tables/`, `matches/`, later `state/`. The bucket is
-the shared cache; a local data directory is a working copy that can be rebuilt
-from it.
+directory: `replays/`, `tables/`, `matches/`, `state/` (and `state-<name>` for
+the state of a batch in a format of its own). The bucket is the shared cache;
+a local data directory is a working copy that can be rebuilt from it.
 
 - Replays and state files are kept in daily partitions by the day the match
   started, Hive style: `replays/date=YYYY-MM-DD/<name>.sdfz`,
@@ -107,9 +107,9 @@ from it.
 - Nothing in the bucket is public, and nothing derived from it is published
   without anonymising it first.
 
-**Compute.** Run everything locally first. Move bulk jobs to a cloud cluster
-of containerised headless engines only when local machines aren't enough,
-based on measured cost.
+**Compute.** Run everything locally first. Bulk re-simulation can run on spot
+instances in the bucket's region
+([ADR 0020](0020-re-simulate-in-bulk-on-spot-instances.md)).
 
 ## Consequences
 
@@ -140,8 +140,9 @@ based on measured cost.
 - Contributors need AWS credentials from the maintainer to use the bucket;
   without them, everything still works from BAR's servers.
 - The headless tools run unattended, in parallel, in their own write
-  directories, so they can be containerised later. Cost per 1,000 replays and
-  per evaluation run is measured before anything moves to the cloud.
+  directories, so the same code runs on a local machine and on a cloud
+  instance. The cost per game is measured by a trial batch before batches move
+  to the cloud for good.
 - Revisit when training needs a different mix (e.g. only recent game
   versions), when storage costs grow past the slice, when contributors without
   AWS access need the data, or when a published, anonymised dataset is needed.
