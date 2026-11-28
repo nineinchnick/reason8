@@ -12,21 +12,27 @@ The "Not covered yet" section at the end lists what still needs hands-on
 testing. Hook 1 below has since been built and run: see
 [`in-game.md`](../reference/in-game.md).
 
-## TL;DR
+## Summary
 
-- BARb (also called "BARbarian") is a **native Skirmish AI**, a C++ library
-  the engine loads. It's built from **CircuitAI**. Most behaviour is in C++.
-  **AngelScript** scripts and **JSON** configs, shipped with the game itself,
-  tune it per difficulty.
-- It doesn't plan. **Managers keep a pool of build tasks. Each idle unit takes
-  the best task for itself**, scored by priority, travel cost and safety.
-- **The opening** is a weighted random pick from a few hand-written sequences
-  per factory. **After the opening**, each factory picks units at random using
-  hand-tuned probability tables that depend on income.
-- **Both are lookup tables of probabilities, which is the same shape as a
-  model's output.** *So the easiest place for Reason8 to plug in is to replace
-  these tables with predictions learned from replays, and leave the rest of
-  BARb alone.*
+BARb, the AI that ships with BAR, does not plan. It is a C++ library
+(CircuitAI), tuned per difficulty by AngelScript scripts and JSON configs that
+ship with the game. Its managers keep a pool of build tasks, and each idle
+unit takes the best one for itself, scored by priority, travel cost and
+safety. Its opening is a weighted random pick from a few hand-written
+sequences per factory; after that each factory draws units from hand-tuned
+probability tables by income. Those tables have the same shape as a model's
+output, so the cheapest way in is to replace them with numbers learned from
+replays and let BARb play the rest of the game.
+
+Used in
+[ADR 0006](../decisions/0006-build-on-barb-and-replace-its-decisions-layer-by-layer.md)
+(Reason8 is a BARb variant that replaces its decisions layer by layer) and
+[ADR 0007](../decisions/0007-ship-the-model-as-tables-in-a-barb-variant.md)
+(the opening is shipped as tables in that variant). The first learned model
+goes one hook deeper, to the task an idle builder takes (hook 5 below,
+[ADR 0019](../decisions/0019-first-model-trees-asked-by-every-builder.md)).
+BARb's military layer, and how its openings compare with human ones, are not
+studied yet.
 
 ## Where things live
 
