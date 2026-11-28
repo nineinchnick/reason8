@@ -174,7 +174,7 @@ def opening_table(openings: dict) -> str:
             f'{float(start_z)}f, "{";".join(steps)}", "{";".join(factories)}")'
         )
     reaction_rows = [
-        f'"{kind} {row["until_seconds"]} {row["answered"]} '
+        f'"{kind} {row["until_seconds"]} '
         + " ".join(str(value) for value in row["quantiles"])
         + '"'
         for kind, rows in sorted((openings.get("reactions") or {}).items())
@@ -205,7 +205,7 @@ def opening_table(openings: dict) -> str:
         "\n"
         "namespace Reason8 {\n"
         "\n"
-        '// Reaction delays: "<kind> <until second> <answered> <quantiles of seconds>".\n'
+        '// Reaction delays: "<kind> <until second> <quantiles of seconds>".\n'
         + reactions
         + '// Units started between two looks: "<kind> <mean>".\n'
         + batches

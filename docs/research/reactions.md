@@ -206,8 +206,9 @@ answered: an order within 60 s.
 
 Decided in [ADR 0008](../decisions/0008-play-under-human-like-limits.md): the
 bot waits the clicked delays of its band (30-40) and of the game phase, by
-kind of unit; when the drawn delay is "no answer", which happens as often as
-players leave a unit idle for a minute, it waits 60 s and then acts.
+kind of unit. It does not copy the share of idle units players leave without
+an order for a minute: drawn blindly, that left a bot's first factory idle for
+182 of its first 223 seconds in a lobby game, with its commander assisting it.
 
 ## Limits
 

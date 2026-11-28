@@ -171,12 +171,9 @@ IUnitTask@ factoryTask = null;  // the task of the current factory unit
 // --- reaction delays (docs/decisions/0008): an idle factory or builder waits as long as a
 // player of the bot's band takes to notice it and give it orders
 
-const int NO_ANSWER_SECONDS = 60;  // a draw of "no answer": orders after a minute
-
 class SReaction {  // one kind of unit in one phase of the game
 	string kind;
 	int untilFrame;
-	float answered;
 	array<float> quantiles;  // seconds
 }
 
@@ -211,8 +208,7 @@ void ReadReactions()
 		SReaction row;
 		row.kind = fields[0];
 		row.untilFrame = int(parseInt(fields[1])) * SECOND;
-		row.answered = float(parseFloat(fields[2]));
-		for (uint j = 3; j < fields.length(); ++j)
+		for (uint j = 2; j < fields.length(); ++j)
 			row.quantiles.insertLast(float(parseFloat(fields[j])));
 		reactionRows.insertLast(row);
 	}
@@ -233,8 +229,6 @@ int DrawReaction(const string& in kind)
 	}
 	if (row is null || row.quantiles.length() == 0)
 		return 0;
-	if (AiRandom(0, 9999) >= int(row.answered * 10000.f))
-		return NO_ANSWER_SECONDS * SECOND;
 	const float seconds = row.quantiles[AiRandom(0, int(row.quantiles.length()) - 1)];
 	return int(seconds * SECOND);
 }

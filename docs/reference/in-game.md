@@ -562,14 +562,13 @@ Reaction delays
   [`reactions.md`](../research/reactions.md)). The hooks in `builder.as` and
   `factory.as` ask `opening.as` first: when a unit's batch of tasks is used
   up, it draws a delay for its kind (factory, builder, construction turret)
-  and phase of the game from the table `reason8 bot export` writes, 60 s for a
-  draw of "no answer", and gives the unit a wait task. A batch is how many
-  tasks one look gives a unit, drawn around what players start between two
-  idle events: about six units for a factory, one or two structures for a
-  builder. Only a finished task uses up the batch, so a unit taking back a
-  task it dropped, or the opening's own short waits, add no delay.
-  `reason8 bot build --limits-only` builds the same AI without openings as
-  `BARbLimited`, stock BARb under the same limits.
+  and phase of the game from the table `reason8 bot export` writes, and gives
+  the unit a wait task. A batch is how many tasks one look gives a unit, drawn
+  around what players start between two idle events: about six units for a
+  factory, one or two structures for a builder. Only a finished task uses up
+  the batch, so a unit taking back a task it dropped, or the opening's own
+  short waits, add no delay. `reason8 bot build --limits-only` builds the same
+  AI without openings as `BARbLimited`, stock BARb under the same limits.
 
 Hidden timers
 : BARb's configs hold some units back (`since` in `behaviour.json`): the radar
@@ -954,9 +953,12 @@ With `--infolog` it also checks each team's command governor
 command the AI gave was sent, replaced by a newer order to the same unit or
 still held at the end (none dropped), the minutes add up, and the logged
 actions kept every window of the budget. With `--state` too it compares the
-live state the script logged with the export (`live_state_by_team`). Each team
-also gets `replay_budget`: its commands in the replay counted as actions, and
-the most in each window, a cross-check that is not part of the verdict (see
+live state the script logged with the export (`live_state_by_team`).
+`reaction_waits_by_team` tells how often each team's idle factories and
+builders waited out a reaction delay, for how long in all and at most: a bot
+whose units stand idle shows there. Each team also gets `replay_budget`: its
+commands in the replay counted as actions, and the most in each window, a
+cross-check that is not part of the verdict (see
 [`command-governor.md`](../research/command-governor.md#the-replay-as-a-check)).
 
 When two AIs built by `reason8 bot build` play in one game, the engine logs
