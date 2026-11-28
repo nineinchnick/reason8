@@ -232,7 +232,7 @@ def test_replaced_scripts_are_listed_with_their_base():
 def test_opening_table_with_reactions():
     reactions = {"builder": [{"until_seconds": 180, "answered": 0.9, "quantiles": [1.0, 2.5]}]}
     table = build.opening_table({"openings": [], "reactions": reactions})
-    assert '\t"builder 180 0.9 1.0 2.5"\n};' in table
+    assert '\t"builder 180 1.0 2.5"\n};' in table
     assert "const array<string> REACTIONS;" in build.opening_table({"openings": []})
 
 

@@ -104,9 +104,16 @@ uses it:
    the moment a unit goes idle to their next order to it, by kind of unit
    (factory, mobile builder, construction turret) and phase of the game, as
    measured in [`reactions.md`](../research/reactions.md). The player's own
-   clicks count, not the commands their widgets send at once. When the draw is
-   "no answer", which happens as often as players leave an idle unit for a
-   minute, the bot waits 60 s and then acts.
+   clicks count, not the commands their widgets send at once. The draw is
+   always one of those delays. Players also leave an idle unit without orders
+   for a minute or longer, a factory in the first three minutes after more
+   than half of its idle moments, but the bot does not copy that with a draw:
+   a player has a reason the draw does not see (nothing more wanted, nothing
+   to pay with), and a bot that waits blindly leaves a factory idle for most
+   of the opening. Leaving a unit idle is a decision for the model that orders
+   the builders
+   ([ADR 0019](0019-first-model-decides-each-builders-next-order.md)), which
+   sees the economy.
 2. **Queue ahead.** When the bot gives orders it queues as the player did: the
    whole drag for a builder, several units for a factory, so that a unit stays
    busy until it needs attention again. Changing a queue already given, in
