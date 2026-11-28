@@ -597,7 +597,11 @@ Leaving `Version` out is what a lobby does.
 
 With `--infolog`, `reason8 bot check` also counts each team's opening log
 lines (`opening_by_team`): its position, the steps finished and skipped, and
-the factory units made.
+the factory units made. When an opening was ended early
+([When the opening ends](#when-the-opening-ends)) the team has `ended`: the
+frame, the reason, what happened, and how many commander steps and factory
+units were done by then. Only those are compared with what was ordered and
+built.
 
 With `--infolog` it also checks each team's command governor
 (`governor_by_team`): the library ran in the engine it was built for, every
