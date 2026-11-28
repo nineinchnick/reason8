@@ -53,6 +53,22 @@ def test_team_game_script_with_ai_options():
     assert "Version=stable; Team=3; }" in script
 
 
+def test_team_game_script_with_options_of_the_second_ally_team():
+    script = team_game_script(
+        map_name="Some Map",
+        game="Some Game test-1",
+        layout=LAYOUT,
+        ais=("BARb", "Reason8"),
+        sides=("Armada", "Cortex"),
+        seed=7,
+        frames=900,
+        options={"reaction_delays": "off"},
+        options_ally_team=1,
+    )
+    assert "ShortName=Reason8; Team=3; [OPTIONS] { reaction_delays=off; } }" in script
+    assert "Version=stable; Team=1; }" in script
+
+
 def test_ai_options_are_checked():
     with pytest.raises(SystemExit, match="bad AI option"):
         ai_options({"builder_orders": "model; cheating=1"})

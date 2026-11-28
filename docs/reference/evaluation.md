@@ -24,7 +24,15 @@ uv run reason8 eval report data/eval/reason8-vs-barb
 
 # the A/A test: stock BARb against itself, the same way
 uv run reason8 eval games ... --ai BARb --out data/eval/barb-vs-barb
+
+# the model ordering builders, without the human-like limits
+uv run reason8 eval games ... --ai-option builder_orders=model \
+    --ai-option reaction_delays=off --ai-option command_budget=off \
+    --out data/eval/model-no-limits
 ```
+
+`--ai-option KEY=VALUE` gives the evaluated AI an option of its
+`AIOptions.lua` in both games of a seed.
 
 A game that has a `result.json` is not played again, so an interrupted run can
 be repeated with the same command. Each game keeps its start script, engine

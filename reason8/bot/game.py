@@ -65,9 +65,10 @@ def team_game_script(
     seed: int,
     frames: int,
     options: Mapping[str, str] | None = None,
+    options_ally_team: int = 0,
 ) -> str:
     """The start script: one AI team per recommended position, a spectating host.
-    `options` are given to the first ally team's AI."""
+    `options` are given to the AI of ally team `options_ally_team`, the first by default."""
     teams, ai_sections = [], []
     team_id = 0
     for ally_team, spawn_points in enumerate(layout.sides):
@@ -80,7 +81,7 @@ def team_game_script(
             ai_sections.append(
                 f"\t[AI{team_id}] {{ Host=0; IsFromDemo=0; Name={ais[ally_team]}-{spawn_point.id}; "
                 f"{ai_fields(ais[ally_team])} Team={team_id};"
-                f"{ai_options(options or {}) if ally_team == 0 else ''} }}"
+                f"{ai_options(options or {}) if ally_team == options_ally_team else ''} }}"
             )
             team_id += 1
     ally_teams = [f"\t[ALLYTEAM{index}] {{ NumAllies=0; }}" for index in range(len(layout.sides))]

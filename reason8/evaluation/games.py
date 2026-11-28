@@ -51,7 +51,13 @@ from pathlib import Path
 
 import polars as pl
 
-from reason8.bot.game import FRAMES_PER_MINUTE, team_game_layout, team_game_script, team_positions
+from reason8.bot.game import (
+    FRAMES_PER_MINUTE,
+    parse_options,
+    team_game_layout,
+    team_game_script,
+    team_positions,
+)
 from reason8.game.unitdefs import UnitDef, game_unit_defs
 from reason8.headless import run as headless_run
 from reason8.headless import tables
@@ -169,8 +175,10 @@ def play_game(
     minutes: float,
     timeout: float,
     unit_defs: Mapping[str, UnitDef],
+    options: Mapping[str, str] | None = None,
 ) -> dict:
-    """Play one game (unless it was played) and measure its teams."""
+    """Play one game (unless it was played) and measure its teams. `options` are AI options
+    of the evaluated AI, whichever ally team it plays in this game."""
     game_dir = out_dir / spec.name
     result_path = game_dir / RESULT_NAME
     if result_path.is_file():
@@ -189,6 +197,8 @@ def play_game(
             sides=spec.sides,
             seed=spec.seed,
             frames=round(minutes * FRAMES_PER_MINUTE),
+            options=options,
+            options_ally_team=0 if spec.game == GAMES[0] else 1,
         ),
         encoding="utf-8",
     )
@@ -288,6 +298,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--minutes", type=float, default=8.5, help="game time of each game")
     parser.add_argument("--jobs", type=int, default=6, help="games at a time (about 6 GB each)")
     parser.add_argument("--timeout", type=float, default=1800, help="seconds per game")
+    parser.add_argument(
+        "--ai-option",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="an option of the evaluated AI, e.g. reaction_delays=off (repeatable)",
+    )
     parser.add_argument("--out", type=Path, required=True, help="folder of the games")
 
 
@@ -297,6 +314,7 @@ def run(args: argparse.Namespace) -> int:
     unit_defs = game_unit_defs(data_dir, args.game)
     specs = game_specs(parse_seeds(args.seeds), args.ai, args.opponent, tuple(args.sides))
     args.out.mkdir(parents=True, exist_ok=True)
+    options = parse_options(args.ai_option)
 
     def one(spec: GameSpec) -> dict:
         result = play_game(
@@ -309,6 +327,7 @@ def run(args: argparse.Namespace) -> int:
             minutes=args.minutes,
             timeout=args.timeout,
             unit_defs=unit_defs,
+            options=options,
         )
         run_facts = result["run"]
         print(
