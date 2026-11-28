@@ -26,9 +26,17 @@ The AI folder <shortName>/<version>/ is put together from four sources:
      next_order.json (`reason8 bot export-next-order`) is turned into the
      table script/<profile>/reason8/next_order_table.as, and stand_in.json
      into the stand-in model's reason8/stand_in.txt, which our library reads
-     when the model decides builders' next orders.
+     when the model decides builders' next orders and there is no learned
+     model.
+  5. the learned builder model (--model: a file of `reason8 model train`, by
+     default builder_v1 in the data directory's models/), copied to
+     reason8/builder_model.json when it exists. It is built from private data
+     and never committed; without it the stand-in answers.
      script/<profile>/reason8/live_state.as is generated for the library: it
      reads the live state from ours, and says "unknown" (-1) with the stock one.
+
+The model file is large (73 MB), so it goes only into the AI folder, not into
+reason8_build.json, which records its name, size and SHA-256.
 
 A script of ours that replaces a BARb script was made from one version of that
 script; ai/Reason8/base.json records its SHA-256. When the game's file differs
@@ -54,7 +62,7 @@ from reason8.bot import library as native
 from reason8.game.maps import MapMetadata, load_map_list
 from reason8.game.package import find_game_package, read_package
 from reason8.headless.run import find_engine
-from reason8.paths import REPO_ROOT
+from reason8.paths import REPO_ROOT, data_dir
 
 DEFAULT_SOURCE = REPO_ROOT / "ai" / "Reason8"
 BASE_AI = Path("AI") / "Skirmish" / "BARb" / "stable"
@@ -68,6 +76,9 @@ OPENING_TABLE = "reason8/opening_table.as"
 LIVE_STATE = "reason8/live_state.as"
 NEXT_ORDER_TABLE = "reason8/next_order_table.as"
 STAND_IN = "reason8/stand_in.txt"  # read by our library (ai/native/NextOrder.cpp)
+MODEL = "reason8/builder_model.json"  # the learned model, read by our library instead
+DEFAULT_MODEL = "builder_v1"  # in <REASON8_DATA_DIR>/models/
+NO_MODEL = "none"
 LIMITS_ONLY_NAME = "BARbLimited"
 HEADLESS_NAMES = ("spring-headless", "spring-headless.exe")  # Linux, Windows
 
@@ -374,6 +385,7 @@ def assemble(
     library: native.Library | None = None,
     short_name: str | None = None,
     roles: Mapping[tuple[str, str], str] | None = None,
+    model: Path | None = None,
 ) -> tuple[dict[str, bytes], dict]:
     """(files of the AI folder by relative path, facts about the build).
 
@@ -381,7 +393,8 @@ def assemble(
     (ADR 0008) and no openings, installed under the short name `LIMITS_ONLY_NAME`: the fair
     opponent for Reason8 (ADR 0003). `library` replaces the engine's library (None keeps
     it); `short_name` installs the AI under another name. `roles` are the start positions'
-    roles (`position_roles`), for the model's inputs.
+    roles (`position_roles`), for the model's inputs; `model` the learned builder model's
+    file (None: the stand-in answers).
     """
     files: dict[str, bytes] = {}
 
@@ -440,6 +453,15 @@ def assemble(
         "utf-8"
     )
     files[STAND_IN] = stand_in_text(stand_in).encode("utf-8")
+    model_facts = None
+    if model is not None:
+        content = model.read_bytes()
+        files[MODEL] = content
+        model_facts = {
+            "name": model.stem,
+            "bytes": len(content),
+            "sha256": sha256(content),
+        }
     live_state = library is not None and library.live_state
     files[f"script/{profile}/{LIVE_STATE}"] = live_state_script(live_state).encode("utf-8")
 
@@ -459,6 +481,8 @@ def assemble(
         "next_order_sha256": file_sha256(next_order_path),
         "stand_in_sha256": file_sha256(stand_in_path),
         "stand_in_rows": len(stand_in.get("rows", [])),
+        # the learned model, or None: the stand-in answers
+        "builder_model": model_facts,
         "usual_metal_spot_positions": len(next_order.get("metal_spots", [])),
         "positions_with_role": sum(
             (row["map"], row["position"]) in (roles or {})
@@ -466,6 +490,24 @@ def assemble(
         ),
     }
     return files, facts
+
+
+def find_model(choice: str | None) -> Path | None:
+    """The learned builder model to install: a file, or a name in the data directory's
+    models/ (``builder_v1`` finds ``models/builder_v1.json``). None when the choice is
+    `NO_MODEL`, or when it is the default and that file is not there: the stand-in then
+    answers. A model asked for by name or path must exist."""
+    choice = choice or DEFAULT_MODEL
+    if choice == NO_MODEL:
+        return None
+    path = Path(choice)
+    if not path.suffix:
+        path = data_dir() / "models" / f"{choice}.json"
+    if path.is_file():
+        return path.resolve()
+    if choice == DEFAULT_MODEL:
+        return None
+    raise SystemExit(f"no builder model at {path}")
 
 
 def build(args: argparse.Namespace) -> dict:
@@ -488,6 +530,7 @@ def build(args: argparse.Namespace) -> dict:
         library=library,
         short_name=args.short_name,
         roles=position_roles(load_map_list()),
+        model=find_model(args.model),
     )
     facts = {"engine": engine_dir.name, "game": args.game, **facts}
 
@@ -539,6 +582,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="commit of the engine's tag, for an engine build.sh has no commit for",
     )
     parser.add_argument("--short-name", help="install the AI under this short name")
+    parser.add_argument(
+        "--model",
+        default=DEFAULT_MODEL,
+        help="the learned builder model: a name in <data dir>/models/ (default "
+        f"{DEFAULT_MODEL}, left out when it is not there), a file, or '{NO_MODEL}' for the "
+        "stand-in",
+    )
     parser.add_argument(
         "--allow-base-drift",
         action="store_true",

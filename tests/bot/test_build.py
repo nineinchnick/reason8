@@ -376,6 +376,35 @@ def test_assemble_with_next_order_files(tmp_path):
     _, without = build.assemble(**make_inputs(tmp_path / "other", stock_hash))
     assert without["next_order_sha256"] is None and without["stand_in_sha256"] is None
     assert without["stand_in_rows"] == 0
+    assert facts["builder_model"] is None and "reason8/builder_model.json" not in files
+
+
+def test_assemble_with_a_builder_model(tmp_path):
+    stock_hash = hashlib.sha256(b"// stock factory\n").hexdigest()
+    model = tmp_path / "builder_v9.json"
+    model.write_bytes(b'{"format": "reason8.builder-trees/1"}')
+    files, facts = build.assemble(**make_inputs(tmp_path / "ai", stock_hash), model=model)
+    assert files["reason8/builder_model.json"] == model.read_bytes()
+    assert facts["builder_model"] == {
+        "name": "builder_v9",
+        "bytes": len(model.read_bytes()),
+        "sha256": hashlib.sha256(model.read_bytes()).hexdigest(),
+    }
+    assert "reason8/stand_in.txt" in files  # the stand-in stays, for a library without it
+
+
+def test_find_model(tmp_path, monkeypatch):
+    monkeypatch.setenv("REASON8_DATA_DIR", str(tmp_path))
+    assert build.find_model(None) is None  # the default, not trained here: the stand-in
+    assert build.find_model("none") is None
+    with pytest.raises(SystemExit, match="no builder model"):
+        build.find_model("builder_v1_no_skill")
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "builder_v1.json").write_text("{}")
+    (tmp_path / "models" / "builder_v1_no_skill.json").write_text("{}")
+    assert build.find_model(None) == (tmp_path / "models" / "builder_v1.json").resolve()
+    assert build.find_model("builder_v1_no_skill").name == "builder_v1_no_skill.json"
+    assert build.find_model(str(tmp_path / "models" / "builder_v1.json")).is_file()
 
 
 def test_library_scouts_are_those_of_first_contact():
