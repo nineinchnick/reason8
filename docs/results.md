@@ -278,8 +278,8 @@ carry most of it, the wind nothing.
 The builder model's table (`context_v2`) gives every order the builders it
 went to and adds the builders' jobs (assist, reclaim, repair, resurrect) as
 answers, with build power and skill
-([ADR 0019](decisions/0019-first-model-trees-asked-by-every-builder.md)). Its
-steps are not those of the scores above: a fifth of them are jobs. On the
+([ADR 0019](decisions/0019-first-model-decides-each-builders-next-order.md)).
+Its steps are not those of the scores above: a fifth of them are jobs. On the
 whole context sample (2,996 games; 286 in test, 129,525 steps), with the mask
 of answers a builder cannot give:
 

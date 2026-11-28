@@ -1,4 +1,4 @@
-# 0019. First model: trees that every builder asks, played live
+# 0019. First model: trees that decide each builder's next order, played live
 
 - **Status:** Accepted
 - **Date:** 2026-11-27
@@ -18,7 +18,7 @@ What we measured and built since:
   ([`context.md`](../research/context.md), preliminary).
 - Our build of BARb's library gives the scripts the live state and holds the
   bot to the action budget ([ADR 0008](0008-play-under-human-like-limits.md)),
-  so a model can be asked during the game.
+  so a model can be consulted during the game.
 - The commands say which units each order went to, and the re-simulated games
   say what those units are, so an order can be given to the builder that got
   it. The unit definitions have every builder's build power.
@@ -45,28 +45,32 @@ starts low.
 
 ## Decision
 
-The first learned model is asked during the game what a builder does next.
+The first learned model decides during the game what a builder does next. The
+bot stays one player: like a person who notices an idle builder and gives it
+an order, it consults one model, which sees the whole team's state, each time
+a builder has nothing to do. The builder is what the decision is about, not
+who makes it.
 
 - **What it decides:** the next order of any unit with build power: the
-  commander, factories, construction units, build towers and the others. A
-  builder asks when it has nothing to do. The model is told what kind of
-  builder asks.
+  commander, factories, construction units, build towers and the others. The
+  decision is made when a builder has nothing to do. The model is told what
+  kind of builder the order is for.
 - **Its answers:** a unit to build, or a job without a target: assist,
   reclaim, repair or resurrect.
 - **Its inputs:** the order history, the map and start position, the game
   time, the team's economy, its own units finished and under construction, its
-  build power (the asking builder's and the team's), and the skill of the
+  build power (the idle builder's and the team's), and the skill of the
   player. In the game the skill is a number we choose. The allies and the wind
   are left out.
 - **The model:** gradient-boosted trees, written to a data file that the
   library evaluates with its own code, without a runtime. The list of inputs
   and the form of the answer are kept independent of trees, so that a network
   can take their place.
-- **Possible answers only:** the answers the asking builder can never give (a
-  factory cannot reclaim, a builder builds only its own list) are removed and
-  the rest rescaled to sum to one. What a team cannot afford stays: the game
-  lets a player start anything. Models are scored on replays with the same
-  mask, so that the model chosen there is the one that plays.
+- **Possible answers only:** the answers the idle builder can never carry out
+  (a factory cannot reclaim, a builder builds only its own list) are removed
+  and the rest rescaled to sum to one. What a team cannot afford stays: the
+  game lets a player start anything. Models are scored on replays with the
+  same mask, so that the model chosen there is the one that plays.
 - **Choosing from the answer:** after the mask, the bot samples among the
   answers with a probability of at least 10%. When no answer reaches the
   threshold or the chosen one cannot be carried out, BARb decides.
@@ -108,8 +112,8 @@ The first learned model is asked during the game what a builder does next.
   games played again, and more have to be.
 - The usual order of metal spots exists only for maps and positions with data.
   Elsewhere BARb places extractors too.
-- The library needs an evaluator for trees and a way for every builder to ask,
-  and the action budget now covers all builders' orders.
+- The library needs an evaluator for trees and has to consult the model for
+  every idle builder, and the action budget now covers all builders' orders.
 - Where to build, and what to assist, reclaim or resurrect, are the next
   decisions to learn. They need the model to see the map around the builder.
   Reclaim and resurrection set new players apart from experienced ones, and

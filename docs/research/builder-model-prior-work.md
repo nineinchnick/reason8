@@ -2,7 +2,7 @@
 
 The first learned model is gradient-boosted trees that every unit with build
 power asks, during the game, what to do next
-([ADR 0019](../decisions/0019-first-model-trees-asked-by-every-builder.md)).
+([ADR 0019](../decisions/0019-first-model-decides-each-builders-next-order.md)).
 This document collects what prior work says about five questions that decision
 raises, and what Reason8 should do about each:
 
@@ -360,7 +360,7 @@ that do nothing. In imitation the case differs (our reading):
   its own model.
 - Mask impossibility (build list, builder kind, unit limits, no target), not
   cost.
-- [ADR 0019](../decisions/0019-first-model-trees-asked-by-every-builder.md)
+- [ADR 0019](../decisions/0019-first-model-decides-each-builders-next-order.md)
   records the rule.
 
 ## 4. What the model sees of the map
@@ -536,7 +536,7 @@ and builders already assigned as the first candidate features.
 
 ## What the records took from this
 
-[ADR 0019](../decisions/0019-first-model-trees-asked-by-every-builder.md)
+[ADR 0019](../decisions/0019-first-model-decides-each-builders-next-order.md)
 states the mask, the check that keeps skill as an input, the measures of drift
 and the test with a shorter order history. This doc keeps the evidence for
 them.

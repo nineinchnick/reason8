@@ -141,7 +141,7 @@ that model in the game; each links to the record that decides it.
   units, build towers. The answer is a probability for every option: a unit or
   building to make, or a job (assist, reclaim, repair, resurrect). Where to
   build and how to fight stay with BARb
-  ([ADR 0019](docs/decisions/0019-first-model-trees-asked-by-every-builder.md)).
+  ([ADR 0019](docs/decisions/0019-first-model-decides-each-builders-next-order.md)).
 
 **Game state from replays**
 : A replay file (`.sdfz`) stores the players' commands, not the state of the
@@ -155,7 +155,7 @@ that model in the game; each links to the record that decides it.
   situation just before the order, and the order as the right answer. The
   situation is the model's input: the order before it, the map and start
   position, the game time, the team's economy, its units, the kind of builder
-  that asks, the team's build power and the player's rating
+  the order is for, the team's build power and the player's rating
   ([ADR 0018](docs/decisions/0018-learn-from-orders-joined-with-the-state-before-them.md)).
 
 **Model**

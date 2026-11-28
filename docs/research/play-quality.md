@@ -4,7 +4,7 @@ The skill we have for a player is the rating of their account (OpenSkill). It
 chooses the training games
 ([ADR 0014](../decisions/0014-first-training-slice.md)) and is an input of the
 first model
-([ADR 0019](../decisions/0019-first-model-trees-asked-by-every-builder.md)),
+([ADR 0019](../decisions/0019-first-model-decides-each-builders-next-order.md)),
 but many things move it besides how a person plays, it can be gamed, and an
 experienced player on a new account starts low. This document looks for a
 score of how well someone played a game, computed from what they did in it:
@@ -238,7 +238,7 @@ PlayeRank (football)
 
 - An RTS has no engine to measure a move against, so the chess method does not
   carry over directly; the nearest thing we have is the model of
-  [ADR 0019](../decisions/0019-first-model-trees-asked-by-every-builder.md),
+  [ADR 0019](../decisions/0019-first-model-decides-each-builders-next-order.md),
   which could score how likely each of a player's orders is (our reading).
 - What the RTS sources measure is economy management (SQ, idle town centre,
   worker production) and attention (APM, action latency). Both are features

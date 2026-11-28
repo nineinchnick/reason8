@@ -35,7 +35,7 @@ games but for units still dying and a few made between two frames
 resources and the wind. A Lua widget can only write text.
 
 The models after the first one choose what to reclaim, resurrect and assist,
-and where ([ADR 0019](0019-first-model-trees-asked-by-every-builder.md)).
+and where ([ADR 0019](0019-first-model-decides-each-builders-next-order.md)).
 Reclaim and resurrection are among the decisions that set experienced players
 apart, and a game played again without what they need would have to be played
 once more. A spectator widget gets a call-in when a feature (a wreck, heap,
