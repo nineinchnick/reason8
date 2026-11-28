@@ -446,31 +446,38 @@ with the current openings.
 
 ADR 0003's second measure, against `BARbLimited` with both on our library (so
 both keep the budget), 10 seeds, 20 games, all played to the end, with the
-current openings:
+current openings. The bot ends its opening at its team's first contact, after
+the 8-minute window or when a commander step stalls for 111 s
+([`in-game.md`](in-game.md#when-the-opening-ends)); "before" is the same AI
+without those ends, the same seeds played again:
 
-| measure at 4:00 | Reason8 | BARbLimited | share                  |
-| --------------- | ------- | ----------- | ---------------------- |
-| metal income    | 10.3    | 10.2        | 101.4% (98.4%–104.3%)  |
-| energy income   | 146.1   | 127.5       | 114.6% (106.7%–122.1%) |
-| built metal     | 4198.2  | 4380.2      | 95.8% (92.9%–98.6%)    |
-| built energy    | 36182.5 | 38470.1     | 94.1% (91.7%–96.6%)    |
-| units           | 16.8    | 17.4        | 96.4% (92.0%–100.9%)   |
+| measure at 4:00 | Reason8 | BARbLimited | share                  | before                 |
+| --------------- | ------- | ----------- | ---------------------- | ---------------------- |
+| metal income    | 9.7     | 10.4        | 92.6% (88.5%–97.0%)    | 95.5% (92.1%–98.9%)    |
+| energy income   | 149.1   | 128.0       | 116.5% (108.9%–125.6%) | 111.1% (104.3%–118.0%) |
+| built metal     | 4167.3  | 4355.2      | 95.7% (93.5%–98.0%)    | 93.6% (92.3%–95.1%)    |
+| built energy    | 36001.6 | 38283.4     | 94.0% (91.9%–96.5%)    | 90.5% (89.3%–91.8%)    |
+| units           | 16.9    | 17.4        | 97.0% (92.1%–102.9%)   | 89.4% (85.7%–93.3%)    |
 
-- **As before, narrowly short.** Built metal at 4:00 is 95.8% of
-  BARbLimited's. With the openings chosen before quick runs of clicks were
-  merged into one step, the same seeds gave 96.2% (94.8%–97.6%): a little
-  lower now, the intervals overlapping. Metal income went from 91.6% to 101.4%
-  and energy income from 120.7% to 114.6%, so the new openings put a little
-  more into metal, but what was built is no more.
+- **No worse, still narrowly short.** Built metal at 4:00 is 95.7% of
+  BARbLimited's, against 93.6% for the same AI without the new ends; built
+  energy and units are higher too, metal income a little lower, the intervals
+  overlapping. The run before this change gave 95.8% (92.9%–98.6%) with the
+  same AI as "before": two runs of the same seeds differ by about 2 points,
+  because BARb seeds its random numbers from the clock.
+- **How the openings ended:** 99 of the 160 Reason8 teams at their first
+  contact (median 4:52, 40 of them before 4:00), 41 at the 8-minute window and
+  18 at a stalled step (median 5:28, two before 4:00); 2 played their opening
+  to the end.
 - **The builds are no harder to tell from human ones.** The classifier on
-  builds is right 85.9% (82.0%–89.6%) of the time, against 83.4% (78.8%–87.7%)
-  for the games with the earlier openings scored the same way today (82.5%
-  when they were played, against fewer re-simulated human games): slightly
-  worse, the intervals overlapping.
-- 116 of 160 Reason8 teams built their opening in order (113 before). The
-  governors of all 320 teams, both AIs', kept the budget and lost no command.
-- Contact before the end: 77.5% of Reason8's teams and 95.0% of BARbLimited's,
-  at a median of 5:01 and 4:33 (4:44 and 4:11 before).
+  builds is right 85.9% (81.4%–89.5%) of the time, against 84.7% (80.3%–88.7%)
+  before, the intervals overlapping.
+- 111 of 160 Reason8 teams ordered what they played of their opening in order
+  (`reason8 bot check`, which compares only the steps before the opening
+  ended). No script errors, and the governors of all 320 teams, both AIs',
+  kept the budget and lost no command.
+- Contact before the end: 72.5% of Reason8's teams and 96.9% of BARbLimited's,
+  at a median of 5:16 and 4:20 (83.1% and 95.0%, at 4:58 and 4:21, before).
 
 ### On Windows
 
