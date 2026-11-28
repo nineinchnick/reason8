@@ -86,7 +86,8 @@ runs in the engine it was built for. Our changes are:
   what does not fit and sending it later, in order;
 - the live state for the scripts: the current wind, the team's stored metal
   and energy with storage, income and expense, and its finished units by name,
-  read from the engine when a script asks.
+  read from the engine when a script asks, and the frame of the team's first
+  contact, kept from the engine's unit-damaged events.
 
 The scripts and the opening tables stay as they are and run on top of it.
 Models run inside the library or its scripts: first as tables loaded from a

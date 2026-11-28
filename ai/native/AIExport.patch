@@ -1,16 +1,17 @@
 diff --git a/src/AIExport.cpp b/src/AIExport.cpp
-index 6e9da12..7ced2e5 100644
+index 6e9da12..caccc1d 100644
 --- a/src/AIExport.cpp
 +++ b/src/AIExport.cpp
-@@ -9,6 +9,7 @@
+@@ -9,6 +9,8 @@
  
  #include "circuit/CircuitAI.h"
  #include "util/Profiler.h"
 +#include "Governor.h"  // Reason8
++#include "LiveState.h"  // Reason8
  
  #include <stdexcept>
  #include <map>
-@@ -38,6 +39,7 @@ EXPORT(int) init(int skirmishAIId, const struct SSkirmishAICallback* innerCallba
+@@ -38,6 +40,7 @@ EXPORT(int) init(int skirmishAIId, const struct SSkirmishAICallback* innerCallba
  	try {
  		circuit::CProfiler::GetInstance().InitNames(skirmishAIId);
  
@@ -18,7 +19,7 @@ index 6e9da12..7ced2e5 100644
  		springai::OOAICallback* clb = springai::WrappOOAICallback::GetInstance(innerCallback, skirmishAIId);
  		circuit::CCircuitAI* ai = new circuit::CCircuitAI(clb);
  
-@@ -63,6 +65,7 @@ EXPORT(int) release(int skirmishAIId) {
+@@ -63,6 +66,7 @@ EXPORT(int) release(int skirmishAIId) {
  
  		delete ai;
  		delete clb;
@@ -26,12 +27,14 @@ index 6e9da12..7ced2e5 100644
  
  		circuit::CProfiler::GetInstance().ReleaseNames(skirmishAIId);
  
-@@ -77,6 +80,8 @@ EXPORT(int) handleEvent(int skirmishAIId, int topic, const void* data) {
+@@ -77,6 +81,10 @@ EXPORT(int) handleEvent(int skirmishAIId, int topic, const void* data) {
  	int ret = ERROR_SHIFT + 1;
  
  	try {
 +		if (topic == EVENT_UPDATE)  // Reason8: send held commands first
 +			reason8::UpdateGovernor(skirmishAIId, static_cast<const SUpdateEvent*>(data)->frame);
++		if (topic == EVENT_UNIT_DAMAGED)  // Reason8: note the first contact
++			reason8::UnitDamaged(skirmishAIId, static_cast<const SUnitDamagedEvent*>(data));
  		ret = myAIs[skirmishAIId]->HandleEvent(topic, data);
  	} CATCH_CPP_AI_EXCEPTION(ret);
  

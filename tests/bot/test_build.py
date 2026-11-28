@@ -12,6 +12,7 @@ import pytest
 from reason8.bot import build
 from reason8.bot import library as native
 from reason8.game import package as game_package
+from reason8.openings import contact
 from reason8.paths import REPO_ROOT
 
 SOURCE = REPO_ROOT / "ai" / "Reason8"
@@ -244,7 +245,8 @@ def test_assemble_with_our_library(tmp_path):
     assert facts["library"]["source"] == "build"
     live_state = files["script/hard/reason8/live_state.as"].decode()
     assert "const bool LIVE_STATE = true;" in live_state
-    for binding in ("Reason8CurrentWind", "Reason8Resource", "Reason8UnitCount", "Reason8Standing"):
+    bindings = ("Reason8CurrentWind", "Reason8Resource", "Reason8UnitCount", "Reason8Standing")
+    for binding in bindings + ("Reason8FirstContactFrame", "Reason8FirstContact"):
         assert binding + "(" in live_state
 
 
@@ -277,7 +279,20 @@ def test_live_state_scripts_declare_the_same_functions():
     ours = build.live_state_script(True)
     stock = build.live_state_script(False)
     assert ours.count("{") == ours.count("}") and stock.count("{") == stock.count("}")
-    assert declarations(ours) == declarations(stock) and len(declarations(ours)) == 4
+    assert declarations(ours) == declarations(stock) and len(declarations(ours)) == 6
+
+
+def test_library_bindings_are_those_the_scripts_call():
+    header = (REPO_ROOT / "ai" / "native" / "LiveState.cpp").read_text(encoding="utf-8")
+    registered = set(re.findall(r'RegisterGlobalFunction\("\w+ (Reason8\w+)\(', header))
+    called = set(re.findall(r"(Reason8\w+)\(", build.live_state_script(True)))
+    assert called == registered
+
+
+def test_library_scouts_are_those_of_first_contact():
+    source = (REPO_ROOT / "ai" / "native" / "LiveState.cpp").read_text(encoding="utf-8")
+    listed = re.search(r"SCOUTS = \{(.*?)\};", source, re.S).group(1)
+    assert set(re.findall(r'"(\w+)"', listed)) == contact.SCOUTS
 
 
 def test_assemble_under_another_short_name(tmp_path):

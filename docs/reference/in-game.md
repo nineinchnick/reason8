@@ -350,7 +350,7 @@ Platforms
   [Windows](#c-our-own-build-of-barbs-library) under Past the tables). Where
   neither can be built, `--library stock` installs the engine's own library:
   the AI plays its openings, without the command budget, and the live state
-  reads as unknown (-1).
+  reads as unknown (-1): the scripts do not learn of the team's first contact.
 
 Engine version
 
@@ -401,15 +401,23 @@ Its log
 
 The live state
 
-: Four functions for the scripts, read from the engine when called:
+: Functions for the scripts, read from the engine when called:
   `Reason8CurrentWind()`, `Reason8Resource(resource, what)` with `metal` or
   `energy` and `current`, `storage`, `income`, `expense` or `pull`,
   `Reason8UnitCount(name)` (the team's finished units of that name) and
-  `Reason8Standing()` (all of them by name). The scripts call them through
-  `live_state.as`, which `reason8 bot build` generates for the library it
-  installs: with the stock library they return -1 and an empty string, so the
-  same scripts compile with either. The opening script logs them at every
-  commander step and every 30 s:
+  `Reason8Standing()` (all of them by name). Two more report the team's first
+  contact, kept from the engine's unit-damaged events as they arrive:
+  `Reason8FirstContactFrame()`, the frame a unit of the team other than a
+  scout was first damaged by an enemy unit (-1 before that), and
+  `Reason8FirstContact()`, what was hit by what (`armck by corak`). A hit
+  counts when the attacker is an enemy unit, or a weapon whose unit the AI
+  cannot see (an ally's it always sees); damage with no unit behind it
+  (debris, falling) does not. The scouts are those of
+  [ADR 0012](../decisions/0012-end-openings-at-first-contact.md). The scripts
+  call them through `live_state.as`, which `reason8 bot build` generates for
+  the library it installs: with the stock library they return -1 and an empty
+  string, so the same scripts compile with either. The opening script logs
+  them at every commander step and every 30 s:
 
   ```
   Reason8 opening: team 0: state at frame 1761: wind 17.1668, metal 349.494 of 1150 +4.30268 -6.96429, energy 23.3591 of 1101 +64.4555 -78, standing armcom 1, armflea 2, armlab 1, armmex 1, armwin 2
@@ -417,9 +425,10 @@ The live state
 
 Our changes to BARb's own files
 
-: Four lines in `AIExport.cpp` (install and release the governor, call it on
-  every update) and two in `InitScript.cpp` (register the live state), as
-  patches in `ai/native`; the rest is new files.
+: A few lines in `AIExport.cpp` (install and release the governor, call it on
+  every update; pass each unit-damaged event to the live state) and two in
+  `InitScript.cpp` (register the live state), as patches in `ai/native`; the
+  rest is new files.
 
 What it measured is in
 [`command-governor.md`](../research/command-governor.md) and
@@ -521,8 +530,8 @@ Can do
 
 With our library
 : The current wind, the team's resources as the engine reports them (stored,
-  storage, income, expense, pull) and its finished units by name (see
-  [Our BARb library](#our-barb-library)).
+  storage, income, expense, pull), its finished units by name and when it was
+  first hit by the enemy (see [Our BARb library](#our-barb-library)).
 
 Cannot
 : Read files, open sockets, read a clock, list enemy units, read line of

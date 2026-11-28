@@ -140,7 +140,7 @@ build_header="#define REASON8_ENGINE_TAG \"$tag\""
 if [ "$(cat "$barb/src/Reason8Build.h" 2>/dev/null)" != "$build_header" ]; then
 	echo "$build_header" >"$barb/src/Reason8Build.h"
 fi
-if ! grep -q 'reason8::UpdateGovernor' "$barb/src/AIExport.cpp"; then
+if ! grep -q 'reason8::UnitDamaged' "$barb/src/AIExport.cpp"; then
 	git -C "$barb" checkout -q src/AIExport.cpp
 	patch -s -d "$barb" -p1 <"$here/AIExport.patch"
 fi
