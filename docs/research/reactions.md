@@ -8,6 +8,22 @@ waits before giving an idle unit orders
 not reflexes, sets the pace of a real player. Code:
 `reason8/analysis/reactions.py`.
 
+## Summary
+
+Players are slow to answer an idle unit, whatever their skill: attention, not
+speed, sets the pace. Counting their own clicks, they give an idle builder new
+orders after a median of 6 s and an idle factory after 13 s, with a long tail
+(p90 33 s and 43 s), and often not within a minute at all: 19% of idle
+builders and 37% of idle factories get no order in that time. They answer
+fastest in the first 3 minutes. From the lowest skill band to the highest, the
+factory median falls only from 13.7 s to 11.0 s. Widgets answer at once; their
+orders are automation, not attention, and are left out. Measured on one map,
+in the first 10 minutes of 300 games.
+
+Used in [ADR 0008](../decisions/0008-play-under-human-like-limits.md): the bot
+waits a delay drawn from these, by kind of unit, game phase and skill band
+([below](#what-the-bot-does-with-it)).
+
 ## Method
 
 Games
