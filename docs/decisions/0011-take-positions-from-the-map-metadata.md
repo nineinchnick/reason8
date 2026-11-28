@@ -1,7 +1,7 @@
 # 0011. Take positions from BAR's map metadata
 
 - **Status:** Accepted
-- **Date:** 2026-11-22
+- **Date:** 2026-11-28
 
 ## Context
 
@@ -44,6 +44,17 @@ What we measured on 315 games of the three slice maps
 - An earlier version of this work found the positions by clustering the start
   points of replays. It arrived at the same eight places per side.
 
+The start point a replay records is the player's last start pick. The game
+refuses picks made after the player locked their place, within 350 units of
+another team's start or, in a draft, out of turn; the commander then starts at
+an earlier pick. In 2,996 re-simulated games
+([`start-positions.md`](../research/start-positions.md)) 5% of commanders
+started elsewhere than the recorded start and 1.9% of players at another
+position. The first buildings of 2.4% of all openings are more than 700 units
+from the recorded start, against 0.1 to 0.4% from where the commander really
+was. Which picks the game took cannot be told from the parsed replays: they do
+not keep the lock messages.
+
 The options were the raw start coordinates, positions clustered from replays
 and kept as a table in the code, or the map metadata; and, with the metadata,
 one position per spawn point or one per pair of mirrored spawn points.
@@ -51,7 +62,7 @@ one position per spawn point or one per pair of mirrored spawn points.
 ## Decision
 
 A player's position is the nearest recommended start position of their team's
-side (`reason8.game.positions.replay_positions()`):
+side to their start (`reason8.game.positions.replay_positions()`):
 
 - The recommended positions come from the game's own `mapmetadata_startpos`
   option, and from the pinned map list when the game has none.
@@ -65,6 +76,18 @@ side (`reason8.game.positions.replay_positions()`):
   other side.
 - Every start gets its nearest spawn point and the distance to it. It is "on
   the spot" when it is nearer than half the way to the next spawn point.
+- The start is the one the replay records, the player's last pick, except
+  where the game was re-simulated: there it is where the player's commander
+  was created at frame 0, and the decision table takes the position from that
+  point (`reason8.context.table.with_spawn_positions()`), on the side of the
+  recorded position.
+- Where the start is the recorded one, an opening whose first buildings are
+  away from it is left out rather than labelled with another position: the
+  opening dataset gives an opening the status "first buildings away from the
+  start" when the nearest of its first three structures is more than 700 units
+  from the start (`first_places_distance`). The export and the bot hold their
+  openings to the same limit, from the position's start and from the bot's own
+  start.
 
 Each game also records how it started (`start_setup()`): whether it showed the
 recommended positions, and whether the team areas are the map's default boxes
@@ -82,6 +105,14 @@ run reproducible. Tests use made-up metadata. Community names for positions
 - The dataset can carry, per player, the position, the spawn point, the role,
   the distance and whether the start is on the spot, and per game the two
   setup flags, and filter on any of them.
+- About three quarters of the openings left out for their first buildings are
+  mislabelled ones; the others are players who walked away from a correct
+  start. Of the mislabelled openings, few (0.04% of players in the
+  re-simulated games) build within 700 units of the recorded start and keep
+  their wrong position outside the decision table.
+- Exact starts in every game need the game's own rules replayed on the start
+  picks and the lock and draft messages of the raw replays, which the parser
+  does not keep yet. Revisit the flag when it does.
 - A position says where a player started, not what they played. A player who
   starts next to an empty air spot may still play air; the recognition test in
   [`maps/`](../research/maps/README.md) measures how often builds and position
