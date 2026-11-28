@@ -23,8 +23,10 @@ Built (--state): the state file comes from playing the replay again with
 
 Ended (--infolog): an opening that no longer applied was ended before its last
   step (``opening.as``, EndOpening), and BARb took over. The log says when,
-  why (`reason`) and how many commander steps and factory units were done by
-  then; only those are compared in the ways above.
+  why (`reason`: "step", a commander step not finished in time; "time", past
+  the opening window; "contact", the team's first contact) and how many
+  commander steps and factory units were done by then; only those are
+  compared in the ways above.
 
 Log (--infolog): whether the AI loaded, which version and scripts, and script
   errors. An AI that fails to load or compile does not stop the game: its team

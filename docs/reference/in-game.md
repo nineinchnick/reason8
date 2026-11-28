@@ -820,10 +820,18 @@ and the factory to BARb, when it no longer applies:
   queue several, so it is slower than the human it follows: at the median
   first contact of its position, which ends the human openings of the dataset,
   it has done a median of half its commander steps (the 160 teams of the last
-  comparison with `BARbLimited`). It plays on until the window instead.
+  comparison with `BARbLimited`). It plays on until its own contact or the
+  window instead.
 
-The window is checked before the step limit, once a second; the log line names
-the one that applied.
+`contact`
+: A unit of the team other than a scout is damaged by an enemy unit, as our
+  BARb library reports it ([Our BARb library](#our-barb-library), the live
+  state): the definition of first contact of ADR 0012. With the engine's own
+  library (`--library stock`) the scripts cannot see it, and only the step
+  limit and the window end an opening.
+
+They are checked once a second, contact first and the step limit last; the log
+line names the one that applied.
 
 #### Why a step limit
 
