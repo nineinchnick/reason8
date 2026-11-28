@@ -814,6 +814,17 @@ and the factory to BARb, when it no longer applies:
 : A commander step is not finished 111 s after it was first queued, its
   retries included.
 
+`time`
+: The game is 8 minutes old, the opening window of ADR 0012, which no human
+  opening goes past. The bot builds one structure at a time where players
+  queue several, so it is slower than the human it follows: at the median
+  first contact of its position, which ends the human openings of the dataset,
+  it has done a median of half its commander steps (the 160 teams of the last
+  comparison with `BARbLimited`). It plays on until the window instead.
+
+The window is checked before the step limit, once a second; the log line names
+the one that applied.
+
 #### Why a step limit
 
 In a real-time 4v4 lobby game on Supreme Isthmus one commander queued step 15

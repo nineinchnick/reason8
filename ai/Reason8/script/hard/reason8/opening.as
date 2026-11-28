@@ -16,7 +16,8 @@
  *
  * The opening ends early, and BARb takes the commander and the factory, when
  * it no longer applies (EndOpening): when a commander step is not finished
- * STEP_LIMIT_SECONDS after it was first queued. Update() checks it once a
+ * STEP_LIMIT_SECONDS after it was first queued, or when the game is past
+ * the opening window (OPENING_WINDOW_SECONDS). Update() checks them once a
  * second, from main.as.
  *
  * Every decision is logged with the prefix "Reason8 opening:". With our BARb
@@ -142,6 +143,9 @@ const int MAX_TRIES = 5;
 // human openings on Supreme Isthmus 99% of the gaps between two structure orders are
 // shorter (docs/reference/in-game.md, "When the opening ends").
 const int STEP_LIMIT_SECONDS = 111;
+// No opening goes past the first 8 minutes of game time, the opening window of
+// docs/decisions/0012.
+const int OPENING_WINDOW_SECONDS = 8 * 60;
 
 bool isOpeningChosen = false;
 bool isOpeningOver = false;  // ended early (EndOpening): BARb decides for every unit
@@ -721,6 +725,13 @@ void Update()
 {
 	if (opening is null || isOpeningOver)
 		return;
+	if (commanderStep >= opening.commander.length() && openingFactory is null)
+		return;  // played to the end
+	if (ai.frame >= OPENING_WINDOW_SECONDS * SECOND) {
+		EndOpening("time", "the game is past the opening window of "
+			+ OPENING_WINDOW_SECONDS + " s");
+		return;
+	}
 	if (commanderStep < opening.commander.length() && stepFrame >= 0
 		&& ai.frame - stepFrame > STEP_LIMIT_SECONDS * SECOND)
 	{
