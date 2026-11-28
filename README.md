@@ -131,10 +131,61 @@ start position on a popular team map**, then have a bot play it in team games.
 
 ## How the model is built
 
+From replays of human games to a person playing with the bot, in two parts.
+Each box is data in the data directory or the repo, each arrow the `reason8`
+command that makes it, or the step done by hand. Dashed arrows are not done
+yet: the learned model is being built.
+
+First the training data, from replays:
+
+```mermaid
+flowchart LR
+    sources[("BAR match dumps<br/>and replay storage")]
+    replays[("replays/<br/>.sdfz files")]
+    tables[("tables/<br/>commands, players,<br/>games")]
+    state[("state/<br/>game state of<br/>replays played again")]
+    openings[("datasets/openings_v2/<br/>build orders<br/>of openings")]
+    ngram[("models/ngram_v2.json<br/>next-build baseline")]
+    context[("datasets/context_v2/<br/>decision table")]
+    trees[("learned model<br/>being built")]
+
+    sources -- "download" --> replays
+    replays -- "parse" --> tables
+    replays -- "headless batch" --> state
+    tables -- "contact, dataset" --> openings
+    state --> openings
+    openings -- "baseline" --> ngram
+    state -- "context build" --> context
+    openings --> context
+    context -. "training" .-> trees
+```
+
+Then the bot, from the models, and the games it plays:
+
+```mermaid
+flowchart LR
+    ngram[("models/ngram_v2.json")]
+    context[("datasets/context_v2/")]
+    trees[("learned model<br/>being built")]
+    aidata["ai/Reason8/<br/>openings.json,<br/>next_order.json,<br/>stand_in.json (temporary)"]
+    bot["Reason8 AI:<br/>BARb with our library"]
+    games["paired games<br/>against stock BARb"]
+    person(["a person plays<br/>a lobby game"])
+
+    ngram -- "bot export" --> aidata
+    context -- "bot export-next-order" --> aidata
+    trees -. "replaces the stand-in" .-> aidata
+    aidata -- "bot build" --> bot
+    bot -- "eval games, eval report" --> games
+    bot -- "copied into BAR by hand,<br/>added in the lobby" --> person
+```
+
 Today the bot plays whole human openings, picked for its start position before
-the game. The first learned model, which is being built, replaces that with a
-decision made during the game. The steps below are the path from replays to
-that model in the game; each links to the record that decides it.
+the game, or, as an option, lets a temporary stand-in decide what each idle
+builder does next. The first learned model replaces the stand-in with a
+decision from the game's state. The steps of that path are below, each linked
+to the record that decides it; [`workflows.md`](docs/reference/workflows.md)
+has the commands of each task.
 
 **What the model answers**
 : One question: *this builder has nothing to do; what does it do next?* A
@@ -183,7 +234,9 @@ that model in the game; each links to the record that decides it.
   and picks at random among the answers with a probability of at least 10%.
   When no answer reaches that, BARb decides. The model plays until the opening
   ends ([ADR 0012](docs/decisions/0012-end-openings-at-first-contact.md)),
-  then BARb plays on.
+  then BARb plays on. All of this but the trees works today, with a stand-in
+  that knows only the builder and the minute
+  ([`in-game.md`](docs/reference/in-game.md#when-the-model-decides)).
 
 ## Goals
 
