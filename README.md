@@ -289,7 +289,11 @@ every player of a replay that position, from the game's own lobby options or
 from the map list fetched by `reason8 maps fetch`: sixteen positions on an 8v8
 map, eight per side. Supreme Isthmus has seven recognisably different openings
 per side; All That Glitters and Rosetta have three (front, tech, air). The
-meta is strongest in the first factory and loose in the exact build order. See
+meta is strongest in the first factory and loose in the exact build order. The
+start a replay records is the player's last pick, which the game may have
+refused: 1.9% of players started at another position, and the opening dataset
+leaves out the 2.4% of openings whose first buildings are away from the start
+([`start-positions.md`](docs/research/start-positions.md)). See
 [`maps/`](docs/research/maps/README.md) for the positions, the sources and the
 numbers per map, and
 [ADR 0011](docs/decisions/0011-take-positions-from-the-map-metadata.md) for
