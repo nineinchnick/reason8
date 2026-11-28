@@ -286,10 +286,15 @@ uv run reason8 context measure                # validation
 uv run reason8 context measure --split test   # the numbers of context.md
 ```
 
-Training the learned model of
+The learned model of
 [ADR 0019](../decisions/0019-first-model-decides-each-builders-next-order.md)
-on this table, and scoring it, is being built and has no command on `main`
-yet.
+is trained on this table and written as a file the bot reads
+([`builder-model.md`](builder-model.md)):
+
+```sh
+uv run reason8 model train    # -> data/models/builder_v1.json, builder_v1_no_skill.json
+uv run reason8 model vectors --model data/models/builder_v1.json
+```
 
 ## Exporting for the bot and building it
 
@@ -304,6 +309,7 @@ sequenceDiagram
     participant Export as reason8 bot export
     participant NextOrder as reason8 bot export-next-order
     participant Repo as ai/Reason8
+    participant Models as data/models
     participant Build as reason8 bot build
     participant Native as ai/native/build.sh
     participant Engine as engine folder
@@ -316,16 +322,19 @@ sequenceDiagram
     Build->>Native: our library for the engine's tag and platform
     Native-->>Build: libSkirmishAI.so or SkirmishAI.dll, cached
     Build->>Repo: our scripts and data files
-    Build->>Engine: AI/Skirmish/Reason8/VERSION/
+    Build->>Models: --model builder_v1, when it is there
+    Build->>Engine: AI/Skirmish/Reason8/VERSION/, with reason8/builder_model.json
 ```
 
 `reason8 bot export` reads the reaction times of `reason8 analysis reactions`
-too (`data/reactions/idle.parquet`). `stand_in.json` is a temporary stand-in
-for the learned model: the bot uses it only with the AI option
-`builder_orders=model`, and it goes when the learned model is in. The game's
-BARb scripts come from the game package in the content folder. The first
-library build takes 5 to 7 minutes; later builds reuse it until `ai/native`
-changes.
+too (`data/reactions/idle.parquet`). The learned model is used only with the
+AI option `builder_orders=model`. `bot build` copies it from the data
+directory's `models/` (`--model`: `builder_v1` by default, another name there
+or a path, `none` for none); it is built from players' data and is never
+committed. Without it the AI plays `stand_in.json`, a stand-in that knows only
+the builder and the minute, and its log says which one plays. The game's BARb
+scripts come from the game package in the content folder. The first library
+build takes 5 to 7 minutes; later builds reuse it until `ai/native` changes.
 
 ```sh
 uv run reason8 bot export --data-dir data/bar \
@@ -346,7 +355,9 @@ uv run reason8 bot build --data-dir /mnt/c/<folder>/bar \
 ```
 
 `--limits-only` builds `BARbLimited`, stock BARb under Reason8's limits and
-without openings; `--library stock` keeps the engine's own library.
+without openings; `--library stock` keeps the engine's own library. To play
+the model without skill next to the one with it, build it under another short
+name: `--model builder_v1_no_skill --short-name Reason8NoSkill`.
 
 ## Running a headless game and checking it
 
@@ -371,8 +382,8 @@ sequenceDiagram
     Engine-->>Person: demos/GAME.sdfz, infolog.txt
     Person->>Run: --snapshots --out STATE GAME.sdfz
     Run-->>Person: what was really built
-    Person->>Check: GAME.sdfz --infolog --state
-    Check-->>Person: per team: ordered, built, log, verdict
+    Person->>Check: GAME.sdfz --infolog --state [--model FILE]
+    Check-->>Person: per team: ordered, built, log, model's inputs, verdict
 ```
 
 ```sh
@@ -390,11 +401,17 @@ uv run reason8 headless run --data-dir data/bar --threads 1 --snapshots \
 uv run reason8 bot check data/runs/team-isthmus/demos/*.sdfz \
     --infolog data/runs/team-isthmus/infolog.txt \
     --state data/runs/team-isthmus.state.jsonl
+# with the learned model: also compare its logged inputs with the state
+#   --model data/models/builder_v1.json
 ```
 
-`reason8 bot check` exits non-zero unless the AI loaded without errors, its
-command governor kept the budget and every team played its opening, or had its
-orders decided by the model.
+With `--model` (the file the AI was built with) and the learned model playing,
+`reason8 bot check` also computes the inputs of each decision the library
+logged again from the state file and says which differ
+([`in-game.md`](in-game.md#the-models-inputs)). `reason8 bot check` exits
+non-zero unless the AI loaded without errors, its command governor kept the
+budget and every team played its opening, or had its orders decided by the
+model.
 
 ## Paired evaluation games
 
@@ -493,5 +510,5 @@ The lobby sends the short name and no version, so the engine loads the highest
 version installed: keep one. An engine update replaces the engine folder and
 the AI in it, and the library must match the engine, so build and copy again
 after an update. The AI option `builder_orders` (Opening or Model) chooses who
-decides the builders' orders in the opening; Model uses the temporary
-stand-in.
+decides the builders' orders in the opening; Model plays the learned model
+when the AI was built with one, and `skill` sets the skill it is told.

@@ -5,9 +5,10 @@ An AI for
 (BAR) that learns to play from publicly available replays of human games.
 
 > **Status:** early proof of concept. The bot plays human openings in team
-> games and hands over to BARb; the first learned model is being built. See
-> the [issues](../../issues) and [milestones](../../milestones) for what's
-> being worked on.
+> games and hands over to BARb; the first learned model plays as an option,
+> deciding the next order of every idle builder during the opening. See the
+> [issues](../../issues) and [milestones](../../milestones) for what's being
+> worked on.
 
 ## Getting started
 
@@ -162,8 +163,7 @@ start position on a popular team map**, then have a bot play it in team games.
 
 From replays of human games to a person playing with the bot, in two parts.
 Each box is data in the data directory or the repo, each arrow the `reason8`
-command that makes it, or the step done by hand. Dashed arrows are not done
-yet: the learned model is being built.
+command that makes it, or the step done by hand.
 
 First the training data, from replays:
 
@@ -176,7 +176,7 @@ flowchart LR
     openings[("datasets/openings_v2/<br/>build orders<br/>of openings")]
     ngram[("models/ngram_v2.json<br/>next-build baseline")]
     context[("datasets/context_v2/<br/>decision table")]
-    trees[("learned model<br/>being built")]
+    trees[("models/builder_v1.json<br/>learned model")]
 
     sources -- "download" --> replays
     replays -- "parse" --> tables
@@ -186,7 +186,7 @@ flowchart LR
     openings -- "baseline" --> ngram
     state -- "context build" --> context
     openings --> context
-    context -. "training" .-> trees
+    context -- "model train" --> trees
 ```
 
 Then the bot, from the models, and the games it plays:
@@ -195,26 +195,26 @@ Then the bot, from the models, and the games it plays:
 flowchart LR
     ngram[("models/ngram_v2.json")]
     context[("datasets/context_v2/")]
-    trees[("learned model<br/>being built")]
-    aidata["ai/Reason8/<br/>openings.json,<br/>next_order.json,<br/>stand_in.json (temporary)"]
+    trees[("models/builder_v1.json<br/>learned model")]
+    aidata["ai/Reason8/<br/>openings.json,<br/>next_order.json,<br/>stand_in.json (fallback)"]
     bot["Reason8 AI:<br/>BARb with our library"]
     games["paired games<br/>against stock BARb"]
     person(["a person plays<br/>a lobby game"])
 
     ngram -- "bot export" --> aidata
     context -- "bot export-next-order" --> aidata
-    trees -. "replaces the stand-in" .-> aidata
     aidata -- "bot build" --> bot
+    trees -- "bot build --model" --> bot
     bot -- "eval games, eval report" --> games
     bot -- "copied into BAR by hand,<br/>added in the lobby" --> person
 ```
 
-Today the bot plays whole human openings, picked for its start position before
-the game, or, as an option, lets a temporary stand-in decide what each idle
-builder does next. The first learned model replaces the stand-in with a
-decision from the game's state. The steps of that path are below, each linked
-to the record that decides it; [`workflows.md`](docs/reference/workflows.md)
-has the commands of each task.
+By default the bot plays whole human openings, picked for its start position
+before the game. As an option, the first learned model decides what each idle
+builder does next, from the game's state; without the model file a stand-in
+that knows only the builder and the minute answers instead. The steps of that
+path are below, each linked to the record that decides it;
+[`workflows.md`](docs/reference/workflows.md) has the commands of each task.
 
 **What the model answers**
 : One question: *this builder has nothing to do; what does it do next?* A
@@ -263,8 +263,7 @@ has the commands of each task.
   and picks at random among the answers with a probability of at least 10%.
   When no answer reaches that, BARb decides. The model plays until the opening
   ends ([ADR 0012](docs/decisions/0012-end-openings-at-first-contact.md)),
-  then BARb plays on. All of this but the trees works today, with a stand-in
-  that knows only the builder and the minute
+  then BARb plays on
   ([`in-game.md`](docs/reference/in-game.md#when-the-model-decides)).
 
 ## Goals
