@@ -28,6 +28,16 @@ Ended (--infolog): an opening that no longer applied was ended before its last
   commander steps and factory units were done by then; only those are
   compared in the ways above.
 
+Model (--infolog): a team whose builders' next orders the model decided (the
+  AI option builder_orders=model, ADR 0019) plays no opening, so none is
+  compared. Its log says, per team, how often an idle builder needed an order
+  and what came of it (`reason8.bot.next_order.summary`): an order the model
+  chose and that was carried out, chosen but not carried out, no answer of at
+  least 10%, nothing the builder could carry out, or no answer at all; how
+  often the order was left to BARb, by kind of builder and by game minute;
+  where extractors went; and when and why the model's orders ended. The team
+  passes when the model decided orders for it.
+
 Log (--infolog): whether the AI loaded, which version and scripts, and script
   errors. An AI that fails to load or compile does not stop the game: its team
   stands still. With our BARb library (`reason8 bot build`), also the command
@@ -56,7 +66,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from reason8.analysis.apm import ActionCounter
-from reason8.bot import budget, live_state
+from reason8.bot import budget, live_state, next_order
 from reason8.headless.state import read_records
 from reason8.paths import REPO_ROOT
 from reason8.replays.parse import default_parser, parse_replay
@@ -254,12 +264,15 @@ def check_replay(
     positions: Mapping[int, str | None] | None = None,
     sides: Mapping[int, str | None] | None = None,
     ended: Mapping[int, Mapping | None] | None = None,
+    model_orders: Mapping[int, Mapping] | None = None,
 ) -> list[dict]:
     """One result per team that the AI played. `variants`, `positions` and `sides` are the
     opening, position and side each team chose, from the engine log (`check_infolog`);
     without them, the first opening of the position nearest to its start, for the side in
     the replay. `ended` says, per team, when its opening was ended early and how much of it
-    was done (`check_infolog`); only that part is compared.
+    was done (`check_infolog`); only that part is compared. A team in `model_orders` (the
+    `reason8.bot.next_order.summary` of its log) had the model decide its builders' next
+    orders instead of playing an opening: it matches when the model decided some.
 
     A lobby that leaves an AI's faction on random writes ``Random`` into the replay, and the
     game picks the side at the start. The side the AI logged is then used, or else the side
@@ -276,6 +289,11 @@ def check_replay(
             side = (sides or {}).get(ai["teamId"]) or ordered_side(replay, ai["teamId"]) or side
         result = {"team": ai["teamId"], "side": side, "version_in_replay": ai.get("version")}
         result["replay_budget"] = replay_budget(replay, ai["teamId"])
+        if team_orders := (model_orders or {}).get(ai["teamId"]):
+            result.update({"mode": "model", "next_order": dict(team_orders)})
+            result["matches"] = team_orders["idle_builders"] > 0
+            results.append(result)
+            continue
         team = teams.get(ai["teamId"])
         opening = choose_opening(
             openings.get("openings", []),
@@ -372,6 +390,7 @@ def check_infolog(infolog: Path, ai_short_name: str) -> dict:
     teams: dict[int, dict] = {}
     governor_messages: list[str] = []
     state_lines: dict[int, list[dict]] = {}
+    model_teams: dict[int, dict] = {}
     with infolog.open(encoding="utf-8", errors="replace") as file:
         for line in file:
             if any(needle in line for needle in ENGINE_ERRORS):
@@ -385,6 +404,10 @@ def check_infolog(infolog: Path, ai_short_name: str) -> dict:
                 scripts.append(message.removeprefix("Load script: "))
             if message.startswith(("Reason8 governor:", "Reason8 library:")):
                 governor_messages.append(message)
+            if message.startswith("Reason8 next order:"):
+                text = message.removeprefix("Reason8 next order: ")
+                if team_line := OPENING_LINE.match(text):
+                    next_order.count_line(model_teams, int(team_line.group(1)), team_line.group(2))
             if message.startswith("Reason8 opening:"):
                 team_line = OPENING_LINE.match(message.removeprefix("Reason8 opening: "))
                 if team_line and (state := live_state.parse_line(team_line.group(2))):
@@ -406,6 +429,9 @@ def check_infolog(infolog: Path, ai_short_name: str) -> dict:
         "opening_by_team": dict(sorted(teams.items())),
         "governor_by_team": governor,
         "live_state_by_team": dict(sorted(state_lines.items())),
+        "next_order_by_team": {
+            team: next_order.summary(counts) for team, counts in sorted(model_teams.items())
+        },
         "errors": errors,
     }
 
@@ -433,8 +459,17 @@ def run(args: argparse.Namespace) -> int:
     positions = {team: counts["position"] for team, counts in chosen.items()}
     sides = {team: counts["side"] for team, counts in chosen.items()}
     ended = {team: counts["ended"] for team, counts in chosen.items()}
+    model_orders = (log or {}).get("next_order_by_team", {})
     teams = check_replay(
-        Replay(document), openings, args.ai, state_records, variants, positions, sides, ended
+        Replay(document),
+        openings,
+        args.ai,
+        state_records,
+        variants,
+        positions,
+        sides,
+        ended,
+        model_orders,
     )
     result: dict = {"teams": teams}
     ok = bool(teams) and all(team["matches"] for team in teams)

@@ -1,4 +1,5 @@
-"""Tests for `reason8 bot export-next-order` (no engine, no data needed)."""
+"""Tests for `reason8 bot export-next-order` and the log of the model's orders (no engine, no
+data needed)."""
 
 import polars as pl
 import pytest
@@ -118,3 +119,65 @@ def test_structure_tasks():
     }
     assert next_order.structure_tasks(unit_defs) == {"armmex": "mex", "armwin": "energy"}
     assert next_order.extractor_names(unit_defs) == ["armmex"]
+
+
+ORDER_LINES = [
+    "model stand-in (NOT the learned model: a fixed answer per builder unit and minute), "
+    "464 rows for 58 builder units from reason8/stand_in.txt",
+    "map 'M', start 711 7215: position P1 (start 681 7376), 9 usual metal spots",
+    "frame 25: armcom 18284 commander: model chose armmex 0.40; 2 of 9 possible of 9 at 10% "
+    "or more: armwin 0.40 armmex 0.29",
+    "frame 25: armcom 18284: armmex on usual spot 1 of 9, BARb's spot 84 at 4888 11320",
+    "frame 900: armcom 18284 commander: model chose assist 0.20; 3 of 9 possible of 9 at 10% "
+    "or more: armwin 0.40",
+    "frame 900: armcom 18284 commander: cannot carry out assist: BARb has no assist task for it; "
+    "left to BARb",
+    "frame 1900: armlab 3 factory: below threshold, best armck 0.08; 0 of 12 possible of 12 "
+    "at 10% or more: armck 0.08; left to BARb",
+    "frame 2000: armnanotc 7 tower: no answers; 0 of 0 possible of 0 at 10% or more; left to BARb",
+    "frame 2100: armcom 18284 commander: model chose armmex 0.30; 1 of 1 possible of 4 at 10% "
+    "or more: armmex 1.00",
+    "frame 2100: armcom 18284: armmex on BARb's metal spot",
+    "frame 2500: armcom 18284 commander: cannot carry out armmex: its task ended unfinished; "
+    "left to BARb",
+    "model orders ended at frame 6450, contact: first contact at frame 6433, armflash by corak; "
+    "BARb takes over",
+]
+
+
+def test_model_orders_log_counts():
+    teams: dict[int, dict] = {}
+    for line in ORDER_LINES:
+        next_order.count_line(teams, 4, line)
+    team = next_order.summary(teams[4])
+    assert (team["model"], team["model_rows"], team["position"], team["usual_spots"]) == (
+        "stand-in",
+        464,
+        "P1",
+        9,
+    )
+    assert team["idle_builders"] == 5
+    assert team["outcomes"] == {
+        "model chose": 3,
+        "below threshold": 1,
+        "nothing possible": 0,
+        "no answers": 1,
+    }
+    assert team["not_given"] == 1 and team["unfinished"] == 1
+    assert team["not_given_reasons"] == {"BARb has no assist task for it": 1}
+    assert team["decided_by_model"] == 2 and team["decided_by_model_share"] == 0.4
+    assert team["left_to_barb"] == 3 and team["left_to_barb_share"] == 0.6
+    assert team["by_kind"]["commander"] == {"idle_builders": 3, "model_chose": 3}
+    assert team["by_kind"]["factory"] == {"idle_builders": 1, "model_chose": 0}
+    assert team["by_minute"] == [
+        {"idle_builders": 2, "left_to_barb": 1},
+        {"idle_builders": 3, "left_to_barb": 2},
+    ]
+    assert team["orders_chosen"] == {"armmex": 2, "assist": 1}
+    assert team["extractors"] == {"usual spot": 1, "BARb's metal spot": 1}
+    assert team["ended"]["reason"] == "contact" and team["ended"]["frame"] == 6450
+
+
+def test_model_orders_log_without_idle_builders():
+    team = next_order.summary(next_order.new_team())
+    assert team["idle_builders"] == 0 and team["decided_by_model_share"] is None
