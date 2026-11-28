@@ -38,6 +38,7 @@ from typing import Any, Protocol
 
 import boto3
 
+from reason8.cloud import content
 from reason8.cloud.messages import LOGS_DIRECTORY, GameMessage, MessageError, result_files
 from reason8.data import storage
 from reason8.data.storage import Bucket
@@ -384,6 +385,12 @@ def work(args: argparse.Namespace, bucket: Bucket, work_dir: Path, log_file: Pat
         instance_id = "local"
     logger.info("worker on %s, %d engines, queue %s", instance_id, args.engines, args.queue_url)
     runner = ReplayRunner(bucket, work_dir, instance_id)
+    try:
+        if content.restore(bucket, runner.data_dir):
+            logger.info("engines, game versions and maps unpacked from the bucket")
+    except (*storage.TRANSFER_ERRORS, OSError):
+        # the games fetch what they need from BAR's servers instead
+        logger.exception("could not unpack the content archive")
     worker = Worker(
         SqsQueue(args.queue_url),
         LoggingRunner(runner, log_file),
