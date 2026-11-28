@@ -5,6 +5,23 @@ short edges, six front players each. Its meta is the simplest of the three
 maps: front, tech and air. Method, sample and the terms used in the tables are
 in [`README.md`](README.md).
 
+## Summary
+
+All That Glitters has the simplest meta of the three maps: three roles, front,
+tech and air, and the front positions can hardly be told apart from their
+builds. The builds name a player's role in 98% of cases, the exact one of the
+sixteen positions in 24%. Six players per side do the same job, choosing
+freely between a bot lab and a vehicle plant (52 to 82% bots), and with
+unreliable wind the front opens on solar collectors, not wind turbines. Only
+the pair of front positions nearest the geothermal vents stands out: two
+thirds of their players build a geothermal plant. So an opening can be flagged
+as off-meta against its role (1.6% of real openings flagged), not against its
+position (29.6%). 84 games, about 80 openings per position.
+
+Kept as the
+[second map of the slice](README.md#recommendation-for-the-first-slice), where
+a model given only the role should do as well as one given the position.
+
 ## The map
 
 From the map file (`mapinfo.lua`, height and metal maps) and the

@@ -5,6 +5,23 @@ other two: a dry asteroid, two teams of 8 on the long edges, a front line of
 five. Like All That Glitters it has three roles. Method, sample and the terms
 used in the tables are in [`README.md`](README.md).
 
+## Summary
+
+Rosetta's meta, like All That Glitters', is the role: builds name the role in
+98% of cases, the exact position in 27%. Weak wind makes solar collectors the
+opener at most positions. The four tech positions build a geothermal plant
+before two minutes and then an advanced bot lab, and play as one meta. The
+ends of the front line open with a bot lab almost always, the inner front
+positions sometimes with vehicles, and the middle pair, sent to a rich metal
+spot, has the least settled opening of the map. Legion is played here (18% of
+the openings, against 2 to 3% elsewhere). It is the smallest sample of the
+three: 81 games, 73 to 82 openings per position.
+
+Kept in the slice as
+[the small test](README.md#recommendation-for-the-first-slice) of whether what
+holds on the other two maps carries over to a third map and to stronger
+lobbies.
+
 ## The map
 
 From the map file (`mapinfo.lua`, the resource spot layout and the placed

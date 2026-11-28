@@ -19,6 +19,31 @@ Code: `reason8/game/maps.py` (BAR's map list), `reason8/game/positions.py`
 (positions and start setup), `reason8/openings/extract.py` (what an opening
 is) and `reason8/analysis/map_meta.py` (the measurement).
 
+## Summary
+
+Every start position has a meta, but it lies in the first factory and the
+role, not in an exact build order. Players start where the game recommends (97
+to 99%), and the two sides open alike, so a map's sixteen positions are eight
+kinds of opening played twice. The specialised positions agree on their first
+factory almost completely (air on an aircraft plant, tech on a bot lab), while
+two players of one position rarely order the same first six units. Builds tell
+seven kinds of opening apart on Supreme Isthmus; on All That Glitters and
+Rosetta they tell only the role, and the front positions look alike. The first
+orders are extractors and energy wherever a player starts: telling a simple
+model the position does not improve its next-unit accuracy, and on the two
+smaller maps it loses up to 2.5 points by splitting the games sixteen ways.
+The samples are small: 81 to 148 games per map, 73 to 151 openings per
+position.
+
+Used in
+[ADR 0011](../../decisions/0011-take-positions-from-the-map-metadata.md) (a
+player's position is the nearest recommended start position) and
+[ADR 0009](../../decisions/0009-start-with-team-game-openings.md) (openings
+per start position); the first model takes the position as one input and
+shares everything else
+([ADR 0019](../../decisions/0019-first-model-trees-asked-by-every-builder.md)).
+The detail is in [Findings](#findings) and in the three map documents.
+
 Replays parsed on 2026-11-22. To reproduce the tables:
 
 ```sh
