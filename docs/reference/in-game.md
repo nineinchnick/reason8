@@ -472,18 +472,24 @@ The next order
   `Reason8NextOrder(builder)`, which consults the model, masks, chooses, logs
   the decision and returns the order or nothing,
   `Reason8OrderFailed(builder, order, reason)`,
-  `Reason8BarbTask(builder, what)`, BARb's own task for an extractor or a job,
-  `Reason8SpotOpen(spot)`, `Reason8BarbOrdered(builder, task)` (BARb gave a
-  builder left to it a task: an order for the model's history) and
-  `Reason8SetStart(position, role)`. The model sits behind one interface
-  (`AnswerModel` in `Model.h`): given the builder the order is for, a
-  probability per answer. The learned trees are read and evaluated by
+  `Reason8OrderEnded(builder, order, done, frames)` (the end of an order's
+  task, and whether it ended at once), `Reason8TaskInProgress(builder)` (the
+  task BARb reevaluates), `Reason8HelpBuild(builder, unit)`,
+  `Reason8BarbTask(builder, job)`, a task for a job with the target BARb's
+  tasks choose, `Reason8BarbSpotTask(builder, unit, spot)`, an extractor on
+  BARb's next free spot, `Reason8SpotOpen(spot)`, `Reason8SpotUsable(spot)`,
+  `Reason8BarbOrdered(builder, task)` (BARb gave a builder left to it a task:
+  an order for the model's history) and `Reason8SetStart(position, role)`.
+  What became of each order is kept in `OrderBook.h`. The model sits behind
+  one interface (`AnswerModel` in `Model.h`): given the builder the order is
+  for, a probability per answer. The learned trees are read and evaluated by
   `Trees.h`, their inputs computed in `NextOrder.cpp` with the rules of
   `ModelInputs.h`; the mask and the choice are in `Choice.h`. The parts
   without the engine have tests that `build.sh` runs before every build:
   `test_next_order.cpp` (mask, choice, stand-in, order history, the export's
-  rounding) and `test_trees.cpp` (every decision of the builder model's test
-  vectors, [`builder-model.md`](builder-model.md#test-vectors)).
+  rounding, orders carried out and held back) and `test_trees.cpp` (every
+  decision of the builder model's test vectors,
+  [`builder-model.md`](builder-model.md#test-vectors)).
 
 Our changes to BARb's own files
 
@@ -644,31 +650,77 @@ The mask and the choice
 
 : The library removes the answers the idle builder can never carry out, by its
   unit definition as the game loaded it: units outside its build list, jobs
-  its definition does not allow, and every job for a factory. It rescales the
-  rest to sum to one and draws among those of at least 10%, in proportion to
-  their probabilities. What the team cannot afford stays possible.
+  its definition does not allow, and every job for a factory. It also holds
+  back, for 30 s of game time, every answer this builder could not carry out
+  (below). It rescales the rest to sum to one and draws among those of at
+  least 10%, in proportion to their probabilities. What the team cannot afford
+  stays possible.
 
 Carrying it out
 
-: A unit by a factory is a recruit task. An extractor goes to the next of the
-  metal spots its position's players usually take, in the order they usually
-  take them (`metal_spots` in `next_order.json`), skipping spots with an
-  extractor on them or already ordered; when none is left, or the map has
-  none, to the spot BARb would take next. Any other structure is a build task
-  next to the builder, BARb choosing the site. A job is BARb's own task for
-  it, with BARb's choice of target: to reclaim or resurrect, the nearest
-  reachable, safe feature within 20 to 60 s of the builder's travel; to
-  assist, a factory that wants help, else guarding the closest factory (within
-  reach for a turret); to repair, the nearest of BARb's repair tasks.
+: What a player means by the order:
+
+  - a unit, by a factory: a recruit task;
+  - a structure of a type the team is building already: the builder helps
+    build it instead of starting another, a factory wherever it is, any other
+    structure within 600 of the builder (the distance within which BARb's
+    builders assist a factory). It is not decided for again until that has
+    ended;
+  - an extractor: the next of the metal spots its position's players usually
+    take, in the order they usually take them (`metal_spots` in
+    `next_order.json`), skipping spots with an extractor on them, already
+    ordered, in an ally's area (where BARb drops an extractor task at once) or
+    further from the AI's own start than the farthest usual spot is from its
+    position's start; a lobby game with fewer players than positions starts a
+    team hundreds of units from the nearest position. When none is left, or
+    the map has none, the free spot BARb would take for its own next
+    extractor: the nearest open one, outside an ally's area, that the builder
+    can reach safely;
+  - any other structure: a build task next to the builder, BARb choosing the
+    site;
+  - a job: a task with the target BARb's own tasks choose for that job. To
+    reclaim or resurrect, BARb's choice near a builder: the nearest reachable,
+    safe feature within 20 to 60 s of its travel. To assist, a factory that
+    wants help, else guarding the closest factory for a minute. To repair, the
+    nearest of BARb's repair tasks. A construction turret takes the target
+    BARb's turret task would in its reach: to assist, the unit under
+    construction closest to finished; to repair, a damaged unit; to reclaim,
+    the features in reach.
+
+Carried out
+
+: An order is carried out once its task has lasted a second, or once the
+  builder is idle again after a build it finished sooner; only then does it
+  enter the model's order history. BARb also asks the script for a task while
+  it reevaluates the task a builder is on (`IBuilderTask::Reevaluate`); the
+  model is not consulted then, and a model order's task goes on. A task that
+  lasted and then ended, done or not (a guard that timed out, a build site
+  BARb gave up), carried the order out; the model decides at the builder's
+  next idle.
 
 When it is left to BARb
 
 : When no possible answer reaches 10%, none is possible, the model has none
-  for the builder, or the order cannot be carried out (BARb has no task for
-  the job, no metal spot is left, no task builds it), the builder is left to
+  for the builder, or the order cannot be carried out, the builder is left to
   BARb until BARb gives it something to do; at the builder's next idle the
-  model decides again. A task given for an order that ends unfinished counts
-  as not carried out too.
+  model decides again. An order cannot be carried out when it cannot be given
+  (no target for the job, no free metal spot, no task builds it) or its task
+  ends within a second: unfinished, or a job done with nothing to do. That
+  answer is then held back for the builder for 30 s, so that the model does
+  not choose it again while nothing changed.
+
+```mermaid
+flowchart TD
+    idle["a builder is idle"] --> model["the model decides,<br/>without the answers held back"]
+    model -->|"no answer of 10%"| barb["left to BARb until<br/>BARb gives it a task"]
+    model --> task["a task: help build,<br/>usual or BARb's spot,<br/>BARb's target for a job"]
+    task -->|"none"| held["held back 30 s"]
+    task -->|"ends within 1 s"| held
+    held --> barb
+    task -->|"lasts 1 s"| history["carried out:<br/>in the order history"]
+    history -->|"its task ends"| idle
+    barb -->|"BARb's task ends"| idle
+```
 
 Until when
 
@@ -698,6 +750,11 @@ Log
   Reason8 next order: team 2: frame 19: armcom 25947 commander: model chose armmex 0.99; 1 of 29 possible of 414 at 10% or more: armmex 0.99 armwin 0.01 armlab 0.00 armap 0.00 armsolar 0.00
   Reason8 next order: team 2: frame 19: armcom 25947 commander: inputs faction=Armada; map=Supreme Isthmus v2.1; position=P3; role=air; previous_1=<start>; builder_kind=commander; ...
   Reason8 next order: team 2: frame 19: armcom 25947: armmex on usual spot 1 of 4, BARb's spot 88 at 2280 11960
+  Reason8 next order: team 2: frame 49: armcom 25947 commander: carried out armmex, chosen at frame 19
+  Reason8 next order: team 2: frame 412: armcom 25947 commander: armmex ended done after 393 frames
+  Reason8 next order: team 2: frame 1880: armcom 25947 commander: model chose armlab 0.52; 2 of 29 possible of 414 at 10% or more: armlab 0.52 armwin 0.28 ...
+  Reason8 next order: team 2: frame 1880: armcom 25947: armlab: helps build the one the team is building
+  Reason8 next order: team 2: frame 2350: armcom 25947 commander: cannot carry out reclaim: its task ended at once, unfinished; left to BARb
   Reason8 next order: team 2: frame 2379: armcom 25947 commander: BARb ordered armmex
   Reason8 next order: team 2: model orders ended at frame 8732, contact: first contact at frame 8702, armatlas by corveng; BARb takes over
   ```
@@ -707,6 +764,8 @@ Log
   without the file the line names the stand-in and says why. The inputs of
   every fourth decision of a team are logged: every name, every number but
   zero, `?` for a missing one.
+
+  The answers held back are named at the end of a decision's line.
 
   `reason8 bot check` counts them per team (`next_order_by_team`): how often
   an idle builder needed an order, what came of each, the orders the model
@@ -728,7 +787,7 @@ flowchart LR
     engine["the engine:<br/>units, economy, map"]
     events["idle events,<br/>every frame"]
     script["next_order.as:<br/>start position and role,<br/>BARb's orders"]
-    history["the bot's orders:<br/>the model's that were given,<br/>and BARb's"]
+    history["the bot's orders:<br/>the model's carried out,<br/>and BARb's"]
     inputs["the 281 inputs"]
     trees["the trees<br/>(Trees.h)"]
     choice["mask and choice<br/>(Choice.h)"]
@@ -742,8 +801,9 @@ flowchart LR
 The order history
 : Counted from the bot's orders, the model's and BARb's, as the table counts a
   player's: a run of orders of one answer at most 6 frames apart is one step.
-  BARb's order is the unit its task builds or the job it does; a model order
-  the script reports it could not carry out in its frame is no order. Each
+  BARb's order is the unit its task builds or the job it does, unless BARb
+  only reevaluates the task the builder is on; a model order counts once it is
+  carried out, at that frame, and one not carried out is no order. Each
   decision is one order, the approximation the reference gives for
   `decision_index` and the job counts. The position and its role come from the
   script, which finds the position from the usual metal spots; `bot build`
@@ -759,8 +819,8 @@ The economy
 Units and build power
 : The team's units by type, finished and under construction, and the build
   power of its finished builders by kind, from the engine. A builder is idle
-  from its idle event until the frame after its next order, as the table reads
-  the state of the frame before the order.
+  from its idle event until the frame after its next order given, carried out
+  or not, as the table reads the state of the frame before the order.
 
 Checked against training
 : `reason8 bot check --model FILE`, with `--infolog` and `--state`

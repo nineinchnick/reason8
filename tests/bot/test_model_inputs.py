@@ -97,6 +97,31 @@ def test_history_follows_the_orders_the_library_records():
     assert model_inputs._orders(lines) == [(10, 1), (16, 1), (50, 1), (60, 1), (70, 1)]
 
 
+def test_history_has_the_orders_carried_out_when_the_log_says_which():
+    lines = [
+        "frame 10: armcom 1 commander: model chose armmex 0.90; 1 of 2 possible",
+        "frame 10: armcom 1 commander: inputs step_idx=?",
+        # ended at once: given (the builder was busy) but never in the history
+        "frame 12: armcom 1 commander: armmex ended unfinished after 2 frames",
+        "frame 12: armcom 1 commander: cannot carry out armmex: its task ended at once, "
+        "unfinished; left to BARb",
+        "frame 50: armcom 1 commander: BARb ordered armwin",
+        "frame 60: armck 2 construction: model chose armlab 0.50; 1 of 2 possible",
+        # carried out a second later, at that frame
+        "frame 90: armck 2 construction: carried out armlab, chosen at frame 60",
+        "frame 95: armcom 1 commander: model chose armmex 0.90; 1 of 2 possible",
+        "frame 95: armcom 1 commander: inputs step_idx=2",
+    ]
+    first, last = model_inputs.logged_decisions(lines)
+    assert first["history"].inputs(1, TYPES)["decision_index"] == 0
+    history = last["history"].inputs(1, TYPES)
+    assert history["decision_index"] == 2  # armwin, armlab
+    assert history["previous_1"] == "armlab" and history["builder_previous"] == "armwin"
+    assert history["ordered_mex"] == 0 and history["ordered_lab"] == 1
+    # busy from the decision of each order given
+    assert model_inputs._orders(lines) == [(10, 1), (50, 1), (60, 2), (95, 1)]
+
+
 def resources(frame: int, metal: float) -> dict:
     return {"t": "r", "f": frame, "teams": [[0, metal, 1000, 2.5, 1.0, 900, 1000, 20, 5]]}
 

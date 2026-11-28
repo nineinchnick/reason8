@@ -6,6 +6,7 @@
 #include "Governor.h"
 #include "Model.h"
 #include "ModelInputs.h"
+#include "OrderBook.h"
 #include "StandIn.h"
 #include "Trees.h"
 
@@ -14,9 +15,15 @@
 #include "module/EconomyManager.h"
 #include "module/FactoryManager.h"
 #include "resource/MetalManager.h"
+#include "spring/SpringCallback.h"
+#include "spring/SpringMap.h"
 #include "task/builder/BuilderTask.h"
+#include "terrain/TerrainManager.h"
 #include "unit/CircuitDef.h"
 #include "unit/CircuitUnit.h"
+#include "util/Utils.h"
+
+#include "Unit.h"
 
 #include "ExternalAI/Interface/SSkirmishAICallback.h"
 #include "ExternalAI/Interface/SSkirmishAILibrary.h"
@@ -67,6 +74,11 @@ constexpr int ECONOMY_FRAMES = 30;
 const char* const DEFAULT_SKILL_QUANTILE = "0.9";
 /* Most units a team can have, for the buffer of getTeamUnits. */
 constexpr int MAX_TEAM_UNITS = 10000;
+/* A builder helps build a structure of the type it was ordered when the team is
+ * building one this close to it: the distance within which BARb's builders assist
+ * a factory (CEconomyManager::CheckMobileAssistRequired). Any factory under
+ * construction is helped, wherever it is: a second one is never what was meant. */
+constexpr float HELP_DISTANCE = 600.f;
 
 std::string Rounded(float probability)
 {
@@ -125,13 +137,16 @@ public:
 	}
 
 	/* Called on every frame before the AI handles it: the economy of whole seconds,
-	 * as the state export writes it, and the order chosen last, once carried out. */
+	 * as the state export writes it, and the model's orders whose task has lasted
+	 * long enough to be carried out. */
 	void Update(int frame)
 	{
 		if (!on) {
 			return;
 		}
-		CommitPending();
+		for (const OrderBook::Order& order : book.Due(frame)) {
+			CarriedOut(order, frame);
+		}
 		for (auto unit = idle.begin(); unit != idle.end();) {  // busy since before this frame
 			unit = unit->second.busyFrom >= 0 && unit->second.busyFrom < frame ? idle.erase(unit) : std::next(unit);
 		}
@@ -160,7 +175,6 @@ public:
 		if (!model) {
 			LoadModel();
 		}
-		CommitPending();
 		CCircuitDef* def = unit->GetCircuitDef();
 		IdleBuilder builder;
 		builder.skirmishAIId = Id();
@@ -174,8 +188,15 @@ public:
 		builder.x = position.x;
 		builder.z = position.z;
 
+		if (const std::optional<OrderBook::Order> previous = book.TakePending(builder.unitId)) {
+			CarriedOut(*previous, builder.frame);  // its task did not end at once, and it is idle again
+		}
+
 		const Answers answers = model->Predict(builder);
-		const Choice choice = Choose(answers, [&](const std::string& answer) { return CanGive(def, builder.kind, answer); },
+		// what the builder can never carry out, and what it could not carry out lately
+		const Choice choice = Choose(answers, [&](const std::string& answer) {
+				return CanGive(def, builder.kind, answer) && !book.HeldBack(builder.unitId, answer, builder.frame);
+			},
 			std::uniform_real_distribution<float>(0.f, 1.f)(random));
 		std::string line = Describe(builder) + ": " + OutcomeName(choice.outcome);
 		if (choice.outcome == Outcome::CHOSEN) {
@@ -191,6 +212,13 @@ public:
 				line += " " + choice.possible[index].name + " " + Rounded(choice.possible[index].probability);
 			}
 		}
+		const std::vector<std::string> heldBack = book.HeldBackAnswers(builder.unitId, builder.frame);
+		if (!heldBack.empty()) {
+			line += "; held back after it could not carry them out:";
+			for (const std::string& answer : heldBack) {
+				line += " " + answer;
+			}
+		}
 		if (choice.outcome != Outcome::CHOSEN) {
 			line += "; left to BARb";
 		}
@@ -199,7 +227,8 @@ public:
 			LogInputs(builder, trees->LastInputs());
 		}
 		if (choice.outcome == Outcome::CHOSEN) {
-			pending = {builder.unitId, choice.chosen.name, builder.frame};  // an order once carried out
+			book.Chosen(builder.unitId, choice.chosen.name, builder.frame);  // in the history once carried out
+			Busy(builder.unitId, builder.frame);
 		}
 		return choice.outcome == Outcome::CHOSEN ? choice.chosen.name : "";
 	}
@@ -212,12 +241,12 @@ public:
 			return;
 		}
 		const std::string answer = AnswerOf(task);
-		if (answer.empty()) {
+		if (answer.empty() || KeepsTask(unit, task)) {
 			return;
 		}
-		CommitPending();
 		const int frame = circuit->GetLastFrame();
-		Ordered(unit->GetId(), answer, frame);
+		history.Record(unit->GetId(), answer, frame);
+		Busy(unit->GetId(), frame);
 		IdleBuilder builder;
 		builder.unitId = unit->GetId();
 		builder.unit = unit->GetCircuitDef()->GetDef()->GetName();
@@ -234,22 +263,132 @@ public:
 		startRole = role;
 	}
 
+	/* The order chosen for the unit cannot be carried out: it is left to BARb, the
+	 * order never enters the history and is held back for the unit for a while. */
 	void Failed(CCircuitUnit* unit, const std::string& order, const std::string& reason)
 	{
-		if (unit == nullptr) {
-			return;
+		if (unit != nullptr) {
+			Fail(unit->GetId(), order, reason);
 		}
-		if (pending.unitId == unit->GetId()) {
-			pending = {};  // never given: no order of the history
-		}
-		IdleBuilder builder;
-		builder.unitId = unit->GetId();
-		builder.unit = unit->GetCircuitDef()->GetDef()->GetName();
-		builder.kind = Kind(unit->GetCircuitDef());
-		builder.frame = circuit->GetLastFrame();
-		Log(Describe(builder) + ": cannot carry out " + order + ": " + reason + "; left to BARb");
 	}
 
+	/* The task of the model's order `order` for the unit ended `done` or not, after
+	 * `lastedFrames`. Returns true when the order was not carried out because its task
+	 * ended at once (OrderBook.h's EndedAtOnce): the unit is then left to BARb. A task
+	 * that lasted and then ended, done or not, carried the order out; the model decides
+	 * at the unit's next idle. */
+	bool OrderEnded(int unitId, const std::string& order, bool done, int lastedFrames)
+	{
+		Log(Who(unitId) + ": " + order + " ended " + (done ? "done" : "unfinished") + " after "
+			+ std::to_string(lastedFrames) + " frames");
+		if (!EndedAtOnce(order, done, lastedFrames)) {
+			return false;
+		}
+		Fail(unitId, order, std::string("its task ended at once, ") + (done ? "done" : "unfinished"));
+		return true;
+	}
+
+	/* The unit's task while BARb reevaluates it: BARb asks the script for a task for
+	 * a unit that is on one (IBuilderTask::Reevaluate). Null for an idle unit. */
+	IUnitTask* TaskInProgress(CCircuitUnit* unit)
+	{
+		IUnitTask* task = unit == nullptr ? nullptr : unit->GetTask();
+		if (task == nullptr) {
+			return nullptr;
+		}
+		const IUnitTask::Type type = task->GetType();
+		return type == IUnitTask::Type::BUILDER || type == IUnitTask::Type::FACTORY ? task : nullptr;
+	}
+
+	/* BARb's task building a structure of type `unitName` that the team has under
+	 * construction, for the builder to help build instead of starting another: a
+	 * factory anywhere, any other structure within HELP_DISTANCE of the builder, the
+	 * nearest. A repair task on it when no task of BARb's builds it. Null when the
+	 * team builds none, or the builder cannot move. */
+	IUnitTask* HelpBuild(CCircuitUnit* unit, const std::string& unitName)
+	{
+		CCircuitDef* built = circuit->GetCircuitDef(unitName.c_str());
+		if (unit == nullptr || built == nullptr || !unit->GetCircuitDef()->IsMobile()) {
+			return nullptr;
+		}
+		const int frame = circuit->GetLastFrame();
+		const springai::AIFloat3& position = unit->GetPos(frame);
+		const bool anywhere = !built->GetBuildOptions().empty() && !built->IsMobile();  // a factory
+		CCircuitUnit* nearest = nullptr;
+		float nearestDistance = 0.f;
+		for (const auto& [id, teamUnit] : circuit->GetTeamUnits()) {
+			if (teamUnit == unit || teamUnit->GetCircuitDef() != built || !teamUnit->GetUnit()->IsBeingBuilt()) {
+				continue;
+			}
+			const float distance = position.SqDistance2D(teamUnit->GetPos(frame));
+			if (!anywhere && distance > HELP_DISTANCE * HELP_DISTANCE) {
+				continue;
+			}
+			if (nearest == nullptr || distance < nearestDistance) {
+				nearest = teamUnit;
+				nearestDistance = distance;
+			}
+		}
+		if (nearest == nullptr) {
+			return nullptr;
+		}
+		circuit::CBuilderManager* builders = circuit->GetBuilderManager();
+		for (int type = 0; type < static_cast<int>(IBuilderTask::BuildType::_SIZE_); ++type) {
+			for (IBuilderTask* task : builders->GetTasks(static_cast<IBuilderTask::BuildType>(type))) {
+				if (task->GetTarget() == nearest) {
+					return task;
+				}
+			}
+		}
+		return builders->Enqueue(circuit::TaskB::Repair(IBuilderTask::Priority::NORMAL, nearest));
+	}
+
+	/* An extractor `unitName` on the metal spot BARb would choose for its own next
+	 * one: the nearest open spot not in an ally's area that the builder can reach
+	 * safely (CEconomyManager::UpdateMetalTasks). Null when there is none; `spot` is
+	 * BARb's index of the spot, -1 for none. */
+	IUnitTask* BarbSpotTask(CCircuitUnit* unit, const std::string& unitName, int& spot)
+	{
+		spot = -1;
+		CCircuitDef* mexDef = circuit->GetCircuitDef(unitName.c_str());
+		if (unit == nullptr || mexDef == nullptr) {
+			return nullptr;
+		}
+		circuit::CMetalManager* metal = circuit->GetMetalManager();
+		circuit::CEconomyManager* economy = circuit->GetEconomyManager();
+		circuit::CTerrainManager* terrain = circuit->GetTerrainManager();
+		circuit::CMap* map = circuit->GetMap();
+		const auto& spots = metal->GetSpots();
+		circuit::CMetalData::PointPredicate predicate = [&](int index) {
+			const springai::AIFloat3& position = spots[index].position;
+			return economy->IsAllyOpenMexSpot(index) && !terrain->IsZoneAlly(position)
+				&& terrain->CanReachAtSafe(unit, position, unit->GetCircuitDef()->GetBuildDistance())
+				&& terrain->CanBeBuiltAt(mexDef, position)
+				&& map->IsPossibleToBuildAt(mexDef->GetDef(), position, UNIT_NO_FACING);
+		};
+		const int index = metal->GetSpotToBuild(unit->GetPos(circuit->GetLastFrame()), predicate);
+		if (index < 0) {
+			return nullptr;
+		}
+		spot = index;
+		return circuit->GetBuilderManager()->Enqueue(circuit::TaskB::Spot(IBuilderTask::BuildType::MEX,
+			IBuilderTask::Priority::NOW, mexDef, spots[index].position, index));
+	}
+
+	/* Whether BARb's metal spot `spot` could take an extractor the model orders: open,
+	 * and not in an ally's area, where BARb drops an extractor task at once
+	 * (CBMexTask::Reevaluate). */
+	bool SpotUsable(int spot)
+	{
+		if (!SpotOpen(spot)) {
+			return false;
+		}
+		return !circuit->IsAllyAware()
+			|| !circuit->GetTerrainManager()->IsZoneAlly(circuit->GetMetalManager()->GetSpots()[spot].position);
+	}
+
+	/* BARb's own task for the job `what` (assist, reclaim, repair, resurrect), with the
+	 * target BARb's own tasks choose for it; null when there is none. */
 	IUnitTask* BarbTask(CCircuitUnit* unit, const std::string& what)
 	{
 		if (unit == nullptr) {
@@ -257,14 +396,15 @@ public:
 		}
 		const springai::AIFloat3& position = unit->GetPos(circuit->GetLastFrame());
 		CCircuitDef* def = unit->GetCircuitDef();
+		if (!def->IsMobile()) {
+			return TowerTask(unit, what);
+		}
 		circuit::CEconomyManager* economy = circuit->GetEconomyManager();
 		circuit::CBuilderManager* builders = circuit->GetBuilderManager();
-		if (what == "mex") {
-			return economy->UpdateMetalTasks(position, unit);
-		}
 		if (what == "reclaim" || what == "resurrect") {
 			// BARb's reclaim near the builder (CEconomyManager::UpdateReclaimTasks with
-			// isNear): the nearest reachable, safe feature within 20 to 60 s of its travel
+			// isNear): the nearest reachable, safe feature within 20 to 60 s of its travel,
+			// one to resurrect for a unit that can
 			return economy->UpdateReclaimTasks(position, unit, true);
 		}
 		if (what == "repair") {
@@ -287,26 +427,67 @@ public:
 			// as BARb assists when idle: a factory that wants help, else guard the
 			// closest factory (CEconomyManager::CheckMobileAssistRequired,
 			// CBuilderManager::CreateBuilderTask)
-			if (def->IsMobile()) {
-				IBuilderTask* task = economy->CheckMobileAssistRequired(position, unit);
-				if (task != nullptr) {
-					return task;
-				}
+			IBuilderTask* task = economy->CheckMobileAssistRequired(position, unit);
+			if (task != nullptr) {
+				return task;
 			}
 			CCircuitUnit* factory = circuit->GetFactoryManager()->GetClosestFactory(position);
 			if (factory == nullptr) {
 				return nullptr;
 			}
-			if (!def->IsMobile()) {
-				const float reach = def->GetBuildDistance() + factory->GetCircuitDef()->GetRadius();
-				if (position.SqDistance2D(factory->GetPos(circuit->GetLastFrame())) > reach * reach) {
-					return nullptr;  // a tower assists only what it reaches
-				}
-			}
-			return builders->EnqueueB(circuit::TaskB::Guard(IBuilderTask::Priority::NORMAL, factory, true,
+			// for a minute, as BARb's guard: not interrupted by BARb's reevaluation, which
+			// would take the builder off the model's order
+			return builders->EnqueueB(circuit::TaskB::Guard(IBuilderTask::Priority::NORMAL, factory, false,
 				FRAMES_PER_SEC * 60));
 		}
 		return nullptr;
+	}
+
+	/* For a build tower, which reaches only what is in its build range: the target
+	 * BARb's own task for a tower chooses for the job (CFactoryManager::CreateAssistTask):
+	 * assist, the unit under construction in reach closest to finished; repair, a
+	 * damaged unit in reach; reclaim, the features in reach. Null for none. */
+	IUnitTask* TowerTask(CCircuitUnit* unit, const std::string& what)
+	{
+		const springai::AIFloat3& position = unit->GetPos(circuit->GetLastFrame());
+		const float radius = unit->GetCircuitDef()->GetBuildDistance();
+		circuit::CFactoryManager* factories = circuit->GetFactoryManager();
+		circuit::CBuilderManager* builders = circuit->GetBuilderManager();
+		if (what == "reclaim") {
+			if (circuit->GetCallback()->IsFeaturesIn(position, radius) && !builders->IsResurrect(position, radius)) {
+				return factories->Enqueue(circuit::TaskS::Reclaim(IBuilderTask::Priority::NORMAL, position, radius));
+			}
+			return nullptr;
+		}
+		if (what != "assist" && what != "repair") {
+			return nullptr;
+		}
+		circuit->UpdateFriendlyUnits();
+		auto& units = circuit->GetCallback()->GetFriendlyUnitsIn(position, radius * 0.9f);
+		circuit::CAllyUnit* target = nullptr;
+		float shortest = std::numeric_limits<float>::max();
+		for (springai::Unit* candidate : units) {
+			auto [ally, isTeam] = circuit->GetTeamOrAllyUnit(candidate);
+			if (ally == nullptr || ally == unit || builders->IsReclaimUnit(ally)) {
+				continue;
+			}
+			if (what == "assist" && candidate->IsBeingBuilt()) {
+				const float maxHealth = candidate->GetMaxHealth();
+				const float buildTime = ally->GetCircuitDef()->GetBuildTime() * (maxHealth - candidate->GetHealth()) / maxHealth;
+				if (buildTime < shortest) {
+					shortest = buildTime;
+					target = ally;
+				}
+			} else if (what == "repair" && !candidate->IsBeingBuilt() && candidate->GetHealth() < candidate->GetMaxHealth()) {
+				target = ally;
+				break;
+			}
+		}
+		utils::free(units);
+		if (target == nullptr) {
+			return nullptr;
+		}
+		return factories->Enqueue(circuit::TaskS::Repair(IBuilderTask::Priority::NORMAL, target));
 	}
 
 	bool SpotOpen(int spot)
@@ -406,23 +587,63 @@ private:
 		return "skill " + Number(skill) + " (" + skillSource + ")";
 	}
 
-	/* A model order, once the script did not report it failed, or BARb's: an order
-	 * of the history, after which the unit is busy. */
-	void CommitPending()
+	/* "frame <now>: <unit> <id> <kind>" for a unit of the team, by its id; "frame
+	 * <now>: unit <id>" once it is gone. */
+	std::string Who(int unitId) const
 	{
-		if (pending.unitId >= 0) {
-			Ordered(pending.unitId, pending.answer, pending.frame);
-			pending = {};
+		CCircuitUnit* unit = circuit->GetTeamUnit(unitId);
+		if (unit == nullptr) {
+			return "frame " + std::to_string(circuit->GetLastFrame()) + ": unit " + std::to_string(unitId);
 		}
+		IdleBuilder builder;
+		builder.unitId = unitId;
+		builder.unit = unit->GetCircuitDef()->GetDef()->GetName();
+		builder.kind = Kind(unit->GetCircuitDef());
+		builder.frame = circuit->GetLastFrame();
+		return Describe(builder);
 	}
 
-	void Ordered(int unitId, const std::string& answer, int frame)
+	void Fail(int unitId, const std::string& order, const std::string& reason)
 	{
-		history.Record(unitId, answer, frame);
+		const int frame = circuit->GetLastFrame();
+		if (book.Failed(unitId, order, frame)) {
+			const auto unit = idle.find(unitId);
+			if (unit != idle.end() && unit->second.busyFrom == frame) {
+				unit->second.busyFrom = -1;  // never given: it stayed idle
+			}
+		}
+		Log(Who(unitId) + ": cannot carry out " + order + ": " + reason + "; left to BARb");
+	}
+
+	/* The model's order was carried out: an order of the history from now on. */
+	void CarriedOut(const OrderBook::Order& order, int frame)
+	{
+		history.Record(order.unitId, order.answer, frame);
+		Log(Who(order.unitId) + ": carried out " + order.answer + ", chosen at frame " + std::to_string(order.frame));
+	}
+
+	/* The unit got an order at `frame`: no longer idle for the inputs. */
+	void Busy(int unitId, int frame)
+	{
 		const auto unit = idle.find(unitId);
 		if (unit != idle.end() && unit->second.busyFrom < 0) {
 			unit->second.busyFrom = frame;
 		}
+	}
+
+	/* Whether `task`, which BARb gives a unit, leaves it on the task it is on: BARb
+	 * reevaluating that task gives the same task or one of the same kind, and the
+	 * unit keeps its own (IBuilderTask::Reevaluate). Not a new order. */
+	static bool KeepsTask(CCircuitUnit* unit, IUnitTask* task)
+	{
+		IUnitTask* current = unit->GetTask();
+		if (current == task) {
+			return true;
+		}
+		auto* currentBuild = dynamic_cast<IBuilderTask*>(current);
+		auto* newBuild = dynamic_cast<IBuilderTask*>(task);
+		return currentBuild != nullptr && newBuild != nullptr && current->GetType() == IUnitTask::Type::BUILDER
+			&& currentBuild->GetBuildType() == newBuild->GetBuildType();
 	}
 
 	/* Whether a unit was idle at the end of the frame before `frame`, as the table
@@ -655,12 +876,6 @@ private:
 		int busyFrom;   // the frame of the first order since, -1 for none
 	};
 
-	struct Pending {
-		int unitId = -1;
-		std::string answer;
-		int frame = 0;
-	};
-
 	CCircuitAI* circuit;
 	bool on = false;
 	std::unique_ptr<AnswerModel> model;
@@ -677,7 +892,7 @@ private:
 
 	// what the inputs need to remember
 	OrderHistory history;
-	Pending pending;  // the model's last order, until the script reports it failed or it is given
+	OrderBook book;  // the model's orders until carried out, and the answers held back
 	std::unordered_map<int, Idle> idle;  // units by their last idle event, until a frame after an order
 	Economy lastSecond;  // the economy at the end of the last whole second's frame
 	std::unordered_map<int, UnitFacts> unitFacts;  // by unit def
@@ -729,6 +944,21 @@ void RegisterNextOrder(asIScriptEngine* engine, CCircuitAI* circuit)
 	}
 	if (result >= 0) {
 		result = engine->RegisterGlobalFunction("void Reason8SetStart(const string& in, const string& in)", asMETHOD(NextOrders, SetStart), asCALL_THISCALL_ASGLOBAL, object);
+	}
+	if (result >= 0) {
+		result = engine->RegisterGlobalFunction("bool Reason8OrderEnded(int, const string& in, bool, int)", asMETHOD(NextOrders, OrderEnded), asCALL_THISCALL_ASGLOBAL, object);
+	}
+	if (result >= 0) {
+		result = engine->RegisterGlobalFunction("IUnitTask@+ Reason8TaskInProgress(CCircuitUnit@)", asMETHOD(NextOrders, TaskInProgress), asCALL_THISCALL_ASGLOBAL, object);
+	}
+	if (result >= 0) {
+		result = engine->RegisterGlobalFunction("IUnitTask@+ Reason8HelpBuild(CCircuitUnit@, const string& in)", asMETHOD(NextOrders, HelpBuild), asCALL_THISCALL_ASGLOBAL, object);
+	}
+	if (result >= 0) {
+		result = engine->RegisterGlobalFunction("IUnitTask@+ Reason8BarbSpotTask(CCircuitUnit@, const string& in, int& out)", asMETHOD(NextOrders, BarbSpotTask), asCALL_THISCALL_ASGLOBAL, object);
+	}
+	if (result >= 0) {
+		result = engine->RegisterGlobalFunction("bool Reason8SpotUsable(int)", asMETHOD(NextOrders, SpotUsable), asCALL_THISCALL_ASGLOBAL, object);
 	}
 	if (result < 0) {
 		throw std::runtime_error("Reason8: cannot register the next order for the scripts");

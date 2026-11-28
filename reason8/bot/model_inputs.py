@@ -18,10 +18,11 @@ counts where the two differ:
   ``finished``, ``given`` and ``destroyed`` lines before that frame;
 - the build power of the team's finished builders by kind, and of the idle ones: the
   build power and kind of each builder type from the model file's ``builders``, and a
-  builder idle from its export ``idle`` line until the bot's next order to it in the log;
+  builder idle from its export ``idle`` line until the bot's next order to it in the log
+  (the model's when it was given, whether or not it was then carried out);
 - the builder: its kind, whether it moves and its build power from ``builders``, its
   type from its name;
-- the order history: the bot's orders in the log (the model's that were given, and
+- the order history: the bot's orders in the log (the model's that were carried out, and
   BARb's), counted and cut into steps as the table does;
 - the start: the faction of the team's commander, the replay's map, and the start
   position nearest to the commander's start in the map list's layout for two teams of
@@ -46,6 +47,7 @@ INPUTS_LINE = re.compile(r"frame (\d+): (\w+) (\d+) (\w+): inputs (.*)")
 DECIDED = re.compile(r"frame (\d+): (\w+) (\d+) \w+: model chose (\S+) ")
 BARB_ORDERED = re.compile(r"frame (\d+): (\w+) (\d+) \w+: BARb ordered (\S+)$")
 NOT_GIVEN = re.compile(r"frame (\d+): (\w+) (\d+) \w+: cannot carry out (\S+): (.*); left to BARb")
+CARRIED_OUT = re.compile(r"frame (\d+): (\w+) (\d+) \w+: carried out (\S+), chosen at frame \d+$")
 MISSING = "?"
 START = "<start>"
 OTHER = "other"
@@ -137,7 +139,7 @@ def logged_decisions(lines: Iterable[str]) -> list[dict]:
     history = History()
     snapshot: tuple[int, History] | None = None
     decisions = []
-    for line, order in _with_orders(lines):
+    for line, order in _with_orders(lines, carried_out=True):
         if order is not None:
             history.record(*order)
         if logged := INPUTS_LINE.match(line):
@@ -163,11 +165,28 @@ def _left_to_barb(line: str) -> bool:
     )
 
 
-def _with_orders(lines: Iterable[str]) -> Iterator[tuple[str, tuple[int, str, int] | None]]:
+def _with_orders(
+    lines: Iterable[str], carried_out: bool = False
+) -> Iterator[tuple[str, tuple[int, str, int] | None]]:
     """Each line with the order of the bot that the library records just before it, as
-    (unit, answer, frame), or None. BARb's orders are recorded at once; the model's at the
-    next decision, BARb order or frame, unless the script reports it could not be carried
-    out before then (``CommitPending`` and ``Failed`` in ``ai/native/NextOrder.cpp``)."""
+    (unit, answer, frame), or None. BARb's orders are recorded at once.
+
+    The model's are given at the next decision, BARb order or frame, unless the script
+    reports in the same frame that they could not be given (``Failed`` in
+    ``ai/native/NextOrder.cpp``): what makes a builder busy. With `carried_out`, what enters
+    the order history instead: the model's orders the library logged as carried out, at the
+    frame of that line (``CarriedOut``); a log of a library that logged none put every given
+    order in the history."""
+    lines = list(lines)
+    if carried_out and any(CARRIED_OUT.match(line) for line in lines):
+        for line in lines:
+            if done := CARRIED_OUT.match(line):
+                yield line, (int(done.group(3)), done.group(4), int(done.group(1)))
+            elif ordered := BARB_ORDERED.match(line):
+                yield line, (int(ordered.group(3)), ordered.group(4), int(ordered.group(1)))
+            else:
+                yield line, None
+        return
     pending: tuple[int, str, int] | None = None
     for line in lines:
         order = None
@@ -183,7 +202,12 @@ def _with_orders(lines: Iterable[str]) -> Iterator[tuple[str, tuple[int, str, in
                 order = None
             yield line, (int(ordered.group(3)), ordered.group(4), int(ordered.group(1)))
             continue
-        elif (failed := NOT_GIVEN.match(line)) and pending and pending[0] == int(failed.group(3)):
+        elif (
+            (failed := NOT_GIVEN.match(line))
+            and pending
+            and pending[0] == int(failed.group(3))
+            and pending[2] == int(failed.group(1))
+        ):
             pending = None
         yield line, order
     if pending is not None:

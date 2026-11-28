@@ -20,22 +20,42 @@ namespace reason8 {
  *       the model decides the next order for each idle builder, instead of
  *       the opening table being played
  *   string Reason8NextOrder(CCircuitUnit@ builder)
- *       consults the model (Model.h) about the idle builder, masks and
- *       chooses (Choice.h), logs the decision, and returns the order chosen:
- *       a unit name, or a job (assist, reclaim, repair, resurrect); "" when
- *       it is left to BARb
+ *       consults the model (Model.h) about the idle builder, masks, holds
+ *       back the answers it could not carry out lately and chooses
+ *       (Choice.h, OrderBook.h), logs the decision, and returns the order
+ *       chosen: a unit name, or a job (assist, reclaim, repair, resurrect);
+ *       "" when it is left to BARb. The order enters the order history once
+ *       it is carried out
  *   void Reason8OrderFailed(CCircuitUnit@ builder, const string& in order,
  *                           const string& in reason)
- *       logs that the order chosen cannot be carried out: it is left to BARb
+ *       logs that the order chosen cannot be given: it is left to BARb, and
+ *       held back for the builder for a while
+ *   bool Reason8OrderEnded(int builder, const string& in order, bool done,
+ *                          int lastedFrames)
+ *       logs the end of a model order's task; true when it ended at once:
+ *       not carried out, held back for the builder, left to BARb
+ *   IUnitTask@ Reason8TaskInProgress(CCircuitUnit@ builder)
+ *       the builder's task when BARb reevaluates it, null when it is idle
+ *   IUnitTask@ Reason8HelpBuild(CCircuitUnit@ builder, const string& in unit)
+ *       the task building a structure `unit` that the team has under
+ *       construction (a factory anywhere, another one near the builder),
+ *       for the builder to help; null when there is none
  *   IUnitTask@ Reason8BarbTask(CCircuitUnit@ builder, const string& in what)
- *       BARb's own task for `what`, with BARb's own choice of place or
- *       target: "mex" (BARb's next metal spot), "assist", "reclaim",
- *       "repair" or "resurrect"; null when BARb has none
+ *       a task for the job `what` ("assist", "reclaim", "repair" or
+ *       "resurrect") with the target BARb's own tasks choose for it; null
+ *       when there is none
+ *   IUnitTask@ Reason8BarbSpotTask(CCircuitUnit@ builder,
+ *                                  const string& in unit, int& out spot)
+ *       an extractor `unit` on the free metal spot BARb would take for its
+ *       own next one; null when there is none
  *   bool Reason8SpotOpen(int spot)
  *       whether BARb's metal spot `spot` has no extractor on it
+ *   bool Reason8SpotUsable(int spot)
+ *       whether it has none and is not in an ally's area
  *   void Reason8BarbOrdered(CCircuitUnit@ builder, IUnitTask@ task)
  *       BARb gave the builder `task`: an order of the bot for the model's
- *       order history all the same
+ *       order history all the same, unless the builder keeps the task it is
+ *       on
  *   void Reason8SetStart(const string& in position, const string& in role)
  *       the team's start position and its role, for the model's inputs
  *
