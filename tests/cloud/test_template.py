@@ -62,8 +62,12 @@ def test_the_workers_write_only_results_failures_and_logs(template):
         for resource in statements["WriteResultsFailuresAndLogs"]["Resource"]
     ]
     assert written == ["state/*", "state-*", "cloud/failures/*", "cloud/logs/*"]
-    assert statements["ReadReplays"]["Action"] == "s3:GetObject"
-    assert statements["ReadReplays"]["Resource"]["Fn::Sub"].endswith("${BucketPrefix}replays/*")
+    assert statements["ReadReplaysAndContent"]["Action"] == "s3:GetObject"
+    readable = [item["Fn::Sub"] for item in statements["ReadReplaysAndContent"]["Resource"]]
+    assert [path.split("${BucketPrefix}")[1] for path in readable] == [
+        "replays/*",
+        "cloud/content/*",
+    ]
 
 
 def test_the_user_data_is_a_valid_shell_script(template, tmp_path):

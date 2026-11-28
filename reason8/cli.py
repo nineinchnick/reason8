@@ -8,6 +8,7 @@ from types import ModuleType
 
 from reason8.analysis import apm, map_meta, opening_shift, orders, play_quality, reactions
 from reason8.bot import build, check, export, game, next_order
+from reason8.cloud import content as cloud_content
 from reason8.cloud import down as cloud_down
 from reason8.cloud import run as cloud_run
 from reason8.cloud import status as cloud_status
@@ -68,6 +69,7 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
             ("run", cloud_run, "queue the games of a replay list and start the workers"),
             ("status", cloud_status, "games waiting, in flight and done, instances, rough cost"),
             ("down", cloud_down, "stop the workers; empty the queue or delete the stack"),
+            ("content", cloud_content, "keep engines, game versions and maps in the bucket"),
             ("worker", cloud_worker, "play the games of the queue on this instance"),
         ],
     ),

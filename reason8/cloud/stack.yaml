@@ -95,10 +95,12 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              - Sid: ReadReplays
+              - Sid: ReadReplaysAndContent
                 Effect: Allow
                 Action: s3:GetObject
-                Resource: !Sub arn:${AWS::Partition}:s3:::${BucketName}/${BucketPrefix}replays/*
+                Resource:
+                  - !Sub arn:${AWS::Partition}:s3:::${BucketName}/${BucketPrefix}replays/*
+                  - !Sub arn:${AWS::Partition}:s3:::${BucketName}/${BucketPrefix}cloud/content/*
               - Sid: WriteResultsFailuresAndLogs
                 Effect: Allow
                 Action: s3:PutObject
