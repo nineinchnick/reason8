@@ -345,6 +345,16 @@ void UpdateGovernor(int skirmishAIId, int frame)
 	found->second->throttle->Update(frame);
 }
 
+void GovernorUnitFinished(int skirmishAIId, int unitId)
+{
+	const auto found = governors.find(skirmishAIId);
+	if (found == governors.end() || !found->second->throttle) {
+		return;
+	}
+	Governor& governor = *found->second;
+	governor.throttle->Finished(unitId, governor.inner->Game_getCurrentFrame(skirmishAIId));
+}
+
 void ReleaseGovernor(int skirmishAIId)
 {
 	const auto found = governors.find(skirmishAIId);

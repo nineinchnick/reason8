@@ -21,6 +21,11 @@ const SSkirmishAICallback* InstallGovernor(int skirmishAIId, const SSkirmishAICa
  * before the AI handles it. */
 void UpdateGovernor(int skirmishAIId, int frame);
 
+/* A unit of the AI was finished: its commands in this frame take no action,
+ * as in BAR's APM gadget. Called on the unit-finished event, before the AI
+ * handles it. */
+void GovernorUnitFinished(int skirmishAIId, int unitId);
+
 /* Logs the last minute and the totals, and frees the governor's state. */
 void ReleaseGovernor(int skirmishAIId);
 

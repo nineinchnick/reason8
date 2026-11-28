@@ -27,7 +27,7 @@ index 6e9da12..caccc1d 100644
  
  		circuit::CProfiler::GetInstance().ReleaseNames(skirmishAIId);
  
-@@ -77,6 +81,10 @@ EXPORT(int) handleEvent(int skirmishAIId, int topic, const void* data) {
+@@ -77,6 +81,12 @@ EXPORT(int) handleEvent(int skirmishAIId, int topic, const void* data) {
  	int ret = ERROR_SHIFT + 1;
  
  	try {
@@ -35,6 +35,8 @@ index 6e9da12..caccc1d 100644
 +			reason8::UpdateGovernor(skirmishAIId, static_cast<const SUpdateEvent*>(data)->frame);
 +		if (topic == EVENT_UNIT_DAMAGED)  // Reason8: note the first contact
 +			reason8::UnitDamaged(skirmishAIId, static_cast<const SUnitDamagedEvent*>(data));
++		if (topic == EVENT_UNIT_FINISHED)  // Reason8: its settings take no action
++			reason8::GovernorUnitFinished(skirmishAIId, static_cast<const SUnitFinishedEvent*>(data)->unit);
  		ret = myAIs[skirmishAIId]->HandleEvent(topic, data);
  	} CATCH_CPP_AI_EXCEPTION(ret);
  

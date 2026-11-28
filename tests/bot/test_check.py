@@ -284,6 +284,7 @@ def test_check_infolog_governor(tmp_path):
 def test_replay_budget():
     class Events:
         events = [
+            {"type": "cmd", "frame": 1, "team": 1, "units": [5, 6, 7]},  # new units: free
             {"type": "cmd", "frame": 30, "team": 1, "units": [5]},
             {"type": "cmd", "frame": 30, "team": 1, "units": [6]},  # the same kind: one action
             {"type": "cmd", "frame": 33, "team": 1, "units": [5]},  # within its 7 frames
@@ -294,7 +295,7 @@ def test_replay_budget():
         ]
 
     result = check.replay_budget(Events(), team=1)
-    assert result["commands"] == 5 and result["actions"] == 3
+    assert result["commands"] == 6 and result["actions"] == 3
     assert result["windows"]["ok"] and result["windows"]["1 s"]["most"] == 3
 
 

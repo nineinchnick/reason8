@@ -74,6 +74,20 @@ void CountsEachKindInAFrame()
 	EXPECT(counter.Counts(4, 12, FIRE_STATE));
 }
 
+void AFinishedUnitsFirstCommandsAreFree()
+{
+	ActionCounter counter({});
+	counter.Finished(5, 100);
+	EXPECT(!counter.Record(5, 100, FIRE_STATE));  // the settings of a new unit
+	EXPECT(!counter.Record(5, 100, MOVE));
+	EXPECT(!counter.Counts(5, 104, MOVE));        // and they mark it like any command
+	EXPECT(counter.Counts(5, 107, MOVE));
+	EXPECT(counter.Record(6, 100, MOVE));         // another unit in the same frame counts
+	counter.Finished(7, 101);
+	EXPECT(counter.Counts(5, 108, FIRE_STATE));   // the finish marks only its own frame
+	EXPECT(counter.Counts(7, 108, FIRE_STATE));
+}
+
 void PacesSpending()
 {
 	// 8 in any 10 s: a bucket of 2, refilled with one token every 50 frames
@@ -253,6 +267,7 @@ int main()
 {
 	CountsLikeTheGadget();
 	CountsEachKindInAFrame();
+	AFinishedUnitsFirstCommandsAreFree();
 	HoldsAKindThatDoesNotFit();
 	PacesSpending();
 	WindowEndsAtItsFrame();

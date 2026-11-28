@@ -57,7 +57,9 @@ inline std::vector<Window> Band30To40()
  * and one of its units got no command in the 7 frames before that frame;
  * commands of the same frame mark their units from the next frame on, so a
  * move and a shift-queued move to one unit in one frame are two actions, as
- * the two clicks they take.
+ * the two clicks they take. As in BAR's gadget, commands to a unit in the
+ * frame it was finished (`Finished`) do not count: the settings an AI gives a
+ * new unit at once.
  *
  * Every window is kept exactly, and spending is paced too: each window also
  * has a bucket that holds up to a quarter of its cap and refills at the rate
@@ -88,7 +90,20 @@ public:
 		if (frame == currentFrame && countedKinds.count(kind) != 0) {
 			return false;
 		}
+		if (frame == finishedFrame && finishedThisFrame.count(unitId) != 0) {
+			return false;
+		}
 		return IgnoredUntil(unitId, frame) <= frame;
+	}
+
+	/* `unitId` was finished at `frame`: its commands in that frame are free. */
+	void Finished(int unitId, int frame)
+	{
+		if (frame != finishedFrame) {
+			finishedThisFrame.clear();
+			finishedFrame = frame;
+		}
+		finishedThisFrame.insert(unitId);
 	}
 
 	/* Whether one more action at `frame` stays within every window, and its
@@ -185,8 +200,10 @@ private:
 	std::unordered_map<int, int> ignoredUntil;  // unit -> first frame a command counts again
 	std::unordered_set<int> markedThisFrame;    // units commanded in currentFrame
 	std::unordered_set<Kind> countedKinds;      // kinds counted in currentFrame
+	std::unordered_set<int> finishedThisFrame;  // units finished in finishedFrame
 	std::deque<int> actionFrames;               // within the longest window
 	int currentFrame = -1;
+	int finishedFrame = -1;
 };
 
 struct Tally {
@@ -280,6 +297,9 @@ public:
 			it = held.erase(it);
 		}
 	}
+
+	/* `unitId` was finished at `frame` (ActionCounter::Finished). */
+	void Finished(int unitId, int frame) { counter.Finished(unitId, frame); }
 
 	std::size_t Held() const { return held.size(); }
 	const Tally& Total() const { return total; }

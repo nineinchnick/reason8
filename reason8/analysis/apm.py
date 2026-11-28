@@ -20,7 +20,10 @@ says, from the commands a player's units receive, on the rules of BAR's own APM 
 - a command counts only if at least one of its units got no command from that player in
   the 7 frames before its frame, and every command marks its units for the next 7 frames.
   Holding the right mouse button repeats a move order every few frames; this makes it one
-  action.
+  action;
+- a widget's commands to a unit in the frame of the unit's first command don't count: the
+  gadget leaves out the commands a unit gets in the frame it is finished, and the replay
+  tells when a unit was finished only by its first command.
 
 A ``COMMAND`` packet goes to the player's current selection (the last ``select`` event), an
 ``AICOMMAND``/``AICOMMANDS`` packet to the units it lists. Four counts are kept per player:
@@ -119,6 +122,11 @@ class ActionCounter:
     in one frame are two actions, as the two clicks they take. A command without a kind
     (None) is of one kind with every other one: at most one action a frame, as in BAR's
     gadget. `ai/native/Budget.h` counts the bot's commands the same way.
+
+    BAR's gadget also leaves out the commands a unit gets in the frame it is finished (the
+    settings a widget or an AI gives a new unit at once). A replay does not say when a unit
+    was finished, so `new_units` takes the frame of a unit's first command for it, and a
+    command's `free` units do not make it count.
     """
 
     def __init__(self, spam_frames: int = SPAM_FRAMES) -> None:
@@ -127,18 +135,30 @@ class ActionCounter:
         self.frame: int | None = None
         self.kinds: set[Any] = set()  # counted in `frame`
         self.marked: list[int] = []  # units commanded in `frame`
+        self.first_frames: dict[int, int] = {}  # unit -> the frame of its first command
         self.frames: list[int] = []
 
-    def command(self, frame: int, units: Iterable[int], kind: Any = None) -> bool:
+    def new_units(self, frame: int, units: Iterable[int]) -> frozenset[int]:
+        """The `units` whose first command is at `frame`: just finished, as far as the
+        replay tells. Records every unit's first frame."""
+        return frozenset(
+            unit for unit in units if self.first_frames.setdefault(unit, frame) == frame
+        )
+
+    def command(
+        self, frame: int, units: Iterable[int], kind: Any = None, free: Iterable[int] = ()
+    ) -> bool:
         """Record a command of `kind` to `units` at `frame`; True when it counts as an
-        action. Frames are given in order."""
+        action. `free` units (`new_units`) do not make it count. Frames are given in
+        order."""
         if frame != self.frame:
             for unit in self.marked:
                 self.ignored_until[unit] = self.frame + self.spam_frames
             self.frame, self.kinds, self.marked = frame, set(), []
         units = tuple(units)
+        free = frozenset(free)
         counted = kind not in self.kinds and any(
-            self.ignored_until.get(unit, frame) <= frame for unit in units
+            unit not in free and self.ignored_until.get(unit, frame) <= frame for unit in units
         )
         self.marked += units
         if counted:
@@ -147,8 +167,11 @@ class ActionCounter:
         return counted
 
     def event(self, event: Mapping[str, Any]) -> bool:
-        """Record a command event of a parsed document to the units it lists."""
-        return self.command(event["frame"], event.get("units") or (), order_kind(event))
+        """Record a command event of a parsed document to the units it lists, an AI's: the
+        units it gives its first command are free (`new_units`)."""
+        units = event.get("units") or ()
+        free = self.new_units(event["frame"], units)
+        return self.command(event["frame"], units, order_kind(event), free)
 
 
 class FrameCounter:
@@ -280,15 +303,18 @@ def player_actions(
         counter = counters[player]
         if via == "COMMAND":
             units = selections.get(player, ())
+            counter["all"].new_units(frame, units)  # a click is never free
+            free: frozenset[int] = frozenset()
             counter["clicked"].command(frame, units, kind)
             if units:
                 counter["clicked_raw"].command(frame)
         elif ai == WIDGET_AI:
             units = event_units or ()
-            counter["widget"].command(frame, units, kind)
+            free = counter["all"].new_units(frame, units)
+            counter["widget"].command(frame, units, kind, free)
         else:
             continue
-        counter["all"].command(frame, units, kind)
+        counter["all"].command(frame, units, kind, free)
     return {
         player: {kind: counter.frames for kind, counter in kinds.items()}
         for player, kinds in counters.items()
