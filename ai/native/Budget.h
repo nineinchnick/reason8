@@ -1,5 +1,6 @@
 /* Reason8 command budget: counts a team's unit commands as actions, the way
- * docs/research/apm.md counts a player's, and holds back the commands that
+ * docs/research/apm.md counts a player's (one action for each kind of order in
+ * a frame, ADR 0008), and holds back the commands that
  * would take more actions than the budget of ADR 0008 allows, to send them
  * later in order. Knows nothing of the engine, so test_budget.cpp can run it
  * alone. GPL-2.0-or-later. */
@@ -9,6 +10,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <functional>
 #include <list>
@@ -24,6 +26,11 @@ constexpr int FRAMES_PER_MINUTE = 60 * FRAMES_PER_SECOND;
 /* A command counts only if one of its units got no command in this many
  * frames before, as in BAR's APM gadget and reason8.analysis.apm. */
 constexpr int SPAM_FRAMES = 7;
+
+/* A kind of order: the command, the unit it builds and its options, without
+ * its parameters or units (Governor.cpp makes it from a command). Every kind
+ * in a frame is one action, however many units or places it goes to. */
+using Kind = std::uint64_t;
 
 struct Window {
 	int frames;      // length of the window
@@ -45,6 +52,12 @@ inline std::vector<Window> Band30To40()
 }
 
 /* Which commands count as actions, and whether one more fits the budget.
+ *
+ * A command counts when no command of its kind has counted in its frame yet,
+ * and one of its units got no command in the 7 frames before that frame;
+ * commands of the same frame mark their units from the next frame on, so a
+ * move and a shift-queued move to one unit in one frame are two actions, as
+ * the two clicks they take.
  *
  * Every window is kept exactly, and spending is paced too: each window also
  * has a bucket that holds up to a quarter of its cap and refills at the rate
@@ -68,14 +81,14 @@ public:
 		}
 	}
 
-	/* Whether a command to `unitId` sent at `frame` would count as an action. */
-	bool Counts(int unitId, int frame) const
+	/* Whether a command of `kind` to `unitId` sent at `frame` would count as
+	 * an action. */
+	bool Counts(int unitId, int frame, Kind kind) const
 	{
-		if (lastActionFrame == frame) {
+		if (frame == currentFrame && countedKinds.count(kind) != 0) {
 			return false;
 		}
-		const auto ignored = ignoredUntil.find(unitId);
-		return ignored == ignoredUntil.end() || ignored->second <= frame;
+		return IgnoredUntil(unitId, frame) <= frame;
 	}
 
 	/* Whether one more action at `frame` stays within every window, and its
@@ -94,13 +107,15 @@ public:
 		return true;
 	}
 
-	/* Records a command sent to `unitId` at `frame`; true when it was an action. */
-	bool Record(int unitId, int frame)
+	/* Records a command of `kind` sent to `unitId` at `frame`; true when it
+	 * was an action. */
+	bool Record(int unitId, int frame, Kind kind)
 	{
-		const bool counted = Counts(unitId, frame);
-		ignoredUntil[unitId] = frame + SPAM_FRAMES;
+		Advance(frame);
+		const bool counted = Counts(unitId, frame, kind);
+		markedThisFrame.insert(unitId);
 		if (counted) {
-			lastActionFrame = frame;
+			countedKinds.insert(kind);
 			actionFrames.push_back(frame);
 			while (!actionFrames.empty() && actionFrames.front() <= frame - longest) {
 				actionFrames.pop_front();
@@ -126,6 +141,30 @@ private:
 		double At(int when) const { return std::min(size, tokens + (when - frame) * perFrame); }
 	};
 
+	/* The first frame a command to `unitId` counts again, as seen from `frame`. */
+	int IgnoredUntil(int unitId, int frame) const
+	{
+		if (frame != currentFrame && markedThisFrame.count(unitId) != 0) {
+			return currentFrame + SPAM_FRAMES;
+		}
+		const auto ignored = ignoredUntil.find(unitId);
+		return ignored == ignoredUntil.end() ? frame : ignored->second;
+	}
+
+	/* Moves on to `frame`: the marks of the frame before take effect. */
+	void Advance(int frame)
+	{
+		if (frame == currentFrame) {
+			return;
+		}
+		for (int unitId : markedThisFrame) {
+			ignoredUntil[unitId] = currentFrame + SPAM_FRAMES;
+		}
+		markedThisFrame.clear();
+		countedKinds.clear();
+		currentFrame = frame;
+	}
+
 	static bool Applies(const Window& window, int frame)
 	{
 		return window.untilFrame == 0 || frame < window.untilFrame;
@@ -144,8 +183,10 @@ private:
 	std::vector<Bucket> buckets;  // by window
 	int longest = 0;
 	std::unordered_map<int, int> ignoredUntil;  // unit -> first frame a command counts again
+	std::unordered_set<int> markedThisFrame;    // units commanded in currentFrame
+	std::unordered_set<Kind> countedKinds;      // kinds counted in currentFrame
 	std::deque<int> actionFrames;               // within the longest window
-	int lastActionFrame = -1;
+	int currentFrame = -1;
 };
 
 struct Tally {
@@ -180,7 +221,7 @@ public:
 
 	/* A command given at `frame`; returns the engine's result when it was sent
 	 * at once, 0 when it is held. */
-	int Submit(int frame, int unitId, bool supersedes, bool collapsible, Payload payload)
+	int Submit(int frame, int unitId, Kind kind, bool supersedes, bool collapsible, Payload payload)
 	{
 		Count([](Tally& tally) { ++tally.seen; });
 		if (supersedes && heldByUnit.count(unitId) != 0) {
@@ -194,9 +235,9 @@ public:
 				}
 			}
 		}
-		if (heldByUnit.count(unitId) == 0 && (!counter.Counts(unitId, frame) || counter.Fits(frame))) {
+		if (heldByUnit.count(unitId) == 0 && (!counter.Counts(unitId, frame, kind) || counter.Fits(frame))) {
 			Count([](Tally& tally) { ++tally.sentAtOnce; });
-			return Dispatch(unitId, frame, payload);
+			return Dispatch(unitId, frame, kind, payload);
 		}
 		if (held.size() >= capacity) {
 			Count([](Tally& tally) { ++tally.dropped; });
@@ -205,7 +246,7 @@ public:
 		}
 		Count([](Tally& tally) { ++tally.deferred; });
 		++heldByUnit[unitId];
-		held.push_back({unitId, frame, collapsible, std::move(payload)});
+		held.push_back({unitId, frame, kind, collapsible, std::move(payload)});
 		return 0;
 	}
 
@@ -222,7 +263,7 @@ public:
 				++it;
 				continue;
 			}
-			if (counter.Counts(it->unitId, frame) && !counter.Fits(frame)) {
+			if (counter.Counts(it->unitId, frame, it->kind) && !counter.Fits(frame)) {
 				blocked.insert(it->unitId);
 				++it;
 				continue;
@@ -232,7 +273,7 @@ public:
 				++tally.sentLater;
 				tally.worstDelay = std::max(tally.worstDelay, delay);
 			});
-			if (Dispatch(it->unitId, frame, it->payload) != 0) {
+			if (Dispatch(it->unitId, frame, it->kind, it->payload) != 0) {
 				Count([](Tally& tally) { ++tally.failed; });
 			}
 			Forget(it->unitId);
@@ -255,6 +296,7 @@ private:
 	struct Entry {
 		int unitId;
 		int frame;  // when the AI gave it
+		Kind kind;
 		bool collapsible;
 		Payload payload;
 	};
@@ -266,9 +308,9 @@ private:
 		change(minute);
 	}
 
-	int Dispatch(int unitId, int frame, Payload& payload)
+	int Dispatch(int unitId, int frame, Kind kind, Payload& payload)
 	{
-		if (counter.Record(unitId, frame)) {
+		if (counter.Record(unitId, frame, kind)) {
 			Count([frame](Tally& tally) {
 				++tally.actions;
 				tally.actionFrames.push_back(frame);

@@ -8,15 +8,19 @@ Usage::
 
 Only the command packets of the parsed replays are used, no re-simulation. They are read
 from the commands, selections and events tables (`reason8.replays.tables`), a day per
-process, and put back in stream order (`event_stream`). An action is
-counted the way BAR's own APM gadget (``luarules/gadgets/game_apm_broadcast.lua``) counts it,
-from the commands a player's units receive:
+process, and put back in stream order (`event_stream`). An action is counted as ADR 0008
+says, from the commands a player's units receive, on the rules of BAR's own APM gadget
+(``luarules/gadgets/game_apm_broadcast.lua``):
 
-- at most one action per player per game frame, so dragging a line of buildings, which
-  sends many orders in one frame, is one action;
+- one action for each kind of order in a frame (`order_kind`: the command, the unit it
+  builds and its options, not its parameters or units), so dragging a line of buildings,
+  which sends many orders of one kind in one frame, is one action, while a move and a
+  shift-queued move, or orders of different kinds to different units, are one each (the
+  gadget counts at most one action a frame);
 - a command counts only if at least one of its units got no command from that player in
-  the 7 frames before, and every command marks its units for the next 7 frames. Holding the
-  right mouse button repeats a move order every few frames; this makes it one action.
+  the 7 frames before its frame, and every command marks its units for the next 7 frames.
+  Holding the right mouse button repeats a move order every few frames; this makes it one
+  action.
 
 A ``COMMAND`` packet goes to the player's current selection (the last ``select`` event), an
 ``AICOMMAND``/``AICOMMANDS`` packet to the units it lists. Four counts are kept per player:
@@ -107,26 +111,44 @@ QUANTILES = (0.25, 0.5, 0.75, 0.9, 0.99)
 
 
 class ActionCounter:
-    """Counts the actions of one player the way BAR's APM gadget does."""
+    """Counts the actions of one player (or AI team) as ADR 0008 does.
+
+    A command counts when no command of its kind has counted in its frame yet and one of
+    its units got no command in the 7 frames before that frame. The commands of a frame
+    mark their units from the next frame on, so a move and a shift-queued move to one unit
+    in one frame are two actions, as the two clicks they take. A command without a kind
+    (None) is of one kind with every other one: at most one action a frame, as in BAR's
+    gadget. `ai/native/Budget.h` counts the bot's commands the same way.
+    """
 
     def __init__(self, spam_frames: int = SPAM_FRAMES) -> None:
         self.spam_frames = spam_frames
         self.ignored_until: dict[int, int] = {}
-        self.last_frame: int | None = None
+        self.frame: int | None = None
+        self.kinds: set[Any] = set()  # counted in `frame`
+        self.marked: list[int] = []  # units commanded in `frame`
         self.frames: list[int] = []
 
-    def command(self, frame: int, units: Iterable[int]) -> bool:
-        """Record a command to `units` at `frame`; True when it counts as an action."""
-        counted = False
-        for unit in units:
-            if not counted and self.last_frame != frame:
-                until = self.ignored_until.get(unit)
-                counted = until is None or until <= frame
-            self.ignored_until[unit] = frame + self.spam_frames
+    def command(self, frame: int, units: Iterable[int], kind: Any = None) -> bool:
+        """Record a command of `kind` to `units` at `frame`; True when it counts as an
+        action. Frames are given in order."""
+        if frame != self.frame:
+            for unit in self.marked:
+                self.ignored_until[unit] = self.frame + self.spam_frames
+            self.frame, self.kinds, self.marked = frame, set(), []
+        units = tuple(units)
+        counted = kind not in self.kinds and any(
+            self.ignored_until.get(unit, frame) <= frame for unit in units
+        )
+        self.marked += units
         if counted:
+            self.kinds.add(kind)
             self.frames.append(frame)
-            self.last_frame = frame
         return counted
+
+    def event(self, event: Mapping[str, Any]) -> bool:
+        """Record a command event of a parsed document to the units it lists."""
+        return self.command(event["frame"], event.get("units") or (), order_kind(event))
 
 
 class FrameCounter:
@@ -207,17 +229,17 @@ def end_frames(replay: Replay, events: Sequence[EventRow] | None = None) -> dict
     team_died: dict[int, int] = {}
     if events is None:
         events = event_rows(replay.events)
-    for kind, frame, player, _, _, _, action, param, _ in events:
+    for event_type, frame, player, _, _, _, action, param, _ in events:
         if frame is None or frame < 0:
             continue
-        if kind == "cmd" and player is not None:
+        if event_type == "cmd" and player is not None:
             last_command[player] = frame
-        elif kind == "team":
+        elif event_type == "team":
             if action == "resign" and player in ends:
                 ends[player] = min(ends[player], frame)
             elif action == "team_died" and param is not None:
                 team_died.setdefault(int(param), frame)
-        elif kind == "playerleft" and player in ends:
+        elif event_type == "playerleft" and player in ends:
             left[player] = frame
     for player, team in team_of.items():
         if team in team_died:
@@ -230,7 +252,8 @@ def end_frames(replay: Replay, events: Sequence[EventRow] | None = None) -> dict
 def player_actions(
     replay: Replay, events: Sequence[EventRow] | None = None
 ) -> dict[int, dict[str, list[int]]]:
-    """Player id -> kind -> the frames of that player's actions (see the module docs).
+    """Player id -> count (``clicked``, ``widget``, ``all``, ``clicked_raw``) -> the frames
+    of that player's actions (see the module docs); a frame is there once per action.
 
     `events` as for `end_frames`.
     """
@@ -246,26 +269,26 @@ def player_actions(
     selections: dict[int, Sequence[int]] = {}
     if events is None:
         events = event_rows(replay.events)
-    for kind, frame, player, via, ai, event_units, _, _, _ in events:
+    for event_type, frame, player, via, ai, event_units, _, _, kind in events:
         if player not in counters:
             continue
-        if kind == "select":  # pregame selections count too
+        if event_type == "select":  # pregame selections count too
             selections[player] = event_units or ()
             continue
-        if kind != "cmd" or frame is None or frame < 0:
+        if event_type != "cmd" or frame is None or frame < 0:
             continue
         counter = counters[player]
         if via == "COMMAND":
             units = selections.get(player, ())
-            counter["clicked"].command(frame, units)
+            counter["clicked"].command(frame, units, kind)
             if units:
                 counter["clicked_raw"].command(frame)
         elif ai == WIDGET_AI:
             units = event_units or ()
-            counter["widget"].command(frame, units)
+            counter["widget"].command(frame, units, kind)
         else:
             continue
-        counter["all"].command(frame, units)
+        counter["all"].command(frame, units, kind)
     return {
         player: {kind: counter.frames for kind, counter in kinds.items()}
         for player, kinds in counters.items()

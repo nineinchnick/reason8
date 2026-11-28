@@ -7,8 +7,10 @@ Usage::
         --bot lobby=data/runs/lobby-2026-11-27 --bot headless=data/eval/end-opening/after
     uv run reason8 analysis orders --out data/orders --report      # docs/research tables
 
-ADR 0008 counts the commands of one frame as at most one action
-(`reason8.analysis.apm.ActionCounter`). This pass looks inside the frames: for every frame
+BAR's APM gadget counts the commands of one frame as at most one action, and ADR 0008 did
+too until this measurement showed what such an action holds for the bot; it now counts
+each kind of order in a frame. This pass counts by frames, the earlier rule
+(`reason8.analysis.apm.ActionCounter` without kinds), and looks inside them: for every frame
 in which a player (or a bot's team) gave commands, how many commands there are, how many
 units they go to, and how many *distinct orders* they hold. An order is the command with
 its unit to build, parameters, options and, for an INSERT, its position and options; which
@@ -21,7 +23,7 @@ A player's commands come in three sources, as in `reason8.analysis.apm`: ``click
 (``COMMAND`` packets, to the current selection), ``widget`` (``AICOMMAND``/``AICOMMANDS``
 with ``ai`` 255) and, for a bot, ``bot`` (the AI's own ``AICOMMAND`` packets). Every frame
 is marked with whether it is an action when all of the commander's commands are counted
-(``action``, the count of ADR 0008 and BAR's own APM) and when only the clicked ones are
+(``action``, the count of BAR's own APM) and when only the clicked ones are
 (``clicked_action``).
 
 An *action span* is a counted action with everything that follows it until the next one:

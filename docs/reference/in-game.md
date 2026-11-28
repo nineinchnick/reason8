@@ -398,9 +398,10 @@ The command governor
   ([ADR 0008](../decisions/0008-play-under-human-like-limits.md)), and holds a
   command that would take an action the 30-40 band's budget has no room for.
   On every frame, before the AI's own commands, it sends what fits, oldest
-  first: once one action fits, everything else held goes in the same frame,
-  which by the counting rule is the same action. A unit with a held command
-  has its later commands held behind it. A new order to a mobile unit given
+  first: once an action of one kind of order fits, every held command of that
+  kind goes in the same frame, which by the counting rule is the same action;
+  each other kind needs an action of its own. A unit with a held command has
+  its later commands held behind it. A new order to a mobile unit given
   without shift replaces the held orders to that unit, as it would replace
   them a moment after they arrived (a factory's orders add to its queue, so
   they never replace each other). Past 1,024 held commands the oldest is

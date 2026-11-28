@@ -9,6 +9,7 @@
 #include "ExternalAI/Interface/SSkirmishAICallback.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -169,6 +170,31 @@ bool Copy(int topic, const void* data, HeldCommand& held)
 	}
 }
 
+/* The kind of order of a unit command (Budget.h): its topic and options, the
+ * unit def of a build and the command id of a custom command, and for an
+ * INSERT the inserted command's id and options, as the replay's commands are
+ * told apart in reason8.analysis.apm.order_kind. */
+Kind KindOf(int topic, const void* data)
+{
+	const auto* common = static_cast<const SStopUnitCommand*>(data);
+	std::int64_t parts[4] = {topic, common->options, 0, 0};
+	if (topic == COMMAND_UNIT_BUILD) {
+		parts[2] = static_cast<const SBuildUnitCommand*>(data)->toBuildUnitDefId;
+	} else if (topic == COMMAND_UNIT_CUSTOM) {
+		const auto* custom = static_cast<const SCustomUnitCommand*>(data);
+		parts[2] = custom->cmdId;
+		constexpr int CMD_INSERT = 1;
+		if (custom->cmdId == CMD_INSERT && custom->params != nullptr && custom->params_size >= 3) {
+			parts[3] = (static_cast<std::int64_t>(custom->params[1]) << 16) ^ static_cast<std::int64_t>(custom->params[2]);
+		}
+	}
+	Kind kind = 1469598103934665603ULL;  // FNV-1a over the parts
+	for (std::int64_t part : parts) {
+		kind = (kind ^ static_cast<Kind>(part)) * 1099511628211ULL;
+	}
+	return kind;
+}
+
 struct Governor {
 	int skirmishAIId = -1;
 	const SSkirmishAICallback* inner = nullptr;
@@ -251,7 +277,8 @@ int CALLING_CONV GovernedHandleCommand(int skirmishAIId, int toId, int commandId
 	// unit's orders replace each other.
 	const bool collapsible = IsQueuedOrder(topic) && IsMobile(governor, common->unitId);
 	const bool supersedes = collapsible && (common->options & UNIT_COMMAND_OPTION_SHIFT_KEY) == 0;
-	return governor.throttle->Submit(frame, common->unitId, supersedes, collapsible, std::move(held));
+	return governor.throttle->Submit(
+		frame, common->unitId, KindOf(topic, data), supersedes, collapsible, std::move(held));
 }
 
 Mode ModeFromOptions(int skirmishAIId, const SSkirmishAICallback* inner)
