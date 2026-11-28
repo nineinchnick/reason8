@@ -178,6 +178,65 @@ def test_model_orders_log_counts():
     assert team["ended"]["reason"] == "contact" and team["ended"]["frame"] == 6450
 
 
+def test_model_orders_that_ended_at_once_by_kind_of_answer():
+    lines = [
+        # an extractor whose task ended at once (a log of the library that says so)
+        "frame 100: armcom 1 commander: model chose armmex 0.50; 1 of 9 possible of 9 at 10% "
+        "or more: armmex 0.50",
+        "frame 104: armcom 1 commander: armmex ended unfinished after 4 frames",
+        "frame 104: armcom 1 commander: cannot carry out armmex: its task ended at once, "
+        "unfinished; left to BARb",
+        # an assist decided again within a second (an older log: no task ends)
+        "frame 400: armcom 1 commander: model chose assist 0.50; 1 of 9 possible of 9 at 10% "
+        "or more: assist 0.50",
+        "frame 410: armcom 1 commander: model chose assist 0.50; 1 of 9 possible of 9 at 10% "
+        "or more: assist 0.50",
+        # that one carried out: the next decision is minutes later
+        "frame 450: armcom 1 commander: carried out assist, chosen at frame 410",
+        # a factory helped build, carried out
+        "frame 5000: armcom 1 commander: model chose armlab 0.50; 1 of 9 possible of 9 at 10% "
+        "or more: armlab 0.50",
+        "frame 5000: armcom 1: armlab: helps build the one the team is building",
+        "frame 5030: armcom 1 commander: carried out armlab, chosen at frame 5000",
+        # a repair with no target: not given, not "ended at once"
+        "frame 6000: armck 2 construction: model chose repair 0.50; 1 of 9 possible of 9 at "
+        "10% or more: repair 0.50",
+        "frame 6000: armck 2 construction: cannot carry out repair: no target for repair; left "
+        "to BARb",
+        "frame 6010: armck 2 construction: model chose armwin 0.50; 1 of 9 possible of 9 at "
+        "10% or more: armwin 0.50",
+        # a unit, by a factory, carried out
+        "frame 7000: armlab 3 factory: model chose armck 0.50; 1 of 9 possible of 9 at 10% or "
+        "more: armck 0.50",
+    ]
+    teams: dict[int, dict] = {}
+    for line in lines:
+        next_order.count_line(teams, 1, line)
+    team = next_order.summary(teams[1])
+    assert "events" not in team
+    assert team["idle_builders"] == 7 and team["carried_out"] == 2 and team["helped_build"] == 1
+    assert team["unfinished"] == 1 and team["not_given"] == 1
+    assert team["ended_at_once"] == 2 and team["ended_at_once_share"] == round(2 / 7, 3)
+    assert team["left_to_barb"] == 1
+    assert team["by_answer"] == {
+        "assist": {"chosen": 2, "not_given": 0, "ended_at_once": 1},
+        "repair": {"chosen": 1, "not_given": 1, "ended_at_once": 0},
+        "extractor": {"chosen": 1, "not_given": 0, "ended_at_once": 1},
+        "factory": {"chosen": 1, "not_given": 0, "ended_at_once": 0},
+        "other structure": {"chosen": 1, "not_given": 0, "ended_at_once": 0},
+        "unit": {"chosen": 1, "not_given": 0, "ended_at_once": 0},
+    }
+
+
+def test_answer_kinds():
+    tasks = {"armmex": "mex", "armlab": "factory", "armwin": "energy"}
+    assert next_order.answer_kind("reclaim", "commander", tasks) == "reclaim"
+    assert next_order.answer_kind("armmex", "commander", tasks) == "extractor"
+    assert next_order.answer_kind("armlab", "construction", tasks) == "factory"
+    assert next_order.answer_kind("armwin", "construction", tasks) == "other structure"
+    assert next_order.answer_kind("armck", "factory", tasks) == "unit"
+
+
 def test_model_orders_log_without_idle_builders():
     team = next_order.summary(next_order.new_team())
     assert team["idle_builders"] == 0 and team["decided_by_model_share"] is None

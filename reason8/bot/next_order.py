@@ -402,10 +402,44 @@ MODEL_SKILL = re.compile(r"; (skill .*)$")
 POSITION = re.compile(r"position (\S+) \(start .*?\), (?:role (\S+), )?(\d+) usual metal spots")
 INPUTS = re.compile(r"frame \d+: \w+ \d+ \w+: inputs ")
 BARB_ORDERED = re.compile(r"frame \d+: \w+ \d+ \w+: BARb ordered (\S+)$")
+CARRIED_OUT = re.compile(r"frame \d+: \w+ \d+ \w+: carried out (\S+), chosen at frame \d+$")
+HELPS_BUILD = re.compile(r"frame \d+: \w+ \d+: \w+: helps build ")
 ENDED = re.compile(r"model orders ended at frame (\d+), (\w+): (.*); BARb takes over")
 UNFINISHED = "its task ended unfinished"
+#: The reason the library gives for an order whose task ended within a second (OrderBook.h).
+AT_ONCE = "its task ended at once"
 FRAMES_PER_MINUTE = 30 * 60
+#: An order whose builder is idle again, or decided for again, within this many frames
+#: (one second) ended at once: it did not turn into work (``CARRIED_OUT_FRAMES`` of
+#: ``ai/native/OrderBook.h``).
+AT_ONCE_FRAMES = 30
 OUTCOMES = ("model chose", "below threshold", "nothing possible", "no answers")
+JOBS = ("assist", "reclaim", "repair", "resurrect")
+#: The kinds of answer the check reports on, by what carries them out.
+ANSWER_KINDS = (*JOBS, "extractor", "factory", "other structure", "unit")
+
+
+def answer_kind(answer: str, builder_kind: str, tasks: Mapping[str, str]) -> str:
+    """What kind of order `answer` is for a builder of `builder_kind`: a job, a unit a factory
+    makes, or a structure by BARb's task for it (``tasks``, as in ``next_order.json``)."""
+    if answer in JOBS:
+        return answer
+    if builder_kind == "factory":
+        return "unit"
+    task = tasks.get(answer)
+    if task == "mex":
+        return "extractor"
+    if task == "factory":
+        return "factory"
+    return "other structure"
+
+
+def default_tasks() -> dict[str, str]:
+    """BARb's task of each structure, from the ``next_order.json`` the AI is built with."""
+    path = DEFAULT_OUT_DIR / NEXT_ORDER_NAME
+    if not path.is_file():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8")).get("tasks", {})
 
 
 def new_team() -> dict:
@@ -427,8 +461,13 @@ def new_team() -> dict:
         "orders_chosen": {},
         "extractors": {"usual spot": 0, "BARb's metal spot": 0},
         "barb_orders": 0,  # orders BARb gave the builders left to it, while the model decided
+        "carried_out": 0,  # the model's orders that entered its order history
+        "helped_build": 0,  # orders carried out by helping build one the team was building
         "inputs_logged": 0,  # decisions whose inputs the library logged
         "ended": None,
+        # (frame, builder, builder kind, outcome or "failed", answer, reason) in log order,
+        # for the orders that ended at once; `summary` drops them
+        "events": [],
     }
 
 
@@ -439,6 +478,10 @@ def count_line(teams: dict[int, dict], team: int, text: str) -> None:
         counts["inputs_logged"] += 1
     elif BARB_ORDERED.match(text):
         counts["barb_orders"] += 1
+    elif CARRIED_OUT.match(text):
+        counts["carried_out"] += 1
+    elif HELPS_BUILD.match(text):
+        counts["helped_build"] += 1
     elif decided := DECIDED.match(text):
         frame, kind, outcome, order = (
             int(decided.group(1)),
@@ -448,6 +491,7 @@ def count_line(teams: dict[int, dict], team: int, text: str) -> None:
         )
         counts["idle_builders"] += 1
         counts["outcomes"][outcome] += 1
+        counts["events"].append((frame, int(decided.group(3)), kind, outcome, order, None))
         by_kind = counts["by_kind"].setdefault(kind, {"idle_builders": 0, "model_chose": 0})
         by_kind["idle_builders"] += 1
         minute = frame // FRAMES_PER_MINUTE
@@ -461,7 +505,9 @@ def count_line(teams: dict[int, dict], team: int, text: str) -> None:
             counts["by_minute"][minute]["left_to_barb"] += 1
     elif failed := NOT_CARRIED_OUT.match(text):
         reason = failed.group(6)
-        if reason == UNFINISHED:
+        frame, unit, kind, answer = failed.group(1, 3, 4, 5)
+        counts["events"].append((int(frame), int(unit), kind, "failed", answer, reason))
+        if reason == UNFINISHED or reason.startswith(AT_ONCE):
             counts["unfinished"] += 1
             return
         counts["not_given"] += 1
@@ -490,19 +536,54 @@ def count_line(teams: dict[int, dict], team: int, text: str) -> None:
         }
 
 
+def at_once(events: list[tuple]) -> dict[str, dict[str, int]]:
+    """Per kind of answer (`ANSWER_KINDS`), the model's orders (``chosen``), those that could
+    not be given (``not_given``: a failure of the same builder and answer in the decision's
+    frame) and those that ended at once (``ended_at_once``: given, and the builder's next
+    decision or failure came within `AT_ONCE_FRAMES`), from a team's events of `count_line`.
+    Works for logs of every version: older libraries logged no task ends, but a builder idle
+    again within a second is decided for again within a second."""
+    by_unit: dict[int, list[tuple]] = {}
+    for event in events:
+        by_unit.setdefault(event[1], []).append(event)
+    kinds = {kind: {"chosen": 0, "not_given": 0, "ended_at_once": 0} for kind in ANSWER_KINDS}
+    tasks = default_tasks()
+    for unit_events in by_unit.values():
+        for index, (frame, _, builder_kind, outcome, answer, _) in enumerate(unit_events):
+            if outcome != "model chose":
+                continue
+            counts = kinds[answer_kind(answer, builder_kind, tasks)]
+            counts["chosen"] += 1
+            later = unit_events[index + 1 :]
+            if any(
+                event[3] == "failed"
+                and event[0] == frame
+                and event[4] == answer
+                and event[5] != UNFINISHED
+                and not event[5].startswith(AT_ONCE)
+                for event in later
+            ):
+                counts["not_given"] += 1
+            elif later and later[0][0] - frame <= AT_ONCE_FRAMES:
+                counts["ended_at_once"] += 1
+    return kinds
+
+
 def summary(counts: Mapping) -> dict:
     """One team's counts with the shares a reader looks for: of the idle builders, how many
-    got an order the model decided and that was carried out, and how many were left to
-    BARb."""
+    got an order the model decided and that was carried out, how many orders ended at once,
+    by kind of answer, and how many were left to BARb."""
     idle = counts["idle_builders"]
     chosen = counts["outcomes"]["model chose"]
     left = idle - chosen + counts["not_given"]
+    by_answer = at_once(counts["events"])
+    ended_at_once = sum(kind["ended_at_once"] for kind in by_answer.values())
 
     def share(part: int) -> float | None:
         return round(part / idle, 3) if idle else None
 
     return {
-        **counts,
+        **{name: value for name, value in counts.items() if name != "events"},
         "orders_chosen": dict(
             sorted(counts["orders_chosen"].items(), key=lambda item: (-item[1], item[0]))
         ),
@@ -510,4 +591,7 @@ def summary(counts: Mapping) -> dict:
         "decided_by_model_share": share(chosen - counts["not_given"]),
         "left_to_barb": left,
         "left_to_barb_share": share(left),
+        "ended_at_once": ended_at_once,
+        "ended_at_once_share": share(ended_at_once),
+        "by_answer": {kind: counts for kind, counts in by_answer.items() if counts["chosen"]},
     }
