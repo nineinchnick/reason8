@@ -21,6 +21,11 @@ Built (--state): the state file comes from playing the replay again with
   "in_order" without "matches" means the opening was followed but not finished
   before the state file ends.
 
+Ended (--infolog): an opening that no longer applied was ended before its last
+  step (``opening.as``, EndOpening), and BARb took over. The log says when,
+  why (`reason`) and how many commander steps and factory units were done by
+  then; only those are compared in the ways above.
+
 Log (--infolog): whether the AI loaded, which version and scripts, and script
   errors. An AI that fails to load or compile does not stop the game: its team
   stands still. With our BARb library (`reason8 bot build`), also the command
@@ -225,6 +230,19 @@ def ordered_side(replay: Replay, team: int) -> str | None:
     return None
 
 
+def played_part(opening: dict, ended: Mapping | None) -> dict:
+    """The part of `opening` the AI played: all of it, or when the opening was ended early
+    (`ended`, from the log), the commander steps and factory units done by then."""
+    if not ended:
+        return opening
+    steps, units = ended["commander_steps_done"], ended["factory_units_done"]
+    return {
+        **opening,
+        "commander": opening.get("commander", [])[:steps],
+        "factories": {name: made[:units] for name, made in opening.get("factories", {}).items()},
+    }
+
+
 def check_replay(
     replay: Replay,
     openings: dict,
@@ -233,11 +251,13 @@ def check_replay(
     variants: Mapping[int, int] | None = None,
     positions: Mapping[int, str | None] | None = None,
     sides: Mapping[int, str | None] | None = None,
+    ended: Mapping[int, Mapping | None] | None = None,
 ) -> list[dict]:
     """One result per team that the AI played. `variants`, `positions` and `sides` are the
     opening, position and side each team chose, from the engine log (`check_infolog`);
     without them, the first opening of the position nearest to its start, for the side in
-    the replay.
+    the replay. `ended` says, per team, when its opening was ended early and how much of it
+    was done (`check_infolog`); only that part is compared.
 
     A lobby that leaves an AI's faction on random writes ``Random`` into the replay, and the
     game picks the side at the start. The side the AI logged is then used, or else the side
@@ -269,6 +289,9 @@ def check_replay(
             continue
         if opening.get("position"):
             result["position"] = opening["position"]
+        if team_ended := (ended or {}).get(ai["teamId"]):
+            result["ended"] = dict(team_ended)
+            opening = played_part(opening, team_ended)
         expected_commander, factory_name, expected_factory = expected_builds(opening, tasks)
         result["expected"] = {
             "commander": expected_commander,
@@ -288,6 +311,10 @@ def check_replay(
 OPENING_LINE = re.compile(r"team (\d+): (.*)")
 CHOSEN = re.compile(r"position (\S+) .*?(?:, opening (\d+) of \d+)?, (\d+) commander steps")
 LOGGED_SIDE = re.compile(r"side '([^']*)'")
+ENDED = re.compile(
+    r"opening ended at frame (\d+), (\w+): (.*); commander steps done (\d+) of \d+, "
+    r"factory units done (\d+) of \d+"
+)
 
 
 def count_opening_line(teams: dict[int, dict], message: str) -> None:
@@ -306,6 +333,7 @@ def count_opening_line(teams: dict[int, dict], message: str) -> None:
             "steps_skipped": 0,
             "factory_units_done": 0,
             "factory_units_skipped": 0,
+            "ended": None,
         },
     )
     text = match.group(2)
@@ -322,6 +350,14 @@ def count_opening_line(teams: dict[int, dict], message: str) -> None:
         team["factory_units_done"] += 1
     elif text.startswith("factory unit ") and text.endswith(": skipped"):
         team["factory_units_skipped"] += 1
+    elif ended := ENDED.match(text):
+        team["ended"] = {
+            "frame": int(ended.group(1)),
+            "reason": ended.group(2),
+            "detail": ended.group(3),
+            "commander_steps_done": int(ended.group(4)),
+            "factory_units_done": int(ended.group(5)),
+        }
 
 
 def check_infolog(infolog: Path, ai_short_name: str) -> dict:
@@ -394,8 +430,9 @@ def run(args: argparse.Namespace) -> int:
     variants = {team: counts["variant"] for team, counts in chosen.items()}
     positions = {team: counts["position"] for team, counts in chosen.items()}
     sides = {team: counts["side"] for team, counts in chosen.items()}
+    ended = {team: counts["ended"] for team, counts in chosen.items()}
     teams = check_replay(
-        Replay(document), openings, args.ai, state_records, variants, positions, sides
+        Replay(document), openings, args.ai, state_records, variants, positions, sides, ended
     )
     result: dict = {"teams": teams}
     ok = bool(teams) and all(team["matches"] for team in teams)

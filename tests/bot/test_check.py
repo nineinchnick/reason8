@@ -172,10 +172,58 @@ def test_check_infolog_counts_per_team(tmp_path):
         "steps_skipped": 1,
         "factory_units_done": 1,
         "factory_units_skipped": 1,
+        "ended": None,
     }
     assert teams[5]["position"] is None
     assert teams[6]["position"] == "P2" and teams[6]["variant"] == 2
     assert teams[6]["commander_steps"] == 4
+
+
+def test_check_infolog_opening_ended(tmp_path):
+    lines = [
+        "team 2: side 'armada', map 'M', start 1 2: position P5 (start 1 2), opening 4 of 5, "
+        "30 commander steps, 1 factories",
+        "team 2: step 15 armnanotc: task queued, frame 9342",
+        "team 2: opening ended at frame 12673, step: step 15 armnanotc not finished 111 s "
+        "after it was queued; commander steps done 14 of 30, factory units done 31 of 36; "
+        "BARb takes over",
+    ]
+    log = write_log(tmp_path, [f"Skirmish AI <Reason8-0.1>: Reason8 opening: {x}" for x in lines])
+    teams = check.check_infolog(log, "Reason8")["opening_by_team"]
+    assert teams[2]["ended"] == {
+        "frame": 12673,
+        "reason": "step",
+        "detail": "step 15 armnanotc not finished 111 s after it was queued",
+        "commander_steps_done": 14,
+        "factory_units_done": 31,
+    }
+
+
+def test_check_infolog_opening_not_ended(tmp_path):
+    lines = ["team 3: commander steps done at frame 2768, BARb takes over"]
+    log = write_log(tmp_path, [f"Skirmish AI <Reason8-0.1>: Reason8 opening: {x}" for x in lines])
+    assert check.check_infolog(log, "Reason8")["opening_by_team"][3]["ended"] is None
+
+
+def test_played_part_of_an_ended_opening():
+    ended = {"commander_steps_done": 5, "factory_units_done": 2}
+    played = check.played_part(ARMADA, ended)
+    assert played["commander"] == ARMADA["commander"]
+    assert played["factories"]["armlab"] == ARMADA["factories"]["armlab"][:2]
+    assert check.played_part(ARMADA, None) is ARMADA
+
+
+def test_check_replay_compares_what_was_played_before_the_opening_ended():
+    openings = {"tasks": TASKS, "openings": [ARMADA]}
+    replay = LobbyReplay(armada_game(["armck", "armpw"]))  # not the opening's factory units
+    ended = {"frame": 1500, "reason": "step", "detail": "...", "commander_steps_done": 3}
+    ended |= {"factory_units_done": 0}
+    (team,) = check.check_replay(replay, openings, "Reason8", sides={0: "armada"}, ended={0: ended})
+    assert team["matches"] and team["ended"]["reason"] == "step"
+    assert team["expected"]["commander"] == ["armwin", "armwin", "armmex"]
+    assert team["expected"]["factory_name"] is None
+    (full,) = check.check_replay(replay, openings, "Reason8", sides={0: "armada"})
+    assert not full["matches"] and "ended" not in full
 
 
 def test_check_infolog_compile_error(tmp_path):
