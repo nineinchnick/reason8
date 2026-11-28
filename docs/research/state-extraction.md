@@ -28,12 +28,17 @@ learned. [Section 7](#7-go--no-go-for-using-state-in-v2) has the budget.
 
 ## How it works
 
-```
-replay.sdfz
-  └─► spring-headless (same engine, game version and map as recorded)
-        └─ widget: reason8_state_export.lua
-           (spectator: sees everything, gives no orders)
-              └─► reason8_state.jsonl (one line per snapshot or event)
+```mermaid
+flowchart LR
+    replay[("replay (.sdfz)")]
+    engine["spring-headless<br/>engine, game version and<br/>map of the recording"]
+    widget["reason8_state_export.lua<br/>spectator: sees everything,<br/>gives no orders"]
+    jsonl[("state file (.jsonl.gz)<br/>one line per snapshot<br/>or event")]
+    tables[("Parquet tables<br/>next to it")]
+    replay --> engine
+    engine -- "units, resources, events" --> widget
+    widget --> jsonl
+    jsonl -- "reason8 headless tables" --> tables
 ```
 
 The idea comes from Apex (`apexearth/bar-ai`: `tools/replay_extract.py` and
