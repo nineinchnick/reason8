@@ -48,7 +48,8 @@ task, the commands in order and what each one talks to.
 
 `download`
 : Download the match dumps and the replays of the training slice, politely
-  (`--limit N --since YYYY-MM-DD --until YYYY-MM-DD`, `--dry-run`).
+  (`--limit N --since YYYY-MM-DD --until YYYY-MM-DD`, `--dry-run`;
+  [workflow](docs/reference/workflows.md#getting-replays-and-match-data)).
 
 `sync push|pull [replays|tables|matches]`
 : Copy the data directory to or from the private S3 bucket
@@ -58,10 +59,14 @@ task, the commands in order and what each one talks to.
 `parse [paths] --jobs N --out DIR --since D --until D --force`
 : Parse replays into the Parquet tables (commands, selections, events, chat,
   map drawings, start picks, shares, statistics, players, games), the replays
-  not parsed yet or all of them.
+  not parsed yet or all of them
+  ([workflow](docs/reference/workflows.md#parsing-replays-into-tables)).
 
 `header REPLAY`
 : Print which engine, game version and map a replay needs.
+
+`widgets`
+: Read the user widgets each player had installed from the replays.
 
 `make-fixture REPLAY DEST`
 : Make the anonymised test fixture from a parsed replay in the tables.
@@ -70,9 +75,12 @@ task, the commands in order and what each one talks to.
 : Fetch BAR's pinned map list; measure how far real starts are from the
   recommended start positions.
 
-`headless setup|run|batch|state`
+`headless setup|run|batch|list|state|tables`
 : Fetch an engine, game and map; run a game or play back a replay headlessly;
-  play many replays and keep their state; summarise a state file.
+  play many replays and keep their state; write a batch's replay list from a
+  sample, in parts for several machines; summarise a state file; convert state
+  files to Parquet tables
+  ([workflow](docs/reference/workflows.md#re-simulating-replays-for-game-state)).
 
 `contact`
 : Measure first contact in re-simulated replays (`--report` prints the
@@ -80,18 +88,39 @@ task, the commands in order and what each one talks to.
 
 `dataset`
 : Build the opening dataset from the tables of the parsed replays (`--stats`
-  prints the tables).
+  prints the tables;
+  [workflow](docs/reference/workflows.md#building-the-opening-dataset)).
 
 `baseline`
 : Fit, score and save the counting baselines for the next build.
 
-`bot build`, `bot check`
-: Build the Reason8 AI from BARb and `ai/Reason8`; check from a replay that it
-  played its opening.
+`context sample|build|check|measure`
+: Draw the games the decision table is built from; build it from the orders of
+  re-simulated games and their state; check the join; measure what the state
+  adds
+  ([workflow](docs/reference/workflows.md#building-the-decision-table-and-measuring-models-on-it)).
 
-`analysis opening-shift`, `analysis map-meta`, `analysis apm`
+`bot export`, `bot export-next-order`, `bot build`
+: Export the model's openings, and what the bot needs when the model decides
+  builders' next orders, into `ai/Reason8`; build the Reason8 AI from BARb and
+  `ai/Reason8`
+  ([workflow](docs/reference/workflows.md#exporting-for-the-bot-and-building-it)).
+
+`bot game`, `bot check`
+: Write the start script of an 8v8 AI game; check from a replay and its log
+  what the AI played
+  ([workflow](docs/reference/workflows.md#running-a-headless-game-and-checking-it)).
+
+`eval games|report|openings`
+: Play paired 8v8 games against stock BARb; compare their economy; tell the
+  bot's openings from human ones
+  ([workflow](docs/reference/workflows.md#paired-evaluation-games)).
+
+`analysis opening-shift|map-meta|apm|reactions|play-quality`
 : The measurements behind the research on balance patches, on the opening meta
-  of each start position and on how many actions per minute people take.
+  of each start position, on how many actions per minute people take, on how
+  long they take to give an idle unit new orders and on scores of how well a
+  player played the opening.
 
 ## Data storage
 
