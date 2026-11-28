@@ -23,33 +23,22 @@ measurements.
 
 ## Summary
 
-- **Sample:** every parsed game of the slice: 42,930 games (all but three of
-  them 8v8), 686,838 player-games, 18.1 million whole player-minutes.
-- **Actions are counted as BAR counts them** (one per frame, and the 7-frame
-  rule per unit), so a dragged line of buildings or a held right button is one
-  action. `clicked` counts what the player clicked, `all` adds the commands
-  sent by the player's widgets and is close to the APM BAR shows in game.
-- **A typical player clicks 13 actions a minute** (median of all
-  player-minutes; quartiles 7 and 22, p90 34, p99 62). With the widgets it is
-  36 (quartiles 22 and 56, p90 80, p99 159).
-- **Over the game,** clicking peaks between minutes 2 and 10 (median 17, p90
-  40 to 42) and slows to 10 after minute 30, while widget commands keep
-  growing with the army: `all` goes from 18 in the first two minutes to 39 at
-  minutes 5 to 10, and stays there with a long tail late in the game (p99 257
-  after minute 30).
-- **Skill doubles the rate.** Median `clicked` per minute goes from 9 below
-  skill 10 to 21 at 40 and up; `all` from 22 to 55. Averaged over a game,
-  `clicked` is 11, 13, 16, 20 and 24 per minute in the five skill bands, and
-  `all` 25, 31, 40, 48 and 56.
-- **Short bursts hardly grow with skill.** The most `clicked` actions a player
-  takes in any 10 seconds of a game has a median of 14 to 17 and a p90 of 22
-  to 23 in every band; for `all` the median is 20 to 29 and the p90 35 to 50,
-  and in any second a median of 6 to 7 and a p90 of 9 to 11. Better players
-  are busier all the time, not much faster at the peak.
-- **Spam is much of the raw clicking.** Without the 7-frame rule the median
-  player-minute has 17 clicks instead of 13, and the p90 68 instead of 34. At
-  the peak a player clicks 8 times in a second (median of the game's maximum),
-  24 at p99.
+People act at a slow, steady rate: a typical player takes 13 actions a minute
+that they clicked themselves, and 36 once the commands their widgets send are
+added (close to the APM BAR shows in game). Better players are busier, not
+faster at the peak: skill doubles the rate per minute (averaged over a game,
+11 to 24 clicked actions a minute from the lowest band to the highest, 25 to
+56 with widgets), while the most clicked actions in any 10 seconds has a p90
+of 22 to 23 in every band. Clicking peaks between minutes 2 and 10 and slows
+late in the game; widget commands keep growing with the army.
+
+An action is counted the way BAR counts it, so a dragged line of buildings or
+a held right button is one action. Counting every click instead doubles the
+p90 (68 a minute instead of 34). The counts are not yet checked against BAR's
+own in-game number.
+
+Used in [ADR 0008](../decisions/0008-play-under-human-like-limits.md): the
+bot's action budget per skill band is rounded from these measurements.
 
 ## What counts as an action
 
