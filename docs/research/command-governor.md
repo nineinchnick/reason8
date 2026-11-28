@@ -21,18 +21,23 @@ than a player's: in games played in real time a counted action of the bot held
 4.8 kinds of order and 9.9 different orders on average, where 99.4% of a
 player's clicked actions give one kind of order (89.6% with their widgets). So
 ADR 0008 now counts each kind of order in a frame as one action, and the
-governor counts that way. In a first game under that rule the budget still
-holds and nothing is lost, but the bot's commands wait longer: 82% of them are
-held (three quarters before), up to 11.5 s (2 s before), and a third are
-replaced by a newer order while they wait. What that costs in play is not yet
-measured.
+governor counts that way. Under that rule the budget still holds and nothing
+is lost, but the bot's commands wait longer: in paired games a third of them
+are replaced by a newer order while they wait (a tenth before), and the
+longest wait of a team is 8.6 s at the median (1.6 s before). At 4:00, the
+time ADR 0003 measures, this costs nothing: the bot builds 100.2%
+(97.6%–102.6%) of the metal value it built before. Past the opening it falls
+behind its earlier self: 96% of the built metal at 7:00 and 94% at 9:00, and
+about 10% fewer units, in 6 seeds whose intervals only just exclude no
+difference; 30 seeds would settle it.
 
 What to use from here: the governor's log as the measure of the budget (a
 headless replay records the bot's commands late and overcounts its actions,
 now by 12 to 25%), the evidence that one action is one kind of order
 ([What one action holds](#what-one-action-holds)), and the holding numbers of
-[Under the count by kind of order](#under-the-count-by-kind-of-order) as the
-baseline for the paired games that measure the effect on play.
+[Under the count by kind of order](#under-the-count-by-kind-of-order), and the
+paired games of [Effect on play](#effect-on-play) as the first sign that the
+count by kind costs economy after the opening.
 
 ## Method
 
@@ -462,11 +467,83 @@ eight `BARbLimited`, both on this library.
   while the headless replay records them frames after the unit's first
   command, which is all the replay can take for the frame it was finished.
 
+## Effect on play
+
+Paired games as in [`evaluation.md`](../reference/evaluation.md): Reason8
+against stock BARb on Supreme Isthmus, seeds 1 to 6, each played twice with
+the sides swapped (12 games and 96 pairs of teams per version), 10 game
+minutes, the bot playing its opening table (not the model's orders). *Before*
+is Reason8 from the commit before the count by kind, *after* the commit that
+completed it; the two differ only in the library's counting and bands, and the
+same stock BARb plays the other side. Each version's share of BARb is the
+report of `reason8 eval report`; *after / before* divides the two shares seed
+by seed, with a 95% interval from resampling the seeds.
+
+| measure at 4:00 | before              | after               | after / before        |
+| --------------- | ------------------- | ------------------- | --------------------- |
+| metal income    | 83.4% (77.5%–87.9%) | 84.8% (81.4%–88.0%) | 101.7% (96.4%–107.5%) |
+| energy income   | 77.9% (72.0%–85.1%) | 77.4% (72.0%–83.9%) | 99.4% (88.0%–114.3%)  |
+| built metal     | 83.3% (82.1%–85.1%) | 83.5% (81.8%–85.1%) | 100.2% (97.6%–102.6%) |
+| built energy    | 81.5% (79.5%–83.4%) | 80.5% (78.9%–82.6%) | 98.8% (95.1%–103.4%)  |
+| units           | 66.5% (63.2%–71.0%) | 64.3% (62.0%–66.6%) | 96.7% (88.2%–105.5%)  |
+
+Built metal and units over the game, after / before:
+
+| at                 | built metal           | units                |
+| ------------------ | --------------------- | -------------------- |
+| 4:00               | 100.2% (97.6%–102.6%) | 96.7% (88.2%–105.5%) |
+| 5:00               | 98.6% (95.0%–102.3%)  | 95.2% (86.0%–106.4%) |
+| 7:00               | 96.1% (92.9%–99.1%)   | 90.4% (82.2%–99.8%)  |
+| 9:00               | 93.9% (88.4%–99.7%)   | 87.7% (77.9%–99.8%)  |
+| each first contact | 95.5% (90.9%–100.7%)  | 87.9% (79.6%–96.7%)  |
+
+Contact came at a median of 290 s before and 291 s after (BARb's teams: 218 s
+and 234 s), and 95.8% and 96.9% of the bot's teams met the enemy before the
+end.
+
+The governors' logs, per version:
+
+| 96 team-games                            | before            | after               |
+| ---------------------------------------- | ----------------- | ------------------- |
+| commands held at least a frame           | 80%               | 84%                 |
+| replaced while held                      | 10%               | 37%                 |
+| longest wait, median team                | 47 frames (1.6 s) | 257 frames (8.6 s)  |
+| longest wait, most                       | 59 frames (2.0 s) | 356 frames (11.9 s) |
+| actions a minute, median team            | 36.5              | 37.9                |
+| most in any 1 s, 10 s, later 60 s, 5 min | 9, 33, 89, 249    | 11, 33, 89, 249     |
+| windows exceeded, commands dropped       | none, 0           | none, 0             |
+
+The caps were 11, 50, 90 and 250 before and 14, 60, 90 and 250 after; the most
+in a minute of the first two was 39 in both (cap 40).
+
+- **Nothing changes at 4:00.** The measure ADR 0003 judges by, built metal at
+  4:00, is 100.2% (97.6%–102.6%) of what the bot built before: a loss of more
+  than 2.4% there is ruled out.
+- **The bot falls behind after the opening.** From 5:00 on its built metal,
+  built energy and units are below the old version's at every time, and the
+  gap grows: built metal 96.1% (92.9%–99.1%) of before at 7:00 and 93.9%
+  (88.4%–99.7%) at 9:00, units 90% and 88%, and at each team's first contact
+  95.5% of the built metal and 87.9% (79.6%–96.7%) of the units. The likely
+  cause is the holding: BARb gives a growing army hundreds of commands a
+  minute, each kind now needs an action of its own, and 37% of the bot's
+  commands are replaced by a newer order before they go (10% before).
+- **What 6 seeds can show.** The A/A test needs 3 seeds to find a 10%
+  difference in built metal and 11 in units and energy income, and its 30
+  seeds narrow built metal to about ±2%
+  ([`evaluation.md`](../reference/evaluation.md#the-aa-test)). Here built
+  metal's after / before interval is about ±2.5% at 4:00 and ±5.5% at 9:00, so
+  6 seeds find a difference of about 5% or more in built metal and only far
+  larger ones in units and energy income. Each version met BARb in its own
+  games, so the ratio carries the noise of both runs. The intervals at 7:00
+  and 9:00 only just exclude 100%, and five measures were looked at at five
+  times, so one of them could do so by chance; the steady fall over the game
+  makes chance less likely, and 30 seeds would settle it.
+
 ## Not measured
 
-- What holding longer under the count by kind of order costs in play: that
-  needs paired games, Reason8 under the new count against the same AI under
-  the old one.
+- Whether the bot's fall behind its earlier self after the opening holds over
+  30 seeds, and what drives it: the longer waits or the orders replaced while
+  held.
 - Whether BARb's own timeouts on tasks (a builder whose order is held for two
   seconds) change what it does later; the economy measures of
   [`evaluation.md`](../reference/evaluation.md#our-barb-library) cover the
