@@ -8,6 +8,7 @@
 #include "ExternalAI/Interface/SSkirmishAICallback.h"
 #include "angelscript/include/angelscript.h"
 
+#include <cstring>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -93,6 +94,14 @@ public:
 	}
 
 	int FirstContactFrame() { return contacts[skirmishAIId].frame; }
+
+	/* Whether idle units wait a reaction delay: the AI option reaction_delays, on unless
+	 * it says "off". */
+	bool ReactionDelays()
+	{
+		const char* value = Engine()->SkirmishAI_OptionValues_getValueByKey(skirmishAIId, "reaction_delays");
+		return value == nullptr || std::strcmp(value, "off") != 0;
+	}
 
 	std::string FirstContact() { return contacts[skirmishAIId].hit; }
 
@@ -188,6 +197,9 @@ void RegisterLiveState(asIScriptEngine* engine, int skirmishAIId)
 	}
 	if (result >= 0) {
 		result = engine->RegisterGlobalFunction("string Reason8FirstContact()", asMETHOD(LiveState, FirstContact), asCALL_THISCALL_ASGLOBAL, object);
+	}
+	if (result >= 0) {
+		result = engine->RegisterGlobalFunction("bool Reason8ReactionDelays()", asMETHOD(LiveState, ReactionDelays), asCALL_THISCALL_ASGLOBAL, object);
 	}
 	if (result < 0) {
 		throw std::runtime_error("Reason8: cannot register the live state for the scripts");

@@ -322,6 +322,7 @@ def live_state_script(available: bool) -> str:
             "string Standing() { return Reason8Standing(); }\n"
             "int FirstContactFrame() { return Reason8FirstContactFrame(); }\n"
             "string FirstContact() { return Reason8FirstContact(); }\n"
+            "bool ReactionDelays() { return Reason8ReactionDelays(); }\n"
             "bool ModelOrders() { return Reason8ModelOrders(); }\n"
             "string NextOrder(CCircuitUnit@ unit) { return Reason8NextOrder(unit); }\n"
             "void OrderFailed(CCircuitUnit@ unit, const string& in order,\n"
@@ -352,6 +353,7 @@ def live_state_script(available: bool) -> str:
             'string Standing() { return ""; }\n'
             "int FirstContactFrame() { return -1; }  // never: no contact without our library\n"
             'string FirstContact() { return ""; }\n'
+            "bool ReactionDelays() { return true; }  // the option is read by our library\n"
             "bool ModelOrders() { return false; }  // the model decides only with our library\n"
             'string NextOrder(CCircuitUnit@) { return ""; }\n'
             "void OrderFailed(CCircuitUnit@, const string& in, const string& in) {}\n"

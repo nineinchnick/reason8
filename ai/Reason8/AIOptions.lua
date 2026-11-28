@@ -97,6 +97,25 @@ local options = {
 		},
 	},
 	{
+		key = 'reaction_delays',
+		name = 'Reaction delays',
+		desc = 'Whether an idle factory or builder waits as long as a player takes to notice it.\nkey: reaction_delays',
+		type = 'list',
+		def = 'on',
+		items = {
+			{
+				key = 'on',
+				name = 'On',
+				desc = 'Idle units wait a delay measured from players (skill 30-40)',
+			},
+			{
+				key = 'off',
+				name = 'Off',
+				desc = 'Idle units get their next order at once',
+			},
+		},
+	},
+	{
 		key = 'builder_orders',
 		name = 'Builder orders',
 		desc = 'Who decides the builders\' orders during the opening.\nkey: builder_orders',
