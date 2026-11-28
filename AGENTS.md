@@ -50,6 +50,10 @@ Keep this file as `AGENTS.md` with no `CLAUDE.md`, `.claude/CLAUDE.md` or
   decision record in `docs/decisions/` (see its README). When a decision
   changes, rewrite its record so it states what holds now. Research docs keep
   the evidence and link to the record instead of restating the decision.
+- Start every research doc with a concise summary: first the verdict in plain
+  words, including when the result is negative or the numbers are low, then
+  what can be used from it. A reader should know the conclusion and what to do
+  with it without reading the rest.
 
 ## Formatting and checks
 
