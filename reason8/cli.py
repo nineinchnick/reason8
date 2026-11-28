@@ -7,7 +7,7 @@ import sys
 from types import ModuleType
 
 from reason8.analysis import apm, map_meta, opening_shift, play_quality, reactions
-from reason8.bot import build, check, export, game
+from reason8.bot import build, check, export, game, next_order
 from reason8.context import check as context_check
 from reason8.context import measure as context_measure
 from reason8.context import table as context_table
@@ -70,6 +70,11 @@ COMMANDS: list[Command | tuple[str, str, list[Command]]] = [
         [
             ("build", build, "build the AI folder from BARb and ai/Reason8"),
             ("export", export, "export the model's openings for the AI"),
+            (
+                "export-next-order",
+                next_order,
+                "export what the bot uses when the model decides orders",
+            ),
             ("game", game, "write the start script of an 8v8 AI game"),
             ("check", check, "check from a replay that the AI played its opening"),
         ],
