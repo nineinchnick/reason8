@@ -12,10 +12,10 @@ plays them from top to bottom whatever happens in the game.
 What we measured and built since:
 
 - The state of the game predicts the next order better than the order history
-  alone: the team's economy, its own units and the game time add one to three
-  points of top-1 each over trees on the history, and trees trained on a few
-  hundred games match the n-gram trained on the whole dataset
-  ([`context.md`](../research/context.md), preliminary).
+  alone. On held-out games of the 2,996 re-simulated ones, trees on the order
+  history get the next order right 56.0% of the time, 60.5% when told which
+  builder the order is for, and 63.8% with the inputs of this record
+  ([`results.md`](../results.md), [`context.md`](../research/context.md)).
 - Our build of BARb's library gives the scripts the live state and holds the
   bot to the action budget ([ADR 0008](0008-play-under-human-like-limits.md)),
   so a model can be consulted during the game.
