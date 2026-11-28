@@ -92,9 +92,10 @@ def test_held_move_and_dragged_line_are_one_action():
 
 def test_widget_and_clicked_commands_are_counted_apart():
     events = [
+        widget(1, 0, 100, 101, 200),  # the units' first commands: free
         select(5, 0, 100),
         click(10, 0),
-        widget(10, 0, 100, 101),  # same frame as the click: one action in `all`
+        widget(10, 0, 100, 101),  # same frame and kind as the click: one action in `all`
         widget(30, 0, 200),
         {**widget(40, 0, 300), "ai": 3},  # a bot's command is not the player's
     ]
@@ -102,6 +103,22 @@ def test_widget_and_clicked_commands_are_counted_apart():
     assert actions[0]["clicked"] == [10]
     assert actions[0]["widget"] == [10, 30]
     assert actions[0]["all"] == [10, 30]
+
+
+def test_a_new_units_first_widget_commands_are_free():
+    events = [
+        widget(100, 0, 500),  # a new unit's settings
+        {**widget(100, 0, 500), "cmd": "FIRE_STATE", "cmd_id": 45},
+        widget(104, 0, 500),  # within 7 frames of them
+        widget(120, 0, 500),
+        select(200, 0, 600),
+        click(200, 0),  # a click to a unit with no command yet still counts
+        widget(200, 0, 600, 601),  # the same frame as the unit's first command: free
+    ]
+    actions = player_actions(make_replay(events))
+    assert actions[0]["widget"] == [120]
+    assert actions[0]["clicked"] == [200]
+    assert actions[0]["all"] == [120, 200]
 
 
 def test_most_in_window():
@@ -211,6 +228,7 @@ def test_each_kind_of_order_in_a_frame_is_an_action():
 def test_player_actions_count_kinds():
     move = {"cmd": "MOVE", "cmd_id": 10}
     events = [
+        widget(1, 0, 100, 101),  # the units' first commands: free
         select(0, 0, 100, 101),
         {**click(50, 0), **move},
         {**click(50, 0), **move, "opts": ["shift"]},  # a queued move in the same frame

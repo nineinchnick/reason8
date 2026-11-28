@@ -400,17 +400,18 @@ The command governor
   On every frame, before the AI's own commands, it sends what fits, oldest
   first: once an action of one kind of order fits, every held command of that
   kind goes in the same frame, which by the counting rule is the same action;
-  each other kind needs an action of its own. A unit with a held command has
-  its later commands held behind it. A new order to a mobile unit given
-  without shift replaces the held orders to that unit, as it would replace
-  them a moment after they arrived (a factory's orders add to its queue, so
-  they never replace each other). Past 1,024 held commands the oldest is
-  dropped and counted. Spending is paced: each window also has a bucket of a
-  quarter of its cap that refills at the rate that spends the rest evenly, so
-  a busy AI acts every second or two instead of spending a window's cap at
-  once and then waiting. The logic is in `Budget.h`, which knows nothing of
-  the engine; `test_budget.cpp` tests it and `build.sh` runs the test with the
-  same compiler before every build.
+  each other kind needs an action of its own. Commands to a unit in the frame
+  it was finished (the settings BARb gives a new unit) take no action, as in
+  BAR's own APM gadget. A unit with a held command has its later commands held
+  behind it. A new order to a mobile unit given without shift replaces the
+  held orders to that unit, as it would replace them a moment after they
+  arrived (a factory's orders add to its queue, so they never replace each
+  other). Past 1,024 held commands the oldest is dropped and counted. Spending
+  is paced: each window also has a bucket of a quarter of its cap that refills
+  at the rate that spends the rest evenly, so a busy AI acts every second or
+  two instead of spending a window's cap at once and then waiting. The logic
+  is in `Budget.h`, which knows nothing of the engine; `test_budget.cpp` tests
+  it and `build.sh` runs the test with the same compiler before every build.
 
 Its log
 
@@ -471,9 +472,9 @@ The next order
 Our changes to BARb's own files
 
 : A few lines in `AIExport.cpp` (install and release the governor, call it on
-  every update; pass each unit-damaged event to the live state) and four in
-  `InitScript.cpp` (register the live state and the next order), as patches in
-  `ai/native`; the rest is new files.
+  every update and unit-finished event; pass each unit-damaged event to the
+  live state) and four in `InitScript.cpp` (register the live state and the
+  next order), as patches in `ai/native`; the rest is new files.
 
 What it measured is in
 [`command-governor.md`](../research/command-governor.md) and
