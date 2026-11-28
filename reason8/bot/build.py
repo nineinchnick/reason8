@@ -211,6 +211,8 @@ def live_state_script(available: bool) -> str:
             "{ return Reason8Resource(resource, what); }\n"
             "int UnitCount(const string& in unitName) { return Reason8UnitCount(unitName); }\n"
             "string Standing() { return Reason8Standing(); }\n"
+            "int FirstContactFrame() { return Reason8FirstContactFrame(); }\n"
+            "string FirstContact() { return Reason8FirstContact(); }\n"
         )
     else:
         body = (
@@ -219,6 +221,8 @@ def live_state_script(available: bool) -> str:
             "float Resource(const string& in, const string& in) { return -1.f; }\n"
             "int UnitCount(const string& in) { return -1; }\n"
             'string Standing() { return ""; }\n'
+            "int FirstContactFrame() { return -1; }  // never: no contact without our library\n"
+            'string FirstContact() { return ""; }\n'
         )
     return header + "namespace Reason8 {\n\n" + body + "\n}  // namespace Reason8\n"
 

@@ -4,10 +4,12 @@
 
 #include "Governor.h"
 
+#include "ExternalAI/Interface/AISEvents.h"
 #include "ExternalAI/Interface/SSkirmishAICallback.h"
 #include "angelscript/include/angelscript.h"
 
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <memory>
 #include <string>
@@ -20,6 +22,29 @@ namespace {
 
 /* Most units a team can have, for the buffer of getTeamUnits. */
 constexpr int MAX_TEAM_UNITS = 10000;
+
+/* Units built to look, whose hits are not contact: the same list as SCOUTS in
+ * reason8/openings/contact.py, which defines first contact (ADR 0012). */
+const std::set<std::string> SCOUTS = {
+	"armfav", "armflea", "armpeep", "corfav", "corfink", "legfig", "legnavyscout", "legscout",
+};
+
+const SSkirmishAICallback* Callback(int skirmishAIId) { return EngineCallback(skirmishAIId); }
+
+std::string UnitName(int skirmishAIId, int unitId)
+{
+	const SSkirmishAICallback* engine = Callback(skirmishAIId);
+	const int defId = engine->Unit_getDef(skirmishAIId, unitId);
+	const char* name = defId < 0 ? nullptr : engine->UnitDef_getName(skirmishAIId, defId);
+	return name == nullptr ? "" : name;
+}
+
+/* The first contact of each AI's team: its frame (-1: none yet) and what was hit by what. */
+struct Contact {
+	int frame = -1;
+	std::string hit;
+};
+std::unordered_map<int, Contact> contacts;
 
 class LiveState {
 public:
@@ -67,6 +92,10 @@ public:
 		return found == standing.end() ? 0 : found->second;
 	}
 
+	int FirstContactFrame() { return contacts[skirmishAIId].frame; }
+
+	std::string FirstContact() { return contacts[skirmishAIId].hit; }
+
 	std::string Standing()
 	{
 		std::string text;
@@ -111,10 +140,38 @@ std::unordered_map<int, std::unique_ptr<LiveState>> states;
 
 }  // namespace
 
+void UnitDamaged(int skirmishAIId, const SUnitDamagedEvent* event)
+{
+	Contact& contact = contacts[skirmishAIId];
+	if (contact.frame >= 0) {
+		return;
+	}
+	const SSkirmishAICallback* engine = Callback(skirmishAIId);
+	std::string attacker = "unseen";
+	if (event->attacker >= 0) {
+		if (engine->Unit_getAllyTeam(skirmishAIId, event->attacker) == engine->Game_getMyAllyTeam(skirmishAIId)) {
+			return;  // our own or an ally's
+		}
+		attacker = UnitName(skirmishAIId, event->attacker);
+		if (attacker.empty()) {
+			attacker = "unseen";
+		}
+	} else if (event->weaponDefId < 0) {
+		return;  // no unit behind it
+	}
+	const std::string hit = UnitName(skirmishAIId, event->unit);
+	if (SCOUTS.count(hit) > 0) {
+		return;
+	}
+	contact.frame = engine->Game_getCurrentFrame(skirmishAIId);
+	contact.hit = hit + " by " + attacker;
+}
+
 void RegisterLiveState(asIScriptEngine* engine, int skirmishAIId)
 {
 	std::unique_ptr<LiveState>& state = states[skirmishAIId];
 	state = std::make_unique<LiveState>(skirmishAIId);
+	contacts[skirmishAIId] = Contact();
 	LiveState* object = state.get();
 	int result = engine->RegisterGlobalFunction("float Reason8CurrentWind()", asMETHOD(LiveState, CurrentWind), asCALL_THISCALL_ASGLOBAL, object);
 	if (result >= 0) {
@@ -125,6 +182,12 @@ void RegisterLiveState(asIScriptEngine* engine, int skirmishAIId)
 	}
 	if (result >= 0) {
 		result = engine->RegisterGlobalFunction("string Reason8Standing()", asMETHOD(LiveState, Standing), asCALL_THISCALL_ASGLOBAL, object);
+	}
+	if (result >= 0) {
+		result = engine->RegisterGlobalFunction("int Reason8FirstContactFrame()", asMETHOD(LiveState, FirstContactFrame), asCALL_THISCALL_ASGLOBAL, object);
+	}
+	if (result >= 0) {
+		result = engine->RegisterGlobalFunction("string Reason8FirstContact()", asMETHOD(LiveState, FirstContact), asCALL_THISCALL_ASGLOBAL, object);
 	}
 	if (result < 0) {
 		throw std::runtime_error("Reason8: cannot register the live state for the scripts");
