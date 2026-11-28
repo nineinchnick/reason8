@@ -43,8 +43,8 @@ struct Window {
 inline std::vector<Window> Band30To40()
 {
 	return {
-		{1 * FRAMES_PER_SECOND, 11, 0},
-		{10 * FRAMES_PER_SECOND, 50, 0},
+		{1 * FRAMES_PER_SECOND, 14, 0},
+		{10 * FRAMES_PER_SECOND, 60, 0},
 		{FRAMES_PER_MINUTE, 40, 2 * FRAMES_PER_MINUTE},
 		{FRAMES_PER_MINUTE, 90, 0},
 		{5 * FRAMES_PER_MINUTE, 250, 0},

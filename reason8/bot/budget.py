@@ -47,11 +47,11 @@ def band_windows(
 #: ADR 0008's table: any 1 s, any 10 s, any 60 s, any 60 s in the first 2 minutes, and the
 #: game average per minute, kept over any 5 minutes.
 BANDS = {
-    "below 10": band_windows(9, 35, 50, 25, 25),
-    "10-20": band_windows(10, 40, 65, 30, 30),
-    "20-30": band_windows(11, 50, 80, 35, 40),
-    "30-40": band_windows(11, 50, 90, 40, 50),
-    "40 and up": band_windows(11, 50, 100, 50, 55),
+    "below 10": band_windows(11, 40, 50, 25, 25),
+    "10-20": band_windows(12, 50, 65, 30, 30),
+    "20-30": band_windows(13, 60, 80, 35, 40),
+    "30-40": band_windows(14, 60, 90, 40, 50),
+    "40 and up": band_windows(14, 60, 100, 45, 55),
 }
 
 
