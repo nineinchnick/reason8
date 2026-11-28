@@ -780,7 +780,10 @@ Log
   logged. The share ended at once is read from the decisions alone, so it
   works for the logs of earlier builds too. A team whose orders the model
   decided is not compared with an opening; it passes when the model decided
-  some.
+  some. An AI built under another short name (`--short-name`) logs under that
+  name; one built before that logs as Reason8, and
+  `reason8 bot check --ai NAME` reads its lines for the teams the replay gives
+  it.
 
 ### The model's inputs
 

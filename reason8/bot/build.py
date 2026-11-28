@@ -379,14 +379,18 @@ def file_sha256(path: Path) -> str | None:
 
 
 def set_short_name(ai_info: str, short_name: str) -> str:
-    """AIInfo.lua with another short name."""
+    """AIInfo.lua with another short name, and the same human readable name: the engine
+    prefixes the AI's log lines with the name, so that `reason8 bot check` tells it apart
+    from Reason8 in the log of a game with both."""
     if not UNIT_NAME.match(short_name.lower()):
         raise SystemExit(f"bad short name {short_name!r}")
-    return re.sub(
-        r"(key\s*=\s*'shortName'\s*,\s*value\s*=\s*')[^']+'",
-        rf"\g<1>{short_name}'",
-        ai_info,
-    )
+    for key in ("shortName", "name"):
+        ai_info = re.sub(
+            rf"(key\s*=\s*'{key}'\s*,\s*value\s*=\s*')[^']+'",
+            rf"\g<1>{short_name}'",
+            ai_info,
+        )
+    return ai_info
 
 
 def assemble(

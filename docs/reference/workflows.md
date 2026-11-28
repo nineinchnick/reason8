@@ -357,7 +357,8 @@ uv run reason8 bot build --data-dir /mnt/c/<folder>/bar \
 `--limits-only` builds `BARbLimited`, stock BARb under Reason8's limits and
 without openings; `--library stock` keeps the engine's own library. To play
 the model without skill next to the one with it, build it under another short
-name: `--model builder_v1_no_skill --short-name Reason8NoSkill`.
+name: `--model builder_v1_no_skill --short-name Reason8NoSkill`, and check its
+games with `reason8 bot check --ai Reason8NoSkill`.
 
 ## Running a headless game and checking it
 

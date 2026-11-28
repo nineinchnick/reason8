@@ -354,6 +354,29 @@ def test_check_infolog_model_orders(tmp_path):
     assert result["opening_by_team"] == {}
 
 
+def test_check_infolog_of_an_ai_under_another_short_name(tmp_path):
+    lines = [
+        # built before the log carried the short name: logged as Reason8, one of two
+        # variants in the game
+        "Skirmish AI <Reason8-0.1>: Load script: /engine/Reason8NoSkill/0.1/script/hard/main.as",
+        "Skirmish AI <Reason8-0.1>: Reason8 next order: team 2: frame 25: armcom 1 commander: "
+        "model chose armmex 0.40; 1 of 9 possible of 9 at 10% or more: armmex 0.40",
+        "Skirmish AI <Reason8-0.1>: Reason8 next order: team 3: frame 25: armcom 5 commander: "
+        "model chose armwin 0.40; 1 of 9 possible of 9 at 10% or more: armwin 0.40",
+        # built since: logged under its short name
+        "Skirmish AI <Reason8NoSkill-0.1>: Reason8 next order: team 2: frame 900: armcom 1 "
+        "commander: model chose assist 0.40; 1 of 9 possible of 9 at 10% or more: assist 0.40",
+    ]
+    log = write_log(tmp_path, lines)
+    result = check.check_infolog(log, "Reason8NoSkill", {2})
+    assert result["scripts_loaded"] == ["/engine/Reason8NoSkill/0.1/script/hard/main.as"]
+    assert list(result["next_order_by_team"]) == [2]
+    assert result["next_order_by_team"][2]["idle_builders"] == 2
+    assert not result["errors"]
+    # without the teams of the replay, every Reason8 team's lines count
+    assert list(check.check_infolog(log, "Reason8NoSkill")["next_order_by_team"]) == [2, 3]
+
+
 def test_check_replay_of_a_team_whose_orders_the_model_decided():
     openings = {"tasks": TASKS, "openings": [ARMADA]}
     replay = LobbyReplay(armada_game(["armck", "armpw"]))  # not the opening

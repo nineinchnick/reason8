@@ -40,6 +40,10 @@ Model (--infolog): a team whose builders' next orders the model decided (the
   the model's orders ended. The team passes when the model decided orders for
   it.
 
+The AI is found in the replay by its short name (--ai), and in the log by its
+short name or, for an AI built under another short name before the log said
+so, as Reason8; then only the lines about its teams in the replay count.
+
 Log (--infolog): whether the AI loaded, which version and scripts, and script
   errors. An AI that fails to load or compile does not stop the game: its team
   stands still. With our BARb library (`reason8 bot build`), also the command
@@ -90,6 +94,12 @@ SCRIPT_ERRORS = (
 # What the engine logs when it cannot load the AI at all. The game still runs,
 # and the AI's team stands still.
 ENGINE_ERRORS = ("[FetchSkirmishAILibrary]", "[StoreSkirmishAILibInfo]")
+# The engine prefixes an AI's log lines with the `name` of its AIInfo.lua, not its short
+# name. `reason8 bot build --short-name` sets both; an AI built before it did logs as
+# Reason8 whatever its short name.
+LOGGED_NAME = "Reason8"
+# A line of one of our scripts or of our library about one team: "Reason8 ...: team N: ".
+TEAM_LINE = re.compile(r"Reason8 [a-z ]+: team (\d+): ")
 
 
 def expected_builds(opening: dict, tasks: dict) -> tuple[list[str], str | None, list[str]]:
@@ -384,9 +394,15 @@ def count_opening_line(teams: dict[int, dict], message: str) -> None:
         }
 
 
-def check_infolog(infolog: Path, ai_short_name: str) -> dict:
-    """Loaded version and scripts of the AI, and its errors, from the engine log."""
-    prefix = re.compile(rf"Skirmish AI <{re.escape(ai_short_name)}-([^>]*)>: (.*)")
+def check_infolog(infolog: Path, ai_short_name: str, teams_played: set[int] | None = None) -> dict:
+    """Loaded version and scripts of the AI, and its errors, from the engine log.
+
+    The AI's lines are those under its short name or, for an AI built under another short
+    name before its log said so, under `LOGGED_NAME`. With `teams_played` (the teams the
+    replay gives the AI) only the lines of our scripts and library about those teams are
+    counted, so that two variants in one game are told apart."""
+    names = sorted({ai_short_name, LOGGED_NAME})
+    prefix = re.compile(rf"Skirmish AI <({'|'.join(map(re.escape, names))})-([^>]*)>: (.*)")
     versions: set[str] = set()
     scripts: list[str] = []
     errors: list[str] = []
@@ -403,8 +419,15 @@ def check_infolog(infolog: Path, ai_short_name: str) -> dict:
             match = prefix.search(line)
             if not match:
                 continue
-            versions.add(match.group(1))
-            message = match.group(2).rstrip()
+            message = match.group(3).rstrip()
+            team_of_line = TEAM_LINE.match(message)
+            if (
+                teams_played is not None
+                and team_of_line
+                and int(team_of_line.group(1)) not in teams_played
+            ):
+                continue
+            versions.add(match.group(2))
             if message.startswith("Load script: "):
                 scripts.append(message.removeprefix("Load script: "))
             if message.startswith(("Reason8 governor:", "Reason8 library:")):
@@ -468,7 +491,8 @@ def run(args: argparse.Namespace) -> int:
     openings = json.loads(args.openings.read_text(encoding="utf-8"))
     document, _ = parse_replay(args.parser or default_parser(), args.replay)
     state_records = list(read_records(args.state)) if args.state else None
-    log = check_infolog(args.infolog, args.ai) if args.infolog else None
+    played = {ai["teamId"] for ai in Replay(document).ais if ai.get("shortName") == args.ai}
+    log = check_infolog(args.infolog, args.ai, played) if args.infolog else None
     chosen = (log or {}).get("opening_by_team", {})
     variants = {team: counts["variant"] for team, counts in chosen.items()}
     positions = {team: counts["position"] for team, counts in chosen.items()}
