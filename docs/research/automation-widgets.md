@@ -13,6 +13,24 @@ of `reason8/openings/dataset.py`.
 Replays of the slice as downloaded on 2026-11-24, `openings_v2` as built on
 the same day.
 
+## Summary
+
+Automation widgets are too rare to change the dataset: dropping their openings
+would not change any measured share. 1.2% of the openings come from players
+with a user widget that gives build orders, and 88% of those have one that
+only copies a constructor's queue to the constructors guarding it, which
+repeats the player's own orders. Widgets that decide what to build are about
+0.08% of the openings. A quarter of every player's orders come from BAR's
+built-in widgets anyway, and the replay can't tell those from user widgets.
+The flag is a lower bound (players can turn off the report, and widgets are
+known only by name), and the lobby option that forbids such widgets is not a
+reliable filter.
+
+Used in
+[ADR 0017](../decisions/0017-keep-openings-with-automation-widgets-flagged.md):
+these openings stay in the dataset with a flag, and evaluation reports them
+apart.
+
 ## Where the list comes from
 
 Since 2025-11-13 BAR ships an "Analytics - Widgets" widget
