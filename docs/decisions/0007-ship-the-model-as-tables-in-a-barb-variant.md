@@ -65,10 +65,20 @@ folder is built by `reason8 bot build` from our own build of BARb's library,
 the game's BARb scripts and configs for one profile, and the files in
 `ai/Reason8`.
 
-The model does not run inside the game. Its predictions are exported offline
-to a data file (`ai/Reason8/openings.json`), and the build turns that file
-into an AngelScript table that the hooks in BARb's builder and factory scripts
-play. When there is no opening, or it is over, BARb decides as before.
+The openings are not decided inside the game. Their model's predictions are
+exported offline to a data file (`ai/Reason8/openings.json`), and the build
+turns that file into an AngelScript table that the hooks in BARb's builder and
+factory scripts play. When there is no opening, or it is over, BARb decides as
+before.
+
+A model that decides from the state of the game is consulted inside it, by our
+library ([ADR 0019](0019-first-model-decides-each-builders-next-order.md)).
+With the AI option `builder_orders=model`, the bot decides the next order of
+every idle builder during the opening by consulting the model, instead of
+playing the opening table; the default, `opening`, plays the table. The tables
+these orders need (the usual order of metal spots, BARb's task for each
+structure, and the model's own data file) are exported offline and installed
+by the build in the same way.
 
 Every headless evaluation checks the engine log and the recorded replay with
 `reason8 bot check` before its result is used.
@@ -87,12 +97,16 @@ runs in the engine it was built for. Our changes are:
 - the live state for the scripts: the current wind, the team's stored metal
   and energy with storage, income and expense, and its finished units by name,
   read from the engine when a script asks, and the frame of the team's first
-  contact, kept from the engine's unit-damaged events.
+  contact, kept from the engine's unit-damaged events;
+- the next orders of ADR 0019: for an idle builder the library consults a
+  model, behind one interface that gives a probability per answer for the
+  builder the order is for, masks the answers, chooses one and hands BARb's
+  own tasks for extractors and jobs to the scripts.
 
-The scripts and the opening tables stay as they are and run on top of it.
-Models run inside the library or its scripts: first as tables loaded from a
-data file, a runtime such as ONNX only when a model needs it, and no second
-process. The widget bridge is not used for play.
+The scripts and the opening tables run on top of it. Models run inside the
+library or its scripts: first as tables loaded from a data file, a runtime
+such as ONNX only when a model needs it, and no second process. The widget
+bridge is not used for play.
 
 The library is built for the platform of the engine it goes into, from the
 same sources: Linux x86-64 with a pinned toolchain, Windows x86-64
