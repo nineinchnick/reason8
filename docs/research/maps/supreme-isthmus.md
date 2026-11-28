@@ -6,6 +6,24 @@ the three maps: seven of its eight positions open in a way of their own.
 Method, sample and the terms used in the tables are in
 [`README.md`](README.md).
 
+## Summary
+
+Supreme Isthmus has the most varied meta of the three maps: builds tell seven
+of its eight places apart, and a position is mistaken mostly for its image on
+the other side. Water, geothermal vents and the distance from the middle make
+the difference: two players per team go to sea, the pond player builds tidal
+generators first, the players near a vent build a geothermal plant within
+about three minutes, and the front players at the land bridge order combat
+units in the first minute. Before the first factory most players start the
+same way (37 to 76% of a position order exactly three extractors and three
+wind turbines). The role alone does not describe a position here: six
+positions are front, and the two at the pond play nothing like the other four.
+148 games, 140 to 151 openings per position.
+
+This is why the [findings of the three maps](README.md#findings) give a model
+the position, not only the role, and why the slice
+[starts with this map](README.md#recommendation-for-the-first-slice).
+
 ## The map
 
 From the map file (`mapinfo.lua`, height and metal maps) and the
