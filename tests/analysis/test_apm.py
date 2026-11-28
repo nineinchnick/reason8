@@ -195,3 +195,29 @@ def test_order_kind_leaves_out_parameters_and_units():
     insert = {"type": "cmd", "cmd": "INSERT", "cmd_id": 1, "opts": ["alt"], "inner": build}
     assert order_kind(insert) == "-3:armmex:32:128"
     assert order_kind({"type": "select", "units": [1]}) is None
+
+
+def test_each_kind_of_order_in_a_frame_is_an_action():
+    counter = ActionCounter()
+    assert counter.command(10, [1], "move")
+    assert counter.command(10, [1], "queued move")  # a path to one unit: two clicks
+    assert counter.command(10, [2], "fire state")
+    assert not counter.command(10, [3], "fire state")  # the same kind: the same action
+    assert not counter.command(12, [1], "attack")  # the frame's marks hold from frame 11 on
+    assert counter.command(12, [4], "attack")
+    assert counter.frames == [10, 10, 10, 12]
+
+
+def test_player_actions_count_kinds():
+    move = {"cmd": "MOVE", "cmd_id": 10}
+    events = [
+        select(0, 0, 100, 101),
+        {**click(50, 0), **move},
+        {**click(50, 0), **move, "opts": ["shift"]},  # a queued move in the same frame
+        *({**widget(50, 0, unit), **move} for unit in (100, 101)),  # a formation move
+        {**widget(50, 0, 100), "cmd": "FIRE_STATE", "cmd_id": 45},
+    ]
+    actions = player_actions(make_replay(events))
+    assert actions[0]["clicked"] == [50, 50]
+    assert actions[0]["widget"] == [50, 50]
+    assert actions[0]["all"] == [50, 50, 50]  # the formation move is a MOVE, like the click

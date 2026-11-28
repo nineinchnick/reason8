@@ -222,7 +222,7 @@ def replay_budget(replay: Replay, team: int, band: str = budget.DEFAULT_BAND) ->
     for event in replay.events:
         if event.get("type") == "cmd" and event.get("team") == team:
             commands += 1
-            counter.command(event["frame"], event.get("units") or ())
+            counter.event(event)
     return {
         "commands": commands,
         "actions": len(counter.frames),

@@ -1,10 +1,10 @@
 """The action budget of ADR 0008, and how a run kept to it.
 
 The bot's actions are counted the way a player's are (`reason8.analysis.apm.ActionCounter`):
-at most one a frame, and a command counts only if one of its units got no command in the 7
-frames before. A skill band allows at most so many actions in any 1, 10 and 60 seconds (fewer
-in the first two minutes) and in any 5 minutes (the game average). `ai/native/Budget.h` keeps
-the same table for the 30-40 band, the one the bot plays.
+one for each kind of order in a frame, and a command counts only if one of its units got no
+command in the 7 frames before. A skill band allows at most so many actions in any 1, 10 and
+60 seconds (fewer in the first two minutes) and in any 5 minutes (the game average).
+`ai/native/Budget.h` keeps the same table for the 30-40 band, the one the bot plays.
 
 `windows_kept` checks a list of action frames against a band; `governor_log` reads what the
 command governor of our BARb library logged in a game (``Reason8 governor: team N: ...``).

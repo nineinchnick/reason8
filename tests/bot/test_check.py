@@ -285,16 +285,17 @@ def test_replay_budget():
     class Events:
         events = [
             {"type": "cmd", "frame": 30, "team": 1, "units": [5]},
-            {"type": "cmd", "frame": 30, "team": 1, "units": [6]},  # one action a frame
+            {"type": "cmd", "frame": 30, "team": 1, "units": [6]},  # the same kind: one action
             {"type": "cmd", "frame": 33, "team": 1, "units": [5]},  # within its 7 frames
             {"type": "cmd", "frame": 40, "team": 1, "units": [7]},
+            {"type": "cmd", "frame": 40, "team": 1, "units": [7], "cmd_id": 45},  # another kind
             {"type": "cmd", "frame": 40, "team": 0, "units": [8]},  # another team
             {"type": "startpos", "frame": 0},
         ]
 
     result = check.replay_budget(Events(), team=1)
-    assert result["commands"] == 4 and result["actions"] == 2
-    assert result["windows"]["ok"] and result["windows"]["1 s"]["most"] == 2
+    assert result["commands"] == 5 and result["actions"] == 3
+    assert result["windows"]["ok"] and result["windows"]["1 s"]["most"] == 3
 
 
 class LobbyReplay:

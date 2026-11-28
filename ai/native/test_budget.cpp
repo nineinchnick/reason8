@@ -45,37 +45,53 @@ Throttle<int> MakeThrottle(std::vector<Window> windows, std::size_t capacity, Se
 	});
 }
 
+/* Kinds of order in the tests. */
+constexpr reason8::Kind MOVE = 1;
+constexpr reason8::Kind QUEUED_MOVE = 2;
+constexpr reason8::Kind FIRE_STATE = 3;
+
 void CountsLikeTheGadget()
 {
 	ActionCounter counter({});
-	EXPECT(counter.Counts(1, 10));
-	EXPECT(counter.Record(1, 10));
-	EXPECT(!counter.Counts(2, 10));  // one action a frame
-	EXPECT(!counter.Record(2, 10));
-	EXPECT(!counter.Counts(1, 16));  // unit 1 had a command 6 frames ago
-	EXPECT(counter.Counts(1, 17));   // 7 frames later it counts again
-	EXPECT(!counter.Counts(2, 12));  // unit 2 was marked at frame 10 too
-	EXPECT(counter.Counts(3, 12));
+	EXPECT(counter.Counts(1, 10, MOVE));
+	EXPECT(counter.Record(1, 10, MOVE));
+	EXPECT(!counter.Counts(2, 10, MOVE));  // one action a kind and frame
+	EXPECT(!counter.Record(2, 10, MOVE));
+	EXPECT(!counter.Counts(1, 16, MOVE));  // unit 1 had a command 6 frames ago
+	EXPECT(counter.Counts(1, 17, MOVE));   // 7 frames later it counts again
+	EXPECT(!counter.Counts(2, 12, MOVE));  // unit 2 was marked at frame 10 too
+	EXPECT(counter.Counts(3, 12, MOVE));
+}
+
+void CountsEachKindInAFrame()
+{
+	ActionCounter counter({});
+	EXPECT(counter.Record(1, 10, MOVE));
+	EXPECT(counter.Record(1, 10, QUEUED_MOVE));  // a path: the same unit, a second click
+	EXPECT(counter.Record(2, 10, FIRE_STATE));   // another unit, another kind
+	EXPECT(!counter.Record(3, 10, FIRE_STATE));  // the same kind again: the same action
+	EXPECT(!counter.Counts(1, 12, FIRE_STATE));  // the frame's marks hold from the next frame
+	EXPECT(counter.Counts(4, 12, FIRE_STATE));
 }
 
 void PacesSpending()
 {
 	// 8 in any 10 s: a bucket of 2, refilled with one token every 50 frames
 	ActionCounter counter({{300, 8, 0}});
-	EXPECT(counter.Record(1, 0));
+	EXPECT(counter.Record(1, 0, MOVE));
 	EXPECT(counter.Fits(1));
-	EXPECT(counter.Record(2, 1));
+	EXPECT(counter.Record(2, 1, MOVE));
 	EXPECT(!counter.Fits(2));  // the bucket is empty
 	EXPECT(!counter.Fits(49));
 	EXPECT(counter.Fits(52));
-	EXPECT(counter.Record(3, 52));
+	EXPECT(counter.Record(3, 52, MOVE));
 	EXPECT(!counter.Fits(53));
 }
 
 void WindowEndsAtItsFrame()
 {
 	ActionCounter counter({{60, 1, 60}});  // one a 2 s window, in the first 2 s only
-	EXPECT(counter.Record(1, 0));
+	EXPECT(counter.Record(1, 0, MOVE));
 	EXPECT(!counter.Fits(59));
 	EXPECT(counter.Fits(60));  // the window no longer applies
 }
@@ -85,12 +101,12 @@ void HoldsAndSendsInOrder()
 	int frame = 0;
 	Sent sent;
 	auto throttle = MakeThrottle({{30, 1, 0}}, 100, sent, frame);
-	EXPECT(throttle.Submit(frame, 1, false, false, 101) == 0);  // the action of this second
+	EXPECT(throttle.Submit(frame, 1, MOVE, false, false, 101) == 0);  // the action of this second
 	EXPECT(sent.ids.size() == 1);
 	frame = 10;
-	throttle.Submit(frame, 2, false, false, 102);  // would be a second action: held
-	throttle.Submit(frame, 2, false, false, 103);  // behind the held one of its unit
-	throttle.Submit(frame, 3, false, false, 104);
+	throttle.Submit(frame, 2, MOVE, false, false, 102);  // would be a second action: held
+	throttle.Submit(frame, 2, MOVE, false, false, 103);  // behind the held one of its unit
+	throttle.Submit(frame, 3, MOVE, false, false, 104);
 	EXPECT(throttle.Held() == 3);
 	EXPECT(sent.ids.size() == 1);
 	for (frame = 11; frame < 30; ++frame) {
@@ -117,10 +133,10 @@ void FreeCommandsPassHeldOnes()
 	int frame = 0;
 	Sent sent;
 	auto throttle = MakeThrottle({{30, 1, 0}}, 100, sent, frame);
-	throttle.Submit(frame, 1, false, false, 101);
+	throttle.Submit(frame, 1, MOVE, false, false, 101);
 	frame = 3;
-	throttle.Submit(frame, 2, false, false, 102);  // an action over budget: held
-	throttle.Submit(frame, 1, false, false, 103);  // unit 1 is within its 7 frames: free
+	throttle.Submit(frame, 2, MOVE, false, false, 102);  // an action over budget: held
+	throttle.Submit(frame, 1, MOVE, false, false, 103);  // unit 1 is within its 7 frames: free
 	EXPECT((sent.ids == std::vector<int>{101, 103}));
 	EXPECT(throttle.Held() == 1);
 }
@@ -130,12 +146,12 @@ void NewOrderCollapsesHeldOrders()
 	int frame = 0;
 	Sent sent;
 	auto throttle = MakeThrottle({{30, 1, 0}}, 100, sent, frame);
-	throttle.Submit(frame, 9, false, false, 100);
+	throttle.Submit(frame, 9, MOVE, false, false, 100);
 	frame = 10;
-	throttle.Submit(frame, 1, false, true, 101);   // an order: held
-	throttle.Submit(frame, 1, false, false, 102);  // a state change: held behind it
-	throttle.Submit(frame, 1, false, true, 103);   // a queued order (shift): held
-	throttle.Submit(frame, 1, true, true, 104);    // an order that replaces the queue
+	throttle.Submit(frame, 1, MOVE, false, true, 101);   // an order: held
+	throttle.Submit(frame, 1, MOVE, false, false, 102);  // a state change: held behind it
+	throttle.Submit(frame, 1, MOVE, false, true, 103);   // a queued order (shift): held
+	throttle.Submit(frame, 1, MOVE, true, true, 104);    // an order that replaces the queue
 	EXPECT(throttle.Held() == 2);
 	EXPECT(throttle.Total().collapsed == 2);
 	frame = 30;
@@ -148,11 +164,11 @@ void SupersedingOrderTakesTheHeldOnesPlace()
 	int frame = 0;
 	Sent sent;
 	auto throttle = MakeThrottle({{30, 1, 0}}, 100, sent, frame);
-	throttle.Submit(frame, 9, false, false, 100);
+	throttle.Submit(frame, 9, MOVE, false, false, 100);
 	frame = 10;
-	throttle.Submit(frame, 1, true, true, 101);  // held
+	throttle.Submit(frame, 1, MOVE, true, true, 101);  // held
 	frame = 20;
-	throttle.Submit(frame, 1, true, true, 102);  // replaces it, and is held itself
+	throttle.Submit(frame, 1, MOVE, true, true, 102);  // replaces it, and is held itself
 	EXPECT(throttle.Held() == 1);
 	frame = 30;
 	throttle.Update(frame);
@@ -165,16 +181,31 @@ void OverflowDropsTheOldest()
 	int frame = 0;
 	Sent sent;
 	auto throttle = MakeThrottle({{300, 1, 0}}, 2, sent, frame);
-	throttle.Submit(frame, 9, false, false, 100);
+	throttle.Submit(frame, 9, MOVE, false, false, 100);
 	frame = 10;
-	throttle.Submit(frame, 1, false, false, 101);
-	throttle.Submit(frame, 2, false, false, 102);
-	throttle.Submit(frame, 3, false, false, 103);
+	throttle.Submit(frame, 1, MOVE, false, false, 101);
+	throttle.Submit(frame, 2, MOVE, false, false, 102);
+	throttle.Submit(frame, 3, MOVE, false, false, 103);
 	EXPECT(throttle.Held() == 2);
 	EXPECT(throttle.Total().dropped == 1);
 	frame = 300;
 	throttle.Update(frame);
 	EXPECT((sent.ids == std::vector<int>{100, 102, 103}));
+}
+
+void HoldsAKindThatDoesNotFit()
+{
+	int frame = 0;
+	Sent sent;
+	auto throttle = MakeThrottle({{30, 1, 0}}, 100, sent, frame);
+	EXPECT(throttle.Submit(frame, 1, MOVE, false, false, 101) == 0);
+	throttle.Submit(frame, 2, MOVE, false, false, 102);        // the same action: sent
+	throttle.Submit(frame, 3, FIRE_STATE, false, false, 103);  // a second action: held
+	EXPECT((sent.ids == std::vector<int>{101, 102}));
+	frame = 30;
+	throttle.Update(frame);
+	EXPECT((sent.ids == std::vector<int>{101, 102, 103}));
+	EXPECT(throttle.Total().actions == 2);
 }
 
 void StaysWithinTheBandUnderLoad()
@@ -188,7 +219,7 @@ void StaysWithinTheBandUnderLoad()
 	for (frame = 0; frame < 10 * reason8::FRAMES_PER_MINUTE; ++frame) {
 		throttle.Update(frame);
 		if (frame % 2 == 0) {
-			throttle.Submit(frame, (frame / 2) % 40, false, false, frame);
+			throttle.Submit(frame, (frame / 2) % 40, MOVE, false, false, frame);
 		}
 		throttle.TakeMinute();
 	}
@@ -196,7 +227,7 @@ void StaysWithinTheBandUnderLoad()
 	EXPECT(total.dropped == 0);
 	EXPECT(total.seen == static_cast<long>(sent.ids.size() + throttle.Held()));
 	for (std::size_t index = 0; index < sent.ids.size(); ++index) {
-		if (check.Record(sent.ids[index] / 2 % 40, sent.frames[index])) {
+		if (check.Record(sent.ids[index] / 2 % 40, sent.frames[index], MOVE)) {
 			actions.push_back(sent.frames[index]);
 		}
 	}
@@ -221,6 +252,8 @@ void StaysWithinTheBandUnderLoad()
 int main()
 {
 	CountsLikeTheGadget();
+	CountsEachKindInAFrame();
+	HoldsAKindThatDoesNotFit();
 	PacesSpending();
 	WindowEndsAtItsFrame();
 	HoldsAndSendsInOrder();
