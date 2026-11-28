@@ -481,6 +481,13 @@ Factory
   units to roles is needed. One unit is queued at a time, so a task that BARb
   gives up on can be queued again without changing the order.
 
+End of the opening
+: `Main::AiUpdate`, which BARb calls once a second, asks `opening.as` whether
+  the opening still applies. When it does not, the opening ends before its
+  last step: the commander's current step is aborted, the factory finishes the
+  unit it is making, and BARb decides for both from then on. See
+  [When the opening ends](#when-the-opening-ends).
+
 Log
 : Every decision is logged with the prefix `Reason8 opening: team <id>:`, so
   the lines of several Reason8 teams in one game can be told apart.
@@ -494,6 +501,7 @@ Reason8 opening: team 0: step 8: finished, frame 2768
 Reason8 opening: team 0: factory armlab: will make armck armrectr armck armrectr armck armrectr, frame 2768
 Reason8 opening: team 0: factory unit 1 armck: task queued, frame 2789
 Reason8 opening: team 0: factory unit 1: done, frame 3520
+Reason8 opening: team 0: opening ended at frame 12673, step: step 15 armnanotc not finished 111 s after it was queued; commander steps done 14 of 30, factory units done 31 of 36; BARb takes over
 ```
 
 ### What a script can see and do
@@ -781,6 +789,63 @@ was given up after five tries.
   their five tries in a second each, and 28 of its 30 steps were skipped. The
   script now waits 2 s times the number of tries before trying a failed step
   again.
+
+### When the opening ends
+
+An opening is what a player builds until first contact, and at most the first
+8 minutes ([ADR 0012](../decisions/0012-end-openings-at-first-contact.md)).
+The bot plays it one step at a time, and ends it early, handing the commander
+and the factory to BARb, when it no longer applies:
+
+`step`
+: A commander step is not finished 111 s after it was first queued, its
+  retries included.
+
+#### Why a step limit
+
+In a real-time 4v4 lobby game on Supreme Isthmus one commander queued step 15
+of its opening, a construction turret, at 5:11 and finished it at 16:26, then
+went on with its wind generators past minute 25. The replay, played again with
+the state export, shows why:
+
+- BARb placed the turret about 130 elmos from where the human had put it,
+  where the commander and the wind generators it had just built stood. For the
+  first 5 minutes the commander stood 113 to 141 elmos from the site, within
+  its build distance of 145.
+- The commander never started it. For 11 minutes it did no work, but for a
+  4-second capture (the state export logs it idle). Once a minute BARb's
+  builder watchdog found it idle with a task, nudged it for a second and sent
+  the same build order again: 15 orders in all.
+- Nothing ended the step. The task neither finished nor failed, so BARb kept
+  it, and whenever the commander was idle the opening handed it the same task
+  back. The turret was started at 16:05 by one of three constructors BARb sent
+  to help, and the commander finished it with them.
+
+Steps stall in headless games too: in the 20 games of the last comparison with
+`BARbLimited` the longest of 2,648 commander steps, also a construction
+turret, took 314 s.
+
+#### Where the limit comes from
+
+From the openings dataset (`openings_v2`, training split, Supreme Isthmus,
+Armada and Cortex players: 268,227 openings, 23.4 million structure orders):
+the time from one structure order of an opening to the next, when it is not
+given in the same frame.
+
+| quantile | gap between two structure orders (s) |
+| -------- | ------------------------------------ |
+| 50%      | 4.2                                  |
+| 90%      | 42.1                                 |
+| 95%      | 63.5                                 |
+| 99%      | 110.9                                |
+| 99.9%    | 185.3                                |
+
+The limit is the 99% quantile, 111 s: a player who has not moved on to the
+next structure that long after the last one is rarely still playing the same
+opening. The bot's own steps rarely take that long: in the same 20 games 18 of
+2,648 commander steps (0.7%) were not finished 111 s after they were first
+queued, and the median was 10 s. Its factory units are not limited: the
+slowest of 1,682 took 86 s.
 
 ### What failure looks like
 
