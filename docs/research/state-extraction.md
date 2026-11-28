@@ -7,68 +7,24 @@ document measures how well that works.
 
 ## Summary
 
-**Go.** Re-running replays in a headless engine works, is exact, and is cheap
-enough for 1v1 games. Big team games cost about 12 times more per replay and
-need a budget.
+**Go.** Running a replay again in a headless engine plays back the same game,
+faster than real time, so the state a replay leaves out (units, positions,
+resources, what each team saw) can be recovered for training. The re-run is
+exact: no desync warnings, the same winner and length as recorded, and
+byte-identical output across runs. A spectator widget writes the state, and
+its reclaim and sight lines agree with the game's own counts and with each
+other where they can be checked. The cost is what limits it in big games: a
+1v1 replay plays 48 times faster than real time (80 to 100 replays an hour per
+core), an 8v8 only 3.8 times (5 to 8), and every engine needs about 5 GB of
+RAM, which caps how many run at once. Only the exact engine and game version
+reproduce a game, and a wrong game version gives no error, just wrong state.
+The answers per question, with the numbers, are in sections 1 to 6.
 
-Faster than real time?
-: Yes. 1v1 replay: 48x on average. 8v8 replay: 3.8x on average (23x at the
-  start, 1.8x at minute 25)
-
-State snapshots from a spectator widget?
-: Yes. Resources and wind every second; units, positions, health and build
-  progress every 5 s; an event for every unit created / finished / destroyed /
-  given / gone idle and for every first hit between two enemy units; every
-  reclaimable feature as it appears and goes, the metal and energy each team
-  reclaimed from it, what each builder works on, sampled every 5 frames, each
-  time an enemy unit enters or leaves an ally team's sight or radar, and the
-  unit types as the game loaded them (section 4). Converted to Parquet tables
-  after the run
-
-What each team saw?
-: Yes, exactly, from the engine's call-ins: on five 8v8 openings every enter
-  has its leave, death or the end, and 81% of the units an enemy hit first
-  were in its sight, 15% on its radar only
-
-Reclaim right?
-: Yes, against the game's own count where the game version keeps one: within
-  0.05% and 0.24% of the metal reclaimed; between allies sharing a feature up
-  to 2% of a team's reclaim is split differently
-
-What stands at any frame?
-: Rebuilt from the unit events alone; it matches the snapshots of real games
-  but for units still dying and the odd unit made between two frames (section
-  4\)
-
-Is the re-run the same game?
-: Yes. 0 desync warnings, same winner and length as recorded, byte-identical
-  output across runs
-
-Disk per game (snapshot every 5 s, gzip)
-: 1v1 (13 min): 86 KB. 8v8 (26 min): 6.0 MB (format 1). First 10 minutes of an
-  8v8 in format 5: 39 KB of gzipped JSON lines and 28 KB of Parquet tables per
-  game minute; format 6 adds 42% and 26% to them, format 7 another 28% and 15%
-
-Replays per hour per core
-: 1v1: 80 to 100. 8v8: 5 to 8
-
-RAM per engine
-: 4.7 GB (1v1) to 5.7 GB (8v8). RAM, not CPU, limits how many engines fit on a
-  machine
-
-CPU per engine
-: 1 core (with `WorkerThreadCount = 1`, which is also the fastest setting per
-  core)
-
-Wrong engine version
-: Refuses to start. If forced, it plays but desyncs and gives a wrong result
-
-Wrong game version
-: Never an error. It plays, desyncs and silently writes wrong state
-
-Getting the right versions
-: All automatic from the replay header: engine from GitHub, game and map with
-  `pr-downloader`
+Used in
+[ADR 0010](../decisions/0010-re-simulate-replays-headlessly-for-game-state.md):
+replays are re-simulated with the versions named in their header, any run with
+a desync warning is rejected, and 8v8 games are played only for the part being
+learned. [Section 7](#7-go--no-go-for-using-state-in-v2) has the budget.
 
 ## How it works
 
