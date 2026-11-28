@@ -4,9 +4,10 @@ An AI for
 [Beyond All Reason](https://github.com/beyond-all-reason/Beyond-All-Reason)
 (BAR) that learns to play from publicly available replays of human games.
 
-> **Status:** early proof of concept. Nothing playable yet. See the
-> [issues](../../issues) and [milestones](../../milestones) for what's being
-> worked on.
+> **Status:** early proof of concept. The bot plays human openings in team
+> games and hands over to BARb; the first learned model is being built. See
+> the [issues](../../issues) and [milestones](../../milestones) for what's
+> being worked on.
 
 ## Getting started
 
@@ -127,32 +128,61 @@ before it improved further through self-play. We start with the smallest
 version of that idea that can actually be tested: **learn the opening for each
 start position on a popular team map**, then have a bot play it in team games.
 
-## How training works (for newcomers)
+## How the model is built
 
-**Data**
-: Replay files (`.sdfz`) of real BAR matches, plus match metadata (map, skill
-  ratings, winner).
+Today the bot plays whole human openings, picked for its start position before
+the game. The first learned model, which is being built, replaces that with a
+decision made during the game. The steps below are the path from replays to
+that model in the game; each links to the record that decides it.
+
+**What the model answers**
+: One question: *this builder has nothing to do; what does it do next?* A
+  builder is anything that constructs: the commander, factories, construction
+  units, build towers. The answer is a probability for every option: a unit or
+  building to make, or a job (assist, reclaim, repair, resurrect). Where to
+  build and how to fight stay with BARb
+  ([ADR 0019](docs/decisions/0019-first-model-trees-asked-by-every-builder.md)).
+
+**Game state from replays**
+: A replay file (`.sdfz`) stores the players' commands, not the state of the
+  game. Each replay is played again in the engine without graphics, and a
+  widget records the state as the game runs: resources, units, what is under
+  construction, what each team sees
+  ([ADR 0010](docs/decisions/0010-re-simulate-replays-headlessly-for-game-state.md)).
 
 **Examples**
-: Turn each replay into many *(situation → action)* pairs, e.g. *"after
-  building these 6 things, the player built a Bot Lab"*.
+: Every order a player gave to a builder becomes one row of a table: the
+  situation just before the order, and the order as the right answer. The
+  situation is the model's input: the order before it, the map and start
+  position, the game time, the team's economy, its units, the kind of builder
+  that asks, the team's build power and the player's rating
+  ([ADR 0018](docs/decisions/0018-learn-from-orders-joined-with-the-state-before-them.md)).
 
 **Model**
-: A function with adjustable numbers (parameters) that takes a situation and
-  outputs a probability for each possible action.
-
-**Training**
-: Repeatedly show the model examples and nudge its parameters so the action
-  the human actually took becomes more likely.
+: Gradient-boosted decision trees. A tree is a chain of yes/no questions about
+  the input; every new tree is fitted to correct the mistakes of the trees
+  before it. Trees train in minutes, suit tables like this one, and are simple
+  enough for the bot to evaluate with its own code. The inputs and the form of
+  the answer do not depend on trees, so a neural network can take their place.
 
 **Evaluation**
-: On games the model never saw, how often is its top guess the human's real
-  choice? Compare against a dumb baseline first. What counts in the end is how
-  the bot plays in the game.
+: Some games are held out and never trained on. On those: how often is the
+  model's top answer what the player did, compared with simpler baselines
+  ([ADR 0013](docs/decisions/0013-evaluate-on-held-out-games.md),
+  [results](docs/results.md))? That number only selects candidates. What
+  counts is how the bot plays: its economy at first contact, and whether its
+  openings can be told from human ones
+  ([ADR 0003](docs/decisions/0003-define-success-as-in-game-measures.md)).
 
-**Deployment**
-: Run the model inside (or alongside) the game so a bot can act on its
-  predictions.
+**In the game**
+: The trained trees are written to a data file that ships with the bot
+  ([ADR 0007](docs/decisions/0007-ship-the-model-as-tables-in-a-barb-variant.md)).
+  When a builder is idle, the bot computes the same inputs from the live game,
+  evaluates the trees, removes the answers that builder can never carry out,
+  and picks at random among the answers with a probability of at least 10%.
+  When no answer reaches that, BARb decides. The model plays until the opening
+  ends ([ADR 0012](docs/decisions/0012-end-openings-at-first-contact.md)),
+  then BARb plays on.
 
 ## Goals
 
