@@ -35,8 +35,10 @@ Model (--infolog): a team whose builders' next orders the model decided (the
   chose and that was carried out, chosen but not carried out, no answer of at
   least 10%, nothing the builder could carry out, or no answer at all; how
   often the order was left to BARb, by kind of builder and by game minute;
-  where extractors went; and when and why the model's orders ended. The team
-  passes when the model decided orders for it.
+  how many orders ended at once (the builder idle again, or decided for again,
+  within a second), by kind of answer; where extractors went; and when and why
+  the model's orders ended. The team passes when the model decided orders for
+  it.
 
 Log (--infolog): whether the AI loaded, which version and scripts, and script
   errors. An AI that fails to load or compile does not stop the game: its team

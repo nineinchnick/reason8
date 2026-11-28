@@ -770,11 +770,17 @@ Log
   `reason8 bot check` counts them per team (`next_order_by_team`): how often
   an idle builder needed an order, what came of each, the orders the model
   chose, how often the order was decided by the model and how often left to
-  BARb, by kind of builder and by game minute, where the extractors went, and
-  when the model's orders ended, the orders BARb gave the builders left to it
-  (`barb_orders`) and the decisions whose inputs were logged. A team whose
-  orders the model decided is not compared with an opening; it passes when the
-  model decided some.
+  BARb, by kind of builder and by game minute, how many ended at once
+  (`ended_at_once`: given, and the builder idle again or decided for again
+  within a second) and, by kind of answer (`by_answer`: each job, extractor,
+  factory, other structure, unit), how many were chosen, could not be given
+  and ended at once, the orders carried out and those that helped build, where
+  the extractors went, and when the model's orders ended, the orders BARb gave
+  the builders left to it (`barb_orders`) and the decisions whose inputs were
+  logged. The share ended at once is read from the decisions alone, so it
+  works for the logs of earlier builds too. A team whose orders the model
+  decided is not compared with an opening; it passes when the model decided
+  some.
 
 ### The model's inputs
 
