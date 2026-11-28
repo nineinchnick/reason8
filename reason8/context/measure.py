@@ -327,6 +327,8 @@ class TreeModel:
         }
         training = self.dmatrix(train, labels(train))
         stopping = self.dmatrix(validation, labels(validation), reference=training)
+        # the rows are binned now: let a caller that passed them on free them while boosting
+        del train, validation
         self.booster = xgboost.train(
             parameters,
             training,
