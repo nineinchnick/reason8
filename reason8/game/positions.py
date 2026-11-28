@@ -184,18 +184,28 @@ def replay_positions(
         side = sides.get(team.ally_team_id)
         if team.start_pos is None or side is None:
             continue
-        start = team.start_pos
-        nearest = min(layout.sides[side], key=lambda point: math.dist(start, (point.x, point.z)))
-        distance = math.dist(start, (nearest.x, nearest.z))
-        positions[team.team_id] = Position(
-            spawn_point=nearest.id,
-            role=nearest.role,
-            side=side,
-            index=layout.sides[side].index(nearest),
-            distance=distance,
-            on_spot=distance < radii[nearest.id],
-        )
+        positions[team.team_id] = position_of(layout, side, team.start_pos, radii)
     return positions
+
+
+def position_of(
+    layout: Layout, side: int, start: Point, radii: Mapping[str, float] | None = None
+) -> Position:
+    """The position of a start on one side of a layout: its nearest spawn point there.
+
+    `radii` are the layout's `spot_radii`, computed when not given.
+    """
+    radii = spot_radii(layout) if radii is None else radii
+    nearest = min(layout.sides[side], key=lambda point: math.dist(start, (point.x, point.z)))
+    distance = math.dist(start, (nearest.x, nearest.z))
+    return Position(
+        spawn_point=nearest.id,
+        role=nearest.role,
+        side=side,
+        index=layout.sides[side].index(nearest),
+        distance=distance,
+        on_spot=distance < radii[nearest.id],
+    )
 
 
 def _resolve_boxes(sets: Mapping[int, tuple[Box, ...]], team_count: int) -> tuple[Box, ...] | None:
