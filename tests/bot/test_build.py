@@ -417,5 +417,8 @@ def test_assemble_under_another_short_name(tmp_path):
     stock_hash = hashlib.sha256(b"// stock factory\n").hexdigest()
     files, facts = build.assemble(**make_inputs(tmp_path, stock_hash), short_name="Reason8Stock")
     assert facts["short_name"] == "Reason8Stock" and facts["openings"] > 0
+    # the engine logs the AI under its name: the same, for `reason8 bot check`
+    ai_info = files["AIInfo.lua"].decode("utf-8")
+    assert ai_info.count("value = 'Reason8Stock'") == 2 and "'Reason8'" not in ai_info
     with pytest.raises(SystemExit):
         build.set_short_name("x", "Not a name")
