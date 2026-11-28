@@ -6,10 +6,14 @@ import polars as pl
 import pytest
 
 from reason8.context import builders, check, table
+from reason8.game.maps import parse_map_list
 from reason8.headless import standing, tables
 from reason8.openings.dataset import ORDER_COLUMNS
+from tests import synthetic
 from tests.headless.test_tables import lines_v5, write_state
 from tests.synthetic import write_tables
+
+MAP_LIST = parse_map_list(synthetic.MAP_LIST_YAML)
 
 REPLAY = "2026-11-01_10-00-00-000_Test Valley 1.0_2026.09.03"
 ROLES = ["mex", "pw", "com", "other"]
@@ -160,6 +164,55 @@ def orders_frame() -> pl.DataFrame:
     )
 
 
+def test_with_spawn_positions_take_the_start_from_the_commander():
+    events = pl.DataFrame(
+        [
+            event(0, "created", 1, "armcom", 0),
+            event(0, "created", 2, "armcom", 1),
+            event(0, "created", 20, "armlab", 0),
+            event(900, "created", 5, "armcom", 1),  # a second commander, later
+        ]
+    ).with_columns(
+        pl.when(pl.col("unit_id") == 2).then(900).otherwise(pl.col("x")).alias("x"),
+        pl.when(pl.col("unit_id") == 2).then(9100).otherwise(pl.col("z")).alias("z"),
+    )
+    games = pl.DataFrame({"replay": [REPLAY], "game": [GAME]})
+    spawns = table.commander_spawns(events, builder_types(), games)
+    assert sorted(spawns.rows()) == [(REPLAY, 0, 100.0, 100.0), (REPLAY, 1, 900.0, 9100.0)]
+
+    # both players were labelled P1 from their replay starts; player 1's commander was
+    # created at P2, player 2 has no commander in the state
+    orders = pl.DataFrame(
+        {
+            "replay": [REPLAY] * 3,
+            "match_id": [7] * 3,
+            "player_slot": [0, 1, 2],
+            "map": [synthetic.MAP] * 3,
+            "team_size": [2] * 3,
+            "start_x": [3000.0] * 3,
+            "start_z": [7000.0] * 3,
+            "position": ["P1"] * 3,
+            "role": ["front"] * 3,
+            "position_index": [0] * 3,
+            "on_spot": [True] * 3,
+        },
+        schema_overrides={
+            "player_slot": pl.Int32,
+            "team_size": pl.Int32,
+            "start_x": pl.Float32,
+            "start_z": pl.Float32,
+            "position_index": pl.Int32,
+        },
+    )
+    moved = table.with_spawn_positions(orders, spawns, MAP_LIST)
+    assert moved.select(*table.START_COLUMNS).rows() == [
+        (100.0, 100.0, "P1", "front", 0, False),
+        (900.0, 9100.0, "P2", "air", 1, True),
+        (3000.0, 7000.0, "P1", "front", 0, True),
+    ]
+    assert table.with_spawn_positions(orders, spawns, {}).equals(orders)
+
+
 def test_with_times():
     rows = table.with_times(orders_frame()).filter(pl.col("player_slot") == 0)
     assert rows["state_frame"].to_list() == [0, 0, 59, 60, 120, 150]
@@ -211,6 +264,11 @@ def write_source(directory, splits):
             pl.lit("Test Valley 1.0").alias("map"),
             pl.format("P{}", pl.col("player_slot")).alias("position"),
             pl.lit("front").alias("role"),
+            pl.lit(2, dtype=pl.Int32).alias("team_size"),
+            pl.lit(100.0, dtype=pl.Float32).alias("start_x"),
+            pl.lit(100.0, dtype=pl.Float32).alias("start_z"),
+            pl.lit(0, dtype=pl.Int32).alias("position_index"),
+            pl.lit(True).alias("on_spot"),
             pl.lit(31000, dtype=pl.Int32).alias("build"),
             pl.lit(None, dtype=pl.Int32).alias("opening_era"),
             pl.lit(GAME).alias("game_version"),
@@ -347,6 +405,7 @@ def build(tmp_path, sample):
         states=tmp_path / "state",
         tables=tmp_path / "tables",
         types=builder_types(),
+        map_list=MAP_LIST,
         log=lambda _: None,
     )
     return out, manifest
@@ -374,6 +433,11 @@ def test_build_table_and_check(tmp_path):
     assert (out / "splits" / "train.txt").read_text() == "7\n"
     games = pl.read_parquet(out / "games.parquet")
     assert games.filter(pl.col("match_id") == 8)["status"].item() == table.NOT_SIMULATED
+
+    # player 1's start is where its commander was created (P0 of player 0 is no position
+    # of the map, so player 0 keeps the start of the opening dataset)
+    starts = rows.group_by("player_slot").agg(pl.col("start_x", "position").first())
+    assert sorted(starts.rows()) == [(0, 100.0, "P0"), (1, 200.0, "P1")]
 
     first = rows.filter(pl.col("player_slot") == 0)
     assert first["answer"].to_list() == [
