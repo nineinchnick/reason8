@@ -30,3 +30,4 @@ number and add it to the list below, which is in the same order.
 - [0017. Keep openings with automation widgets and flag them](0017-keep-openings-with-automation-widgets-flagged.md)
 - [0018. Learn from orders joined with the state just before them](0018-learn-from-orders-joined-with-the-state-before-them.md)
 - [0019. First model: trees that decide each builder's next order, played live](0019-first-model-decides-each-builders-next-order.md)
+- [0020. Re-simulate replays in bulk on spot instances fed by a queue](0020-re-simulate-in-bulk-on-spot-instances.md)

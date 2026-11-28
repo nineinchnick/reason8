@@ -252,6 +252,42 @@ The tables of a game, one file each, described in
 `reason8 headless tables --help`: `game`, `resources`, `events`, `units`,
 `hits`, `damage`, `features`, `reclaim`, `work` and `visibility`.
 
+### A batch in the cloud
+
+The same batch can run on EC2 spot instances: the games of a list go to a
+queue, each instance plays five at a time and writes their state to the bucket
+with the layout above, and the instances terminate themselves when the queue
+is empty ([`cloud.md`](cloud.md),
+[ADR 0020](../decisions/0020-re-simulate-in-bulk-on-spot-instances.md)).
+
+```mermaid
+flowchart LR
+    list["list of replays"]
+    queue[("SQS queue<br/>one game each")]
+    workers["spot instances<br/>reason8 cloud worker"]
+    bucket[("bucket<br/>replays/, state/")]
+    local[("data/state/")]
+    list -- "cloud run" --> queue
+    queue --> workers
+    bucket -- "replays" --> workers
+    workers -- "state files, tables" --> bucket
+    bucket -- "sync pull state" --> local
+```
+
+```sh
+uv run reason8 sync push replays            # the replays of the list, if not there yet
+uv run reason8 cloud up                     # the stack, at the pushed HEAD
+uv run reason8 cloud run --list data/workers/context.txt --instances 10 \
+    --max-frame 18000
+uv run reason8 cloud status
+uv run reason8 sync pull state              # -> data/state
+```
+
+A list written for local machines works unchanged: only the replays' names
+count. Games whose state is already in the bucket are left out, so pushing the
+local state first (`reason8 sync push state`) keeps them from being played
+again.
+
 ## Building the decision table and measuring models on it
 
 After a batch of the context sample has played. The decision table joins every

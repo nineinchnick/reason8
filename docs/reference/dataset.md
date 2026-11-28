@@ -226,10 +226,15 @@ data/
     _index.jsonl      # every replay parsed, failures included
     date=2026-11-01/2026-11-01.commands.parquet
     date=2026-11-01/2026-11-01.games.parquet
-  state/
+  state/              # re-simulated games: a state file and its tables per game
     date=2026-11-01/2026-11-01_10-26-55-123_Rosetta 1.4.4_2026.09.03.jsonl.gz
+    date=2026-11-01/2026-11-01_10-26-55-123_Rosetta 1.4.4_2026.09.03.game.parquet
+  state-v7/           # the same, for a batch in a state format of its own
   matches/            # the match dumps, not partitioned
 ```
+
+In the bucket, `cloud/` also holds the failure records, logs and batch records
+of the cloud workers ([`cloud.md`](cloud.md)); it is not synced.
 
 The day is the first ten characters of the replay's file name; a file whose
 name doesn't start with a date (our own test games) goes to `date=unknown`.
