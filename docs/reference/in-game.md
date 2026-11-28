@@ -28,7 +28,16 @@ ships with BAR, and the scripts mentioned here.
   nearest to its commander. In two 8v8 games every Reason8 team found its
   position; see
   [Learned openings in team games](#learned-openings-in-team-games).
-- **The model does not have to run inside the game yet.** For openings its
+- **The model can decide each builder's next order instead.** With the AI
+  option `builder_orders=model` the opening table is not played: during the
+  opening the bot, as one player, decides the next order for every unit with
+  build power that has nothing to do, by consulting one model of the team's
+  state, and extractors go to the metal spots players usually take
+  ([When the model decides](#when-the-model-decides)). Until the learned model
+  of
+  [ADR 0019](../decisions/0019-first-model-decides-each-builders-next-order.md)
+  is in, a stand-in answers, and the option is off by default.
+- **The openings' model does not run inside the game.** For openings its
   output is known before the game starts, so it is exported to a data file and
   compiled into a script table.
 - **Failures are silent.** A missing AI or a script error leaves the team
@@ -246,9 +255,23 @@ The AI lives in [`ai/Reason8`](../../ai/Reason8):
   commander one build task per step and the factory one task per unit, moving
   on when a task is done and trying again, after a pause, when it fails.
 
+`next_order.json`
+: What the bot uses when the model decides builders' next orders
+  ([When the model decides](#when-the-model-decides)), written by
+  `reason8 bot export-next-order`: the usual order of metal spots per map and
+  start position, and BARb's task type for every structure.
+
+`stand_in.json`
+: The stand-in model's table, written by the same command. It is temporary: it
+  goes when the learned model is in.
+
+`script/hard/reason8/next_order.as`
+: The script side of the model's orders: it carries out the order our library
+  chooses for an idle builder with BARb's tasks, or leaves it to BARb.
+
 `script/hard/manager/builder.as`, `factory.as`
-: Copies of BARb's two scripts with six added calls into `opening.as`, marked
-  `Reason8:`.
+: Copies of BARb's two scripts with added calls into `opening.as` and
+  `next_order.as`, marked `Reason8:`.
 
 `script/hard/main.as`
 : A copy of BARb's main script, unchanged.
@@ -316,8 +339,10 @@ the AI cannot play (see [`results.md`](../results.md#using-it-in-the-game)).
    `script/hard/reason8/opening_table.as`. Each opening's steps and factory
    units are one string there, decoded only for the opening played: 480
    openings as nested script arrays made each Reason8 AI take minutes to
-   compile. `script/hard/reason8/live_state.as` is generated for the library
-   installed.
+   compile. `next_order.json` is turned into
+   `script/hard/reason8/next_order_table.as`, and `stand_in.json` into the
+   stand-in's `reason8/stand_in.txt`, which our library reads.
+   `script/hard/reason8/live_state.as` is generated for the library installed.
 
 It stops when a stock script that we replace no longer has the recorded hash,
 because our copy would silently drop the game's change.
@@ -427,12 +452,27 @@ The live state
   Reason8 opening: team 0: state at frame 1761: wind 17.1668, metal 349.494 of 1150 +4.30268 -6.96429, energy 23.3591 of 1101 +64.4555 -78, standing armcom 1, armflea 2, armlab 1, armmex 1, armwin 2
   ```
 
+The next order
+
+: Functions for the scripts with which the bot decides the next order of an
+  idle builder ([When the model decides](#when-the-model-decides)):
+  `Reason8ModelOrders()` (the AI option `builder_orders` is `model`),
+  `Reason8NextOrder(builder)`, which consults the model, masks, chooses, logs
+  the decision and returns the order or nothing,
+  `Reason8OrderFailed(builder, order, reason)`,
+  `Reason8BarbTask(builder, what)`, BARb's own task for an extractor or a job,
+  and `Reason8SpotOpen(spot)`. The model sits behind one interface
+  (`AnswerModel` in `Model.h`): given the builder the order is for, a
+  probability per answer. The mask and the choice are in `Choice.h`, which
+  knows nothing of the engine; `test_next_order.cpp` tests them and the
+  stand-in, and `build.sh` runs it before every build.
+
 Our changes to BARb's own files
 
 : A few lines in `AIExport.cpp` (install and release the governor, call it on
-  every update; pass each unit-damaged event to the live state) and two in
-  `InitScript.cpp` (register the live state), as patches in `ai/native`; the
-  rest is new files.
+  every update; pass each unit-damaged event to the live state) and four in
+  `InitScript.cpp` (register the live state and the next order), as patches in
+  `ai/native`; the rest is new files.
 
 What it measured is in
 [`command-governor.md`](../research/command-governor.md) and
@@ -517,6 +557,101 @@ Reason8 opening: team 0: factory unit 1: done, frame 3520
 Reason8 opening: team 0: opening ended at frame 12673, step: step 15 armnanotc not finished 111 s after it was queued; commander steps done 14 of 30, factory units done 31 of 36; BARb takes over
 ```
 
+### When the model decides
+
+With the AI option `builder_orders=model`, the opening table is not played.
+Instead, during the opening, the bot decides the next order for every unit
+with build power that has nothing to do (the commander, factories,
+construction units, construction turrets and the others) by consulting one
+model of the team's state, as
+[ADR 0019](../decisions/0019-first-model-decides-each-builders-next-order.md)
+decides. The bot is one player: it notices an idle builder and gives it
+something to do, as a person does; the builder is what the decision is about,
+not who makes it. The default, `opening`, plays the opening table as before,
+so the bot is unchanged until the learned model is in. The model's orders need
+our library; with the engine's own the option has no effect.
+
+The model
+
+: Until the trees of ADR 0019 are in, a **stand-in** answers: NOT the learned
+  model, but a fixed table of how often players' builders of each unit got
+  each answer in each minute of the opening window, measured on the training
+  split of the decision table (`reason8 bot export-next-order`,
+  `reason8/bot/next_order.py`, `stand_in.json`). It knows nothing of the game
+  state. The library logs which model answers when it is first consulted.
+
+The answer
+
+: A unit to build, or a job without a target: `assist`, `reclaim`, `repair` or
+  `resurrect`, as the decision table names them.
+
+The mask and the choice
+
+: The library removes the answers the idle builder can never carry out, by its
+  unit definition as the game loaded it: units outside its build list, jobs
+  its definition does not allow, and every job for a factory. It rescales the
+  rest to sum to one and draws among those of at least 10%, in proportion to
+  their probabilities. What the team cannot afford stays possible.
+
+Carrying it out
+
+: A unit by a factory is a recruit task. An extractor goes to the next of the
+  metal spots its position's players usually take, in the order they usually
+  take them (`metal_spots` in `next_order.json`), skipping spots with an
+  extractor on them or already ordered; when none is left, or the map has
+  none, to the spot BARb would take next. Any other structure is a build task
+  next to the builder, BARb choosing the site. A job is BARb's own task for
+  it, with BARb's choice of target: to reclaim or resurrect, the nearest
+  reachable, safe feature within 20 to 60 s of the builder's travel; to
+  assist, a factory that wants help, else guarding the closest factory (within
+  reach for a turret); to repair, the nearest of BARb's repair tasks.
+
+When it is left to BARb
+
+: When no possible answer reaches 10%, none is possible, the model has none
+  for the builder, or the order cannot be carried out (BARb has no task for
+  the job, no metal spot is left, no task builds it), the builder is left to
+  BARb until BARb gives it something to do; at the builder's next idle the
+  model decides again. A task given for an order that ends unfinished counts
+  as not carried out too.
+
+Until when
+
+: The team's first contact or the end of the 8-minute opening window,
+  whichever comes first, as for the opening
+  ([When the opening ends](#when-the-opening-ends)); then BARb decides for
+  every unit. The reaction delays and the command budget apply to every
+  builder as before.
+
+The usual order of metal spots
+
+: For each map and position, the spots taken in at least a quarter of its
+  training openings, in the order of the median rank at which an opening took
+  each (rank 1 is the first spot it put an extractor on), from the extractor
+  orders of `openings_v2`. Orders within 64 of each other are one spot. On the
+  three maps of the slice, all 48 positions have one, with 4 to 25 spots.
+
+Log
+
+: Every decision is one line with the prefix `Reason8 next order: team <id>:`,
+  and so is what came of it:
+
+  ```
+  Reason8 next order: team 2: the model decides the next orders of idle builders during the opening; the opening table is not played
+  Reason8 next order: team 2: map 'Supreme Isthmus v2.1', start 2155 11744: position P3 (start 2146 11801), 4 usual metal spots
+  Reason8 next order: team 2: model stand-in (NOT the learned model: a fixed answer per builder unit and minute), 464 rows for 58 builder units from reason8/stand_in.txt
+  Reason8 next order: team 2: frame 19: armcom 25947 commander: model chose armmex 0.29; 2 of 9 possible of 9 at 10% or more: armwin 0.40 armmex 0.29 armsolar 0.10 armtide 0.08 armlab 0.07
+  Reason8 next order: team 2: frame 19: armcom 25947: armmex on usual spot 1 of 4, BARb's spot 88 at 2280 11960
+  Reason8 next order: team 2: model orders ended at frame 8732, contact: first contact at frame 8702, armatlas by corveng; BARb takes over
+  ```
+
+  `reason8 bot check` counts them per team (`next_order_by_team`): how often
+  an idle builder needed an order, what came of each, the orders the model
+  chose, how often the order was decided by the model and how often left to
+  BARb, by kind of builder and by game minute, where the extractors went, and
+  when the model's orders ended. A team whose orders the model decided is not
+  compared with an opening; it passes when the model decided some.
+
 ### What a script can see and do
 
 Read from CircuitAI's script bindings (`src/circuit/script/*.cpp`).
@@ -555,8 +690,12 @@ content folder made by `reason8 headless setup`
 ([`state-extraction.md`](../research/state-extraction.md)).
 
 ```sh
-# 0. the openings, from the saved model (written to ai/Reason8/openings.json)
+# 0. the openings, from the saved model (written to ai/Reason8/openings.json),
+#    and what the bot uses when the model decides builders' next orders
+#    (ai/Reason8/next_order.json, and the stand-in's ai/Reason8/stand_in.json)
 uv run reason8 bot export --data-dir data/bar \
+    --game "Beyond All Reason test-32018-ad135b9"
+uv run reason8 bot export-next-order --data-dir data/bar \
     --game "Beyond All Reason test-32018-ad135b9"
 
 # 1. build the AI into the folder the game will run in (the first time this
@@ -588,7 +727,10 @@ uv run reason8 bot check data/runs/reason8/demos/*.sdfz \
 
 For a team game on the map's recommended positions, `reason8 bot game` writes
 the start script in place of step 2's `ai_vs_ai.txt`: eight Reason8 teams of
-one side against eight stock BARb teams of the other.
+one side against eight stock BARb teams of the other. `--ai-option KEY=VALUE`
+gives the Reason8 teams an AI option: with `--ai-option builder_orders=model`
+the model decides their builders' next orders
+([When the model decides](#when-the-model-decides)).
 
 ```sh
 uv run reason8 bot game --map "Supreme Isthmus v2.1" \
@@ -882,6 +1024,62 @@ opening. The bot's own steps rarely take that long: in the same 20 games 18 of
 2,648 commander steps (0.7%) were not finished 111 s after they were first
 queued, and the median was 10 s. Its factory units are not limited: the
 slowest of 1,682 took 86 s.
+
+### The model's orders, with the stand-in
+
+10-minute 8v8 games on Supreme Isthmus, seed 1, Reason8 as Armada against
+stock BARb as Cortex, one at a time on a machine running six other engines,
+each taking 2 to 3.5 minutes of wall time.
+
+What came of the idle builders in a game with the model's orders, the 8 teams
+together:
+
+| outcome                                          | idle builders |
+| ------------------------------------------------ | ------------: |
+| needed an order                                  |           452 |
+| decided by the model and given to the builder    |           409 |
+| chosen by the model, but BARb had no task for it |            43 |
+| left to BARb before a choice                     |             0 |
+| given, but the task ended unfinished             |            41 |
+
+- Of the 43 orders not given, 21 were `assist` with no factory to assist and
+  22 `reclaim` for which BARb had no task (no feature in reach, or enough
+  reclaim tasks already). No order was left to BARb before a choice: the
+  stand-in always had an answer for the builder, one the builder could carry
+  out and of at least 10%.
+- The model decided 214 times for commanders, 163 for construction units, 44
+  for factories and 31 for resurrection bots. The share decided by the model
+  ranged from 73% to 98% per team.
+- 35 of the 51 extractors went to a usual metal spot of the team's position,
+  16 to BARb's when the position's usual spots were taken.
+- The model's orders ended at first contact for 7 teams (from 2:26 to 5:57)
+  and at the end of the window for one. `reason8 bot check` passed: no script
+  error, and every governor sent all commands within the budget.
+
+The stand-in draws its orders at random, so games differ: in an earlier game
+with the same seed the model decided 168 of 205 orders, and no construction
+unit was built before its orders ended, because the stand-in seldom orders a
+factory (a lab is 6% of the commander's answers in its first minute).
+
+The teams' economy as the live state logged it, the mean of the 8 teams. The
+first three games were played before the openings were re-exported without
+those built away from their start, and before the usual order of metal spots
+left such openings out; the last one after:
+
+| game                      | metal income at 5:00 | at 8:00 | extractors at 8:00 | factories at 8:00 | units at 10:00 |
+| ------------------------- | -------------------: | ------: | -----------------: | ----------------: | -------------: |
+| the model's orders        |                  8.1 |    10.6 |                3.5 |               0.9 |             40 |
+| opening table             |                  9.7 |    15.0 |                4.4 |               1.4 |           44.5 |
+| the commit before         |                 10.8 |    12.2 |                4.1 |               0.9 |           46.5 |
+| the model's orders, after |                  7.4 |    10.8 |                3.2 |               1.0 |           49.5 |
+
+*The stand-in plays a weaker economy than the openings, as a table that knows
+nothing of the game should: more wind, fewer extractors. That is why the
+option is off by default. With the option off the bot plays its openings as
+before: 6 of 8 teams followed their opening as far as they played it in the
+game of the commit before, and 4 of 8 in the game with the default option; in
+both games the other teams' commander or factory orders left their opening
+after some steps.*
 
 ### What failure looks like
 
