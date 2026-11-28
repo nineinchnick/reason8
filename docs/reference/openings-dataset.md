@@ -102,6 +102,14 @@ orders a removed unit
   Legion are compared with the newest game with Legion, the others with the
   newest game without it, because a game with Legion defines 244 more units.
 
+first buildings away from the start
+: the nearest of the opening's first three structures is more than 700 map
+  units from the start (`first_places_distance`). The start in a replay is the
+  player's last start pick, which the game may have refused; the commander
+  then started somewhere else, often at another position
+  ([ADR 0011](../decisions/0011-take-positions-from-the-map-metadata.md),
+  [`start-positions.md`](../research/start-positions.md)).
+
 Kept and flagged instead
 ([ADR 0011](../decisions/0011-take-positions-from-the-map-metadata.md)):
 starts that are not on the spot of their position (`on_spot`), games that did
@@ -235,11 +243,11 @@ Order:
 
 `openings.parquet` has the player columns, `faction_picked`, `position_side`,
 `position_distance`, `skill_uncertainty`, and per opening `orders`, `added`,
-`orders_in_window`, `status` and `removed_units`. `games.parquet` has the game
-columns, `team_count`, `opening_era_name`, `factions` (the unit name prefixes
-of the factions loaded), `positions_source`, `parser`, `contact_measured` (the
-game was re-simulated), `unit_control_widgets`, `replay_file_name`,
-`game_duration` and `avg_skill`.
+`orders_in_window`, `first_places_distance`, `status` and `removed_units`.
+`games.parquet` has the game columns, `team_count`, `opening_era_name`,
+`factions` (the unit name prefixes of the factions loaded),
+`positions_source`, `parser`, `contact_measured` (the game was re-simulated),
+`unit_control_widgets`, `replay_file_name`, `game_duration` and `avg_skill`.
 
 The widget columns of `openings.parquet` (`reason8.replays.widgets`) are empty
 when `reason8 widgets` has not read the game's replay:

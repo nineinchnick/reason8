@@ -112,6 +112,14 @@ WATER_LEVEL = "changed water level"
 WRONG_SHAPE = "not two teams of 8"
 # Why an opening is dropped (openings.parquet, column `status`).
 REMOVED_UNIT = "orders a removed unit"
+BUILT_AWAY = "first buildings away from the start"
+# An opening is built away from its start when the nearest of its first FIRST_PLACES
+# structures is further than BUILT_AWAY_DISTANCE map units from it. The replay's start is
+# the player's last pick, which the game may have refused; the commander then starts at an
+# earlier one (docs/research/start-positions.md). Within 200 units are 95% of openings, and
+# from 700 on the counts per distance stay flat: such buildings are at another place.
+FIRST_PLACES = 3
+BUILT_AWAY_DISTANCE = 700.0
 
 _TWEAK_PREFIXES = ("tweakdefs", "tweakunits", "multiplier_")
 _GAMES_PER_PART = 250
@@ -332,6 +340,12 @@ def player_openings(
     found = (
         players.join(in_window, on=player, how="left", maintain_order="left")
         .join(kept, on=player, how="left", maintain_order="left")
+        .join(
+            first_places_distances(orders, players).collect(),
+            on=player,
+            how="left",
+            maintain_order="left",
+        )
         .with_columns(
             pl.col("orders_in_window", "orders", "added").fill_null(0),
             pl.col("units").fill_null([]),
@@ -343,6 +357,38 @@ def player_openings(
     ]
     found = found.with_columns(pl.Series("faction", factions, dtype=pl.String))
     return orders, found.select([pl.col(name).cast(dtype) for name, dtype in PLAYER_SCHEMA.items()])
+
+
+def first_places_distances(
+    orders: pl.DataFrame | pl.LazyFrame, starts: pl.DataFrame | pl.LazyFrame
+) -> pl.LazyFrame:
+    """Per opening (match_id, player_slot), ``first_places_distance``: the distance from
+    its start (``start_x``, ``start_z`` of `starts`) to the nearest of the first
+    `FIRST_PLACES` structures the opening adds (`orders` with ``seq_idx``, ``kind``, ``x``
+    and ``z``). An opening without a placed structure or a start has none."""
+    player = ["match_id", "player_slot"]
+    places = (
+        orders.lazy()
+        .filter(
+            pl.col("seq_idx").is_not_null(),
+            pl.col("kind") != "factory",
+            pl.col("x").is_not_null(),
+            pl.col("z").is_not_null(),
+        )
+        .sort(*player, "seq_idx")
+        .group_by(player)
+        .head(FIRST_PLACES)
+    )
+    return (
+        places.join(starts.lazy().select(*player, "start_x", "start_z").unique(player), on=player)
+        .with_columns(
+            ((pl.col("x") - pl.col("start_x")) ** 2 + (pl.col("z") - pl.col("start_z")) ** 2)
+            .sqrt()
+            .alias("distance")
+        )
+        .group_by(player)
+        .agg(pl.col("distance").min().cast(pl.Float32).alias("first_places_distance"))
+    )
 
 
 def extract_game(
@@ -480,6 +526,8 @@ PLAYER_SCHEMA = {
     "orders_in_window": pl.Int32,  # build orders of the whole opening window
     "orders": pl.Int32,
     "added": pl.Int32,
+    # from the start to the nearest of the opening's first FIRST_PLACES structures
+    "first_places_distance": pl.Float32,
     "units": pl.List(pl.String),
 }
 # Columns of the game and the player repeated on every order row, after the order's own.
@@ -654,6 +702,8 @@ def build_dataset(
         .with_columns(
             pl.when(pl.col("removed_units").list.len() > 0)
             .then(pl.lit(REMOVED_UNIT))
+            .when(pl.col("first_places_distance") > BUILT_AWAY_DISTANCE)
+            .then(pl.lit(BUILT_AWAY))
             .otherwise(pl.lit(INCLUDED))
             .alias("status")
         )
