@@ -18,7 +18,14 @@ name in the bucket:
     the Parquet tables of the parsed replays (``reason8 parse``) in daily partitions, and
     ``_index.jsonl``;
 ``matches``
-    the cached match dumps (``.parquet``) and other downloaded ``.json``.
+    the cached match dumps (``.parquet``) and other downloaded ``.json``;
+``state``
+    the game state of re-simulated replays (``reason8 headless batch``, ``reason8 cloud``): a
+    state file (``.jsonl.gz``) and its Parquet tables per game, in daily partitions.
+
+A batch in another state format writes to a folder of its own, ``state-<name>`` (e.g.
+``state-v7``), so formats don't mix; such an area has the layout of ``state`` and is copied
+only when it is named (``reason8 sync pull state-v7``).
 
 A file is copied when the other side doesn't have it or has it with a different size; nothing is
 ever deleted on either side. Other files in these directories (``.part`` downloads, leftovers of
@@ -36,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import re
 import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -45,6 +53,8 @@ from pathlib import Path, PurePosixPath
 
 from reason8.data import download, storage
 from reason8.data.storage import Bucket
+from reason8.headless.state import STATE_SUFFIX
+from reason8.headless.tables import TABLE_SUFFIX
 from reason8.paths import LayoutError, data_dir, partition, partition_in_range
 from reason8.replays import parse, tables
 
@@ -53,6 +63,9 @@ PULL = "pull"
 DEFAULT_JOBS = 8
 LOCAL_SIDE = "data directory"
 BUCKET_SIDE = "bucket"
+#: The area of re-simulated state; ``state-<name>`` areas have its layout.
+STATE_AREA = "state"
+STATE_AREA_SUFFIX_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
 @dataclass(frozen=True)
@@ -74,7 +87,31 @@ AREAS = {
         ("*" + tables.SUFFIX,), {tables.INDEX_NAME: parse.merge_indexes}, partitioned=True
     ),
     "matches": Area(("*.parquet", "*.json")),
+    STATE_AREA: Area(("*" + STATE_SUFFIX, "*" + TABLE_SUFFIX), partitioned=True),
 }
+
+
+def is_area_name(area_name: str) -> bool:
+    """Whether `area_name` is an area: one of `AREAS`, or ``state-<name>``."""
+    return area_name in AREAS or is_state_area_name(area_name)
+
+
+def is_state_area_name(area_name: str) -> bool:
+    """Whether `area_name` holds re-simulated state: ``state`` or ``state-<name>``, where the
+    name is letters, digits, ``.``, ``_`` and ``-``."""
+    suffix = area_name.removeprefix(STATE_AREA + "-")
+    return area_name == STATE_AREA or (
+        suffix != area_name and bool(STATE_AREA_SUFFIX_PATTERN.fullmatch(suffix))
+    )
+
+
+def find_area(area_name: str) -> Area:
+    """The area of that name; a ``state-<name>`` area has the layout of ``state``."""
+    if area_name in AREAS:
+        return AREAS[area_name]
+    if is_state_area_name(area_name):
+        return AREAS[STATE_AREA]
+    raise KeyError(f"unknown area {area_name!r}; choose from {list(AREAS)} or state-<name>")
 
 
 @dataclass
@@ -166,7 +203,7 @@ def sync_area(
     """
     if direction not in (PUSH, PULL):
         raise ValueError(f"direction must be {PUSH!r} or {PULL!r}, not {direction!r}")
-    area = AREAS[area_name]
+    area = find_area(area_name)
     local_directory = (data_directory or data_dir()) / area_name
     local_sizes = local_files(local_directory)
     bucket_sizes = bucket.list_files(area_name)
@@ -252,7 +289,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="push: data directory to bucket; pull: bucket to data directory",
     )
     parser.add_argument(
-        "areas", nargs="*", metavar="AREA", help=f"{', '.join(AREAS)} (default: all of them)"
+        "areas",
+        nargs="*",
+        metavar="AREA",
+        help=f"{', '.join(AREAS)} or state-<name> (default: {', '.join(AREAS)})",
     )
     storage.add_uri_argument(parser)
     parser.add_argument(
@@ -278,9 +318,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def run(args: argparse.Namespace) -> int:
-    unknown_areas = [area_name for area_name in args.areas if area_name not in AREAS]
+    unknown_areas = [area_name for area_name in args.areas if not is_area_name(area_name)]
     if unknown_areas:
-        print(f"unknown areas {unknown_areas}; choose from {list(AREAS)}", file=sys.stderr)
+        print(
+            f"unknown areas {unknown_areas}; choose from {list(AREAS)} or state-<name>",
+            file=sys.stderr,
+        )
         return 2
     bucket = storage.configured_bucket(args.s3_uri)
     if bucket is None:
