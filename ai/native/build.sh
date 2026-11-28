@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Build BARb (CircuitAI) from source with the Reason8 command governor and
-# live state, without root, for Linux x86-64 or Windows x86-64, from the
-# engine source at the tag of the engine the library will run in. See
-# docs/reference/in-game.md, "Our own build of BARb's library".
+# Build BARb (CircuitAI) from source with the Reason8 command governor, the
+# live state and the next orders, without root, for Linux x86-64 or Windows
+# x86-64, from the engine source at the tag of the engine the library will
+# run in. See docs/reference/in-game.md, "Our own build of BARb's library".
 # `reason8 bot build` runs it.
 #
 #   ai/native/build.sh [--platform linux|windows] <work dir> [engine tag] [engine commit]
@@ -131,11 +131,13 @@ if [ "$platform" = linux ]; then
 	verify_commit spring-static-libs "$static_libs_commit"
 fi
 
-# 3. our changes: the governor and the live state (new files), the engine tag
-#    the library is built for, and the patches to BARb's own files
+# 3. our changes: the governor, the live state and the next orders (new
+#    files), the engine tag the library is built for, and the patches to
+#    BARb's own files
 barb=recoil/AI/Skirmish/BARb
 cp "$here/Budget.h" "$here/Governor.h" "$here/Governor.cpp" \
-	"$here/LiveState.h" "$here/LiveState.cpp" "$barb/src/"
+	"$here/LiveState.h" "$here/LiveState.cpp" "$here/Choice.h" "$here/Model.h" \
+	"$here/StandIn.h" "$here/NextOrder.h" "$here/NextOrder.cpp" "$barb/src/"
 build_header="#define REASON8_ENGINE_TAG \"$tag\""
 if [ "$(cat "$barb/src/Reason8Build.h" 2>/dev/null)" != "$build_header" ]; then
 	echo "$build_header" >"$barb/src/Reason8Build.h"
@@ -144,12 +146,14 @@ if ! grep -q 'reason8::UnitDamaged' "$barb/src/AIExport.cpp"; then
 	git -C "$barb" checkout -q src/AIExport.cpp
 	patch -s -d "$barb" -p1 <"$here/AIExport.patch"
 fi
-if ! grep -q 'reason8::RegisterLiveState' "$barb/src/circuit/script/InitScript.cpp"; then
+if ! grep -q 'reason8::RegisterNextOrder' "$barb/src/circuit/script/InitScript.cpp"; then
+	git -C "$barb" checkout -q src/circuit/script/InitScript.cpp
 	patch -s -d "$barb" -p1 <"$here/InitScript.patch"
 fi
 
-# 4. the command budget's own tests, with the same compiler; then the engine
-#    tree configured for the AI only, the one target built and stripped
+# 4. the tests of the command budget and of the choice, with the same
+#    compiler; then the engine tree configured for the AI only, the one
+#    target built and stripped
 cmake_options=(-G Ninja -Wno-dev
 	-DCMAKE_BUILD_TYPE=RELWITHDEBINFO
 	"-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O3 -g -DNDEBUG"
@@ -157,10 +161,13 @@ cmake_options=(-G Ninja -Wno-dev
 	-DAI_TYPES=NATIVE "-DAI_EXCLUDE_REGEX=^(CppTestAI|CircuitAI|NullAI.*|.*Test.*)$"
 	-DBUILD_TESTING=OFF -DBUILD_spring-legacy=OFF -DBUILD_spring-headless=OFF
 	-DBUILD_spring-dedicated=OFF)
-test_options=(-std=c++20 -O2 -Wall -Wextra -Werror -I "$here" "$here/test_budget.cpp")
+test_options=(-std=c++20 -O2 -Wall -Wextra -Werror -I "$here")
+tests=(test_budget test_next_order)
 if [ "$platform" = linux ]; then
-	x86_64-conda-linux-gnu-g++ "${test_options[@]}" -o test_budget
-	./test_budget
+	for test in "${tests[@]}"; do
+		x86_64-conda-linux-gnu-g++ "${test_options[@]}" "$here/$test.cpp" -o "$test"
+		"./$test"
+	done
 
 	export PKG_CONFIG_LIBDIR=$work_dir/spring-static-libs/lib/pkgconfig:$work_dir/tools/env/lib/pkgconfig
 	export CMAKE_PREFIX_PATH=$work_dir/spring-static-libs:$work_dir/tools/env
@@ -174,12 +181,15 @@ if [ "$platform" = linux ]; then
 else
 	# the image cannot run what it builds: the test runs where Windows
 	# programs do (WSL), and is compiled everywhere
-	"${container[@]}" x86_64-w64-mingw32-g++-posix "${test_options[@]}" -static -o test_budget.exe
-	if [ -e /proc/sys/fs/binfmt_misc/WSLInterop ]; then
-		./test_budget.exe
-	else
-		echo "test_budget.exe built but not run: this system runs no Windows programs" >&2
-	fi
+	for test in "${tests[@]}"; do
+		"${container[@]}" x86_64-w64-mingw32-g++-posix "${test_options[@]}" "$here/$test.cpp" \
+			-static -o "$test.exe"
+		if [ -e /proc/sys/fs/binfmt_misc/WSLInterop ]; then
+			"./$test.exe"
+		else
+			echo "$test.exe built but not run: this system runs no Windows programs" >&2
+		fi
+	done
 
 	# the image's CMAKE_TOOLCHAIN_FILE picks MinGW, its MINGWLIBS the libraries
 	# shellcheck disable=SC2016 # expanded in the container
