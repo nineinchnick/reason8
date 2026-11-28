@@ -43,7 +43,8 @@ the `analysis` commands) reads those tables.
 ## Commands
 
 Everything runs as `uv run reason8 <command>`; `--help` on any of them says
-more.
+more. [`workflows.md`](docs/reference/workflows.md) shows, for each usual
+task, the commands in order and what each one talks to.
 
 `download`
 : Download the match dumps and the replays of the training slice, politely
