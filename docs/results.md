@@ -10,6 +10,29 @@ ends at the player's first contact with the enemy
 [`openings-dataset.md`](reference/openings-dataset.md). Code:
 `reason8/models/`.
 
+## Summary
+
+Counting already predicts openings well, and that is the bar later models have
+to beat. The chosen baseline, a 4-gram told the player's faction, map and
+start position, gets the next step of an opening right 48.1% of the time on
+held-out games and has it among its three guesses 74.9% of the time; just
+repeating the previous step gets 32.3%. That is about what a published
+StarCraft model reaches predicting the next build. The map and position help
+most where the first factory is chosen (15 points more at steps 2 to 5) and
+little after step 10, and no balance-patch era scores differently.
+
+Trees that also see the game state do better, but so far only on the
+re-simulated sample: 51.4% against the saved 4-gram's 48.3% on the same 45
+test games, which is preliminary. The scores of the builder model's table
+count jobs as answers and cannot be compared with the 48.1%; they are in
+[`context.md`](research/context.md).
+
+The saved 4-gram is what the bot plays now: its openings are human openings
+chosen by how likely the model finds them ([below](#using-it-in-the-game),
+[ADR 0007](decisions/0007-ship-the-model-as-tables-in-a-barb-variant.md)). The
+first learned model to replace it is trees asked by every builder
+([ADR 0019](decisions/0019-first-model-trees-asked-by-every-builder.md)).
+
 ```sh
 uv run reason8 baseline                 # validation: compare and choose
 uv run reason8 baseline --split test    # the tables below
