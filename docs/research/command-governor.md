@@ -13,6 +13,27 @@ it works is in [`in-game.md`](../reference/in-game.md#our-barb-library); code:
 `ai/native`, `reason8/bot/budget.py`, `reason8/bot/live_state.py`,
 `reason8/analysis/orders.py`.
 
+## Summary
+
+The governor keeps the bot within its action budget and loses no command, but
+counting the commands of a frame as one action let one action hold far more
+than a player's: in games played in real time a counted action of the bot held
+4.8 kinds of order and 9.9 different orders on average, where 99.4% of a
+player's clicked actions give one kind of order (89.6% with their widgets). So
+ADR 0008 now counts each kind of order in a frame as one action, and the
+governor counts that way. In a first game under that rule the budget still
+holds and nothing is lost, but the bot's commands wait longer: 82% of them are
+held (three quarters before), up to 11.5 s (2 s before), and a third are
+replaced by a newer order while they wait. What that costs in play is not yet
+measured.
+
+What to use from here: the governor's log as the measure of the budget (a
+headless replay records the bot's commands late and overcounts its actions,
+now by 12 to 25%), the evidence that one action is one kind of order
+([What one action holds](#what-one-action-holds)), and the holding numbers of
+[Under the count by kind of order](#under-the-count-by-kind-of-order) as the
+baseline for the paired games that measure the effect on play.
+
 ## Method
 
 Library
