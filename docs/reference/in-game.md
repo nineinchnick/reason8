@@ -246,8 +246,11 @@ The AI lives in [`ai/Reason8`](../../ai/Reason8):
 : Copies of BARb's two scripts with six added calls into `opening.as`, marked
   `Reason8:`.
 
+`script/hard/main.as`
+: A copy of BARb's main script, unchanged.
+
 `base.json`
-: The SHA-256 of the stock scripts those two copies were made from.
+: The SHA-256 of the stock scripts those copies were made from.
 
 ```json
 {
@@ -1133,9 +1136,9 @@ build both in CI.
    carry a position, so `reason8.replays.replay` labels them `structure`. Tell
    factories from the builder's id, as `reason8 bot check` does.
 6. **Use a timeout.** One run never finished (see option 2).
-7. **The two replaced scripts follow the game.** When BAR changes `builder.as`
-   or `factory.as`, the build stops and the hook lines have to be carried
-   over.
+7. **The replaced scripts follow the game.** When BAR changes `builder.as`,
+   `factory.as` or `main.as`, the build stops and the hook lines have to be
+   carried over.
 
 ## Installing it in a real game
 
