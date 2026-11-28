@@ -5,8 +5,10 @@
 --                        only copy; the game archive has none for this AI.
 --   profile     = hard   The only profile the variant is built with.
 --
--- One is Reason8's own, read by the command governor of our BARb library:
+-- Two are Reason8's own, read by our BARb library:
 --   command_budget       How the AI keeps to the action budget of ADR 0008.
+--   builder_orders       Who decides the builders' orders during the opening:
+--                        the opening table, or the model (ADR 0019).
 
 local options = {
 	{
@@ -88,6 +90,25 @@ local options = {
 				key = 'off',
 				name = 'Off',
 				desc = 'No governor',
+			},
+		},
+	},
+	{
+		key = 'builder_orders',
+		name = 'Builder orders',
+		desc = 'Who decides the builders\' orders during the opening.\nkey: builder_orders',
+		type = 'list',
+		def = 'opening',
+		items = {
+			{
+				key = 'opening',
+				name = 'Opening',
+				desc = 'The commander and the first factory play an opening of the start position',
+			},
+			{
+				key = 'model',
+				name = 'Model',
+				desc = 'The model decides the next order of every idle builder (a stand-in until the learned model is in)',
 			},
 		},
 	},

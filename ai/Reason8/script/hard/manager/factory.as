@@ -65,10 +65,14 @@ IUnitTask@ AiMakeTask(CCircuitUnit@ unit)
 	if (reactionFrames > 0)
 		return aiFactoryMgr.Enqueue(TaskS::Wait(false, reactionFrames));
 
-	// Reason8: the opening's factory makes the opening's units first
+	// Reason8: the opening's factory makes the opening's units first, or the model decides
 	IUnitTask@ task = Reason8::MakeFactoryTask(unit);
 	if (task is null)
+		@task = Reason8::NextOrderFor(unit, true);
+	if (task is null) {
 		@task = aiFactoryMgr.DefaultMakeTask(unit);
+		Reason8::BarbGave(unit, task);  // Reason8:
+	}
 	Reason8::TaskGiven(unit, task, true);  // Reason8:
 	return task;
 }
@@ -80,6 +84,7 @@ void AiTaskAdded(IUnitTask@ task)
 void AiTaskRemoved(IUnitTask@ task, bool done)
 {
 	Reason8::FactoryTaskRemoved(task, done);  // Reason8:
+	Reason8::OrderTaskEnded(task, done);  // Reason8:
 	Reason8::TaskEnded(task, done);  // Reason8:
 }
 
@@ -100,8 +105,9 @@ void AiUnitAdded(CCircuitUnit@ unit, Unit::UseAs usage)
 		}
 	}
 
-	// Reason8: an opening names the factory's first units; otherwise BARb's opener
-	if (Reason8::StartFactoryOpening(unit))
+	// Reason8: an opening names the factory's first units, or the model decides
+	// them; otherwise BARb's opener
+	if (Reason8::StartFactoryOpening(unit) || Reason8::FactoryTakesModelOrders(unit))
 		return;
 
 	const array<Opener::SO>@ opener = Opener::GetOpener(facDef);
